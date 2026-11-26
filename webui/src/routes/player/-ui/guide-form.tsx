@@ -115,6 +115,7 @@ export function ChannelForm({
       genres: count([...catalog.movies, ...catalog.shows].flatMap((t) => t.genres)).slice(0, 24),
       studios: count(catalog.movies.map((m) => m.studio)).slice(0, 18),
       networks: count(catalog.shows.map((x) => x.network)).slice(0, 18),
+      youtubeChannels: count(catalog.youtube.map((y) => y.channel_title)).slice(0, 24),
       collections: count(catalog.movies.map((m) => m.collection ?? null)).filter(Boolean),
       shows: [...catalog.shows].sort((a, b) => a.title.localeCompare(b.title)),
     };
@@ -155,7 +156,8 @@ export function ChannelForm({
     const pool = specPool({ ...spec, show: null }, catalog, now, people);
     const movies = pool.filter((p) => p.kind === 'movie').length;
     const shows = new Set(pool.filter((p) => p.kind === 'episode').map((p) => p.href)).size;
-    return { movies, shows, total: pool.length };
+    const youtube = pool.filter((p) => p.kind === 'youtube').length;
+    return { movies, shows, youtube, total: pool.length };
   }, [spec, catalog, mode, now, people]);
 
   const save = async () => {
@@ -165,7 +167,8 @@ export function ChannelForm({
         : { ...spec, show: null };
     if (!clean.name.trim()) return setError('Give it a name.');
     if (mode === 'show' && !clean.show) return setError('Pick a show.');
-    if (mode === 'library' && !clean.kinds.length) return setError('Pick movies, TV or both.');
+    if (mode === 'library' && !clean.kinds.length)
+      return setError('Pick movies, TV, YouTube or any combination.');
     setBusy(true);
     setError(null);
     try {
@@ -195,7 +198,13 @@ export function ChannelForm({
               : airs
                 ? tooFew
                   ? 'Too little matches yet: loosen it a little'
-                  : `${airs.movies ? `${airs.movies} movies` : ''}${airs.movies && airs.shows ? ' and ' : ''}${airs.shows ? `${airs.shows} shows` : ''} match`
+                  : `${[
+                      airs.movies ? `${airs.movies} movies` : '',
+                      airs.shows ? `${airs.shows} shows` : '',
+                      airs.youtube ? `${airs.youtube} YouTube videos` : '',
+                    ]
+                      .filter(Boolean)
+                      .join(', ')} match`
                 : ''}
           </span>
           <button type="button" className={sh.btn} onClick={onCancel} data-nav>
@@ -272,17 +281,35 @@ export function ChannelForm({
           </>
         ) : (
           <>
-            <Field label="Movies or TV">
+            <Field label="Sources">
               <Chips
-                label="Movies or TV"
+                label="Sources"
                 options={[
                   { value: 'movies', label: 'Movies' },
                   { value: 'tv', label: 'TV' },
+                  { value: 'youtube', label: 'YouTube' },
                 ]}
                 picked={spec.kinds}
-                onToggle={(v) => set({ kinds: toggle(spec.kinds, v as 'movies' | 'tv') })}
+                onToggle={(v) =>
+                  set({ kinds: toggle(spec.kinds, v as 'movies' | 'tv' | 'youtube') })
+                }
               />
             </Field>
+            {spec.kinds.includes('youtube') && options.youtubeChannels.length ? (
+              <Field
+                label="YouTube channels"
+                hint="videos from any of these (or leave blank for all)"
+              >
+                <Chips
+                  label="YouTube channels"
+                  options={options.youtubeChannels.map((x) => ({ value: x, label: x }))}
+                  picked={spec.youtube_channels ?? []}
+                  onToggle={(v) =>
+                    set({ youtube_channels: toggle(spec.youtube_channels ?? [], v) })
+                  }
+                />
+              </Field>
+            ) : null}
             <Field label="People" hint="their films and shows: an actor, a director">
               {spec.people.length ? (
                 <div className={f.chips}>

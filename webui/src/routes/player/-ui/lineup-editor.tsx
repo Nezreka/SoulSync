@@ -48,21 +48,35 @@ export function LineupEditor({
   const byId = new Map(channels.map((c) => [c.id, c]));
   const madeById = new Map(made.map((m) => [`made-${m.id}`, m]));
 
+  // the change waiting out the debounce: closing the editor sends it, it
+  // used to be dropped with the timer
+  const pending = useRef<LineupEntry[] | null>(null);
+  const send = (next: LineupEntry[], live: boolean) => {
+    pending.current = null;
+    guideEdits
+      .saveLineup(next)
+      .then(() => {
+        if (live) setSaved('saved');
+        onChanged();
+      })
+      .catch(() => live && setSaved('failed'));
+  };
   const commit = (next: LineupEntry[]) => {
     setRows(next);
     setSaved('saving');
+    pending.current = next;
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      guideEdits
-        .saveLineup(next)
-        .then(() => {
-          setSaved('saved');
-          onChanged();
-        })
-        .catch(() => setSaved('failed'));
-    }, 500);
+    timer.current = window.setTimeout(() => send(next, true), 500);
   };
-  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  useEffect(
+    () => () => {
+      window.clearTimeout(timer.current);
+      if (pending.current) sendRef.current(pending.current, false);
+    },
+    [],
+  );
 
   const update = (id: string, change: Partial<LineupEntry>) =>
     commit(rows.map((r) => (r.channel_id === id ? { ...r, ...change } : r)));

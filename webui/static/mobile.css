@@ -1445,10 +1445,12 @@
         min-height: 0;
     }
 
-    /* Tracks scroll container - fit within modal */
-    .playlist-tracks-scroll {
+    /* Tracks scroll container - fit within modal so the whole playlist scrolls as one page (#2282) */
+    .playlist-tracks-scroll,
+    .playlist-tracks-container,
+    .playlist-tracks-list {
         max-height: none;
-        overflow-y: visible;
+        overflow: visible;
         flex: none;
     }
 
@@ -1631,7 +1633,7 @@
        Settings page's new parts ([data-ui]), sized by theirs. The /player app
        sizes every control of its own for touch ([data-player-root]); the
        floor turned its carousel dots into fat pills. */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn):not(.play-button):not(.stop-button):not(.mini-nav-btn):not(.mini-toggle-btn):not(.expand-hint):not(.sync-tab-button):not(.sync-tab-close):not(.automx-dot):not(.automx-pill):not([data-stats-mark]):not([data-library-v2] button):not(.notif-panel button):not(.notif-history-modal button):not(.toast-compact button):not([data-server-activity] button):not([data-people] button):not([data-ui] button):not([data-player-root] button) {
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.mm-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn):not(.play-button):not(.stop-button):not(.mini-nav-btn):not(.mini-toggle-btn):not(.expand-hint):not(.sync-tab-button):not(.sync-tab-close):not(.automx-dot):not(.automx-pill):not([data-stats-mark]):not([data-library-v2] button):not(.notif-panel button):not(.notif-history-modal button):not(.toast-compact button):not([data-server-activity] button):not([data-people] button):not([data-ui] button):not([data-player-root] button) {
         min-height: 38px;
     }
 
@@ -4328,6 +4330,68 @@ body:has(.artist-map-container) #gsearch-bar {
     }
 }
 
+/* --- Download Discography footer on phones (#2299, Jygijiji) ---
+   .discog-footer is one non-wrapping flex row: info, Cancel (min-width
+   84px), "Add N to Wishlist" (min-width 200px) and the combined
+   "Wishlist + Watchlist" button. on a 390x844 phone the actions measure
+   430px inside a 388px footer, and the sheet is overflow:hidden, so the
+   combined button sat past the edge with nothing to scroll to it. stack on
+   phones: the main action keeps a full row, the combined button and Cancel
+   share the next, and the footer clears the home indicator. the same footer
+   is the discover "your albums" batch modal's and the playlist explorer's. */
+@media (max-width: 768px) {
+    .discog-footer {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding-bottom: max(14px, env(safe-area-inset-bottom));
+    }
+
+    .discog-footer-info {
+        font-size: 12px;
+    }
+
+    .discog-footer-actions {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    /* in the page they come Cancel, submit, combined: the main action first */
+    .discog-footer-actions .discog-submit-btn {
+        flex: 1 1 100%;
+        width: 100%;
+        min-width: 0;
+        order: 1;
+    }
+
+    .discog-footer-actions .discog-both-btn,
+    .discog-footer-actions .discog-cancel-btn {
+        flex: 1 1 0;
+        min-width: 0;
+        order: 2;
+    }
+}
+
+/* short screens: the stacked footer plus the hero, filter bar and future
+   block are taller than the viewport, and overflow:hidden cut the footer off
+   (its bottom at 674 in a 667px viewport, 770 in a 568px one, 475 in a 390px
+   landscape one). the sheet itself scrolls and the list is capped, so the
+   footer is one gesture away. taller phones keep the pinned footer. */
+@media (max-width: 900px) and (max-height: 800px) {
+    .discog-modal {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .discog-modal .discog-grid {
+        flex: 0 0 auto;
+        min-height: 140px;
+        max-height: 45dvh;
+    }
+}
+
 /* --- Mirrored playlist detail modal on phones: every action reachable ---
    Tacobell444's screenshot (#1691): on a phone the modal's action bar ran
    off the right edge — "Sync & download", Close and Identify were past
@@ -4364,6 +4428,28 @@ body:has(.artist-map-container) #gsearch-bar {
     .mirrored-modal {
         max-height: calc(100vh - 20px);
         max-height: calc(100dvh - 20px);
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+    }
+    /* #2282: the hero alone filled most of a phone and the list scrolled
+       in the strip left under it. the whole panel scrolls as one page
+       now, the list just grows. the vanilla modal's action bar stays on
+       screen at the bottom */
+    .mm-as-page .mirrored-modal {
+        max-height: none;
+        height: 100%;
+        overflow-y: auto;
+    }
+    .mm-list {
+        flex: 0 0 auto;
+        min-height: auto;
+        overflow-y: visible;
+    }
+    .mm-actions {
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
     }
     /* #2181: the detail as a page keeps the hamburger (style.css), so its
        hero starts below it: top 16 + 44 tall + 16 */

@@ -212,6 +212,10 @@ describe('the sheet', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(document.getElementById('service-config-modal')!.hidden).toBe(true);
     expect(shell.landPendingSettingsSave).toHaveBeenCalled();
+    // #2285: its tile is still there once the sheet is closed
+    expect(tile('deezer')).not.toBeNull();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(tile('deezer')).not.toBeNull();
     // heard: the store holds it, and closing sent it on its way
     expect(settingsStore.getState().settings.deezer).toEqual({ app_id: 'dz' });
     await waitFor(() => expect(settingsStore.hasPending()).toBe(false));

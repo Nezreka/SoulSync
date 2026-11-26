@@ -193,3 +193,193 @@ Add tracks to the queue from the Enhanced Library Manager or download results. M
         },
     ]
 });
+
+registerDocsSection({
+    id: 'player-home-videos',
+    needs: 'everyone',
+    title: 'Home Videos',
+    icon: '🎥',
+    pages: [
+        {
+            id: 'home-what',
+            title: 'Your Home Videos',
+            lede: 'Clips from your phone or camera, by the day they were filmed.',
+            body: `
+**Home videos** is a page of its own in the player's sidebar (on a phone, under **More**). It shows:
+
+- **On this day**: clips filmed on today's date in earlier years, with how long ago.
+- **Folders**: each folder your clips sit in is an album, so the way you sorted them on disk carries over. Open one to see it in order, play it all, or download the whole album.
+- **The timeline**: every clip by month, newest first, with the day it was filmed, its length and how far you got.
+
+Switch between **Timeline** and **Folders** at the top, or type in **Find a video** to search names, notes and folders.
+
+Home videos are never looked up on TMDB or anywhere else, never matched, renamed or moved. A clip is named from its file: a camera's name like \`VID_20261031_183012\` becomes "Oct 31, 2026, 6:30 PM" until someone names it. The date comes from the clip itself (its own creation time), else a date in the name, else the file's date. The picture is a frame a few seconds in, made in the background.
+
+They play, resume, cast and download like everything else in the player. A clip whose file is gone shows greyed in its album until it comes back.
+`
+        },
+        {
+            id: 'home-edit',
+            title: 'Naming and Dating a Clip',
+            lede: 'Give a clip a name, fix its date, pick a better picture, add notes.',
+            body: `
+Hover a clip and press the pencil (on a phone, press and hold; with a mouse, right-click). The sheet has:
+
+- **Name**: shows what the file was called. Your name is kept, even after a rescan. **Use the automatic name** goes back.
+- **Date filmed**: says where the date came from. Change it if the camera's clock was wrong; the clip moves to the right month and On this day follows.
+- **Picture**: four frames from the clip. Pick one and it's the picture at once.
+- **Notes**: who's in it, where it was. Notes are searched too.
+
+Admins can edit by default. In Player setup, **Home videos**, an admin can let everyone who can see the clips edit them.
+`
+        },
+        {
+            id: 'home-setup',
+            title: 'Setting Up Home Videos (Admin)',
+            needs: 'admin',
+            lede: 'Add your server\'s home video library or a folder, right from the player.',
+            body: `
+Open **Player setup** (the player's Settings, Libraries) and go to **Home videos**:
+
+- **On Plex or Jellyfin**: a Plex library of the "Other videos" type, or a Jellyfin "Home videos and photos" library, is listed with how many clips it has. **Add it** and it's read at once, with progress on the card.
+- **Folders on disk**: type a folder and SoulSync checks it can read it and how many clips are in it before you add it. Works with or without a media server.
+
+The same lists are in Settings: **Connections** (Home videos libraries, a Scan switch each) and **Library, Folders** (Home videos folders). New clips are picked up after every library scan.
+
+Once there are clips, the **Home videos** library appears. Rename it, split folders off into more home libraries (Kids, Grandparents), and choose who sees each one under **Who sees what**: you may want to switch them off for guests. Home libraries start with **Show in the guide** off; switch it on and the guide gets a Home videos channel.
+`
+        },
+    ]
+});
+
+registerDocsSection({
+    id: 'player-downloads',
+    needs: 'everyone',
+    title: 'Player Downloads',
+    icon: '⬇️',
+    pages: [
+        {
+            id: 'pdl-download',
+            title: 'Downloading Something',
+            lede: 'Keep a movie, a season, an album or a playlist on your phone, or save it to this computer.',
+            body: `
+Every movie, episode, season, show, album, playlist, audiobook and podcast in the player has a **Download** button. It also says where the thing already is: **Waiting**, **60%**, **On Pixel 8** or **Downloaded**.
+
+The button opens the download sheet:
+
+- **Download to**: *This computer* (your browser saves the file) or one of your phones and tablets that has the SoulSync app signed in to your profile.
+- **Quality**: *Original* is the file as it is on the server. Smaller copies (**1080p**, **720p**, **480p** for video, **320**, **256** or **128 kbps** for music) are made by the server first. Each one shows its real size before you commit, and the quality you pick is remembered for next time. A copy never goes above the source: a 720p file only offers 720p and 480p.
+- **Whole things in one go**: a season, a show, an album, a playlist, a book, or a podcast's newest episodes.
+- **Fits**: for a phone, the sheet says how much room is left under its storage limit.
+
+When you pick **This computer**, the server gets the file ready (a smaller copy shows its progress while it's made) and then your browser downloads it. When you pick a phone, the download waits for it: the phone picks it up the next time the app is open and online.
+
+Subtitles and chapter marks come along in a smaller copy, so an offline episode plays like a streamed one.
+`
+        },
+        {
+            id: 'pdl-smart',
+            title: 'Smart Downloads',
+            lede: 'Let the phone keep itself topped up.',
+            body: `
+When you send a show, a playlist or a podcast to a phone, the sheet offers a **Smart download**:
+
+- **Shows**: keep the next 1, 3 or 5 unwatched episodes ready. As you watch, the next ones download on their own. **Delete an episode once it's watched** clears the ones you've seen.
+- **Playlists**: **Keep in step with the playlist**. Songs added later download, songs taken out are removed. Works for your own playlists, mirrored ones and your Discover mixes.
+- **Podcasts**: keep the newest few episodes ready, and delete the ones you've played.
+
+Change or turn off a smart download from the sheet, or from the Downloads page. Turning it off keeps what it already downloaded.
+`
+        },
+        {
+            id: 'pdl-page',
+            title: 'The Downloads Page',
+            lede: 'See and manage what is on each of your devices, from any screen.',
+            body: `
+**Downloads** in the player's sidebar lists your devices at the top, each with how much room it uses and when it was last seen. Pick one to see what's on it, grouped by show, movie, album, playlist, book and podcast, with each item's state: on the phone, downloading, waiting, watched.
+
+From there you can **add the rest** of a season, change a group's **smart settings**, **remove** an item or **remove all** of a group, and cancel something still waiting. Changes reach the device the next time it's online.
+
+**This computer** lists the files you saved from this browser. **Download again** gets one in another quality; **Forget** only takes it off the list (the file stays where your browser saved it).
+
+Plays, positions and watched marks made offline on a phone are sent back when it reconnects, so Continue Watching and your listening history stay right.
+`
+        },
+        {
+            id: 'pdl-admin',
+            title: 'Download Settings (Admin)',
+            needs: 'admin',
+            lede: 'Who may download, and how much work the server does for smaller copies.',
+            body: `
+In the player's **Settings**, under **Downloads**:
+
+- **Members may ask for smaller copies**: off means members download originals only. Admins always can.
+- **Copies made at once**: how many smaller copies the server makes at the same time. Each one keeps a CPU core or the GPU busy (the same encoder the player uses for streaming, so a GPU is used when it works).
+- **Room for smaller copies**: how much disk the copies may use. When it's full, the copies used longest ago go first. A copy is made once per file and quality and shared by everyone who asks for it.
+
+Whether a profile may download at all is set per person on the player's **Users & Downloads** page.
+`
+        },
+    ]
+});
+
+registerDocsSection({
+    id: 'player-notifications',
+    needs: 'everyone',
+    title: 'Player Notifications',
+    icon: '🔔',
+    pages: [
+        {
+            id: 'pnotify-what',
+            title: 'What You Hear About',
+            lede: 'The bell at the top of the player, and your phone, tell you what is new for you. Only what is new for you.',
+            body: `
+The **bell** in the player's header shows how many notifications you haven't read. Click it for the list: each one opens what it's about and counts as read. **Mark all read** clears the count, and the **x** on a row dismisses it.
+
+Each kind is a switch in **Settings → Notifications**, and your phone app reads the same switches:
+
+| Kind | When | On to start |
+|---|---|---|
+| **New episodes** | A new episode of a show you're watching (you played an episode in the last 120 days, or it's on your watchlist). Never more than one a day per show: a second episode the same day turns it into "3 new episodes of …". | Yes |
+| **Featured films** | A well-reviewed film arrives in the library. TMDB has to rate it 7.0 or better and the other scores SoulSync has (IMDb, Rotten Tomatoes, Metacritic) have to agree. Never more than 3 a week. Turn on **Also films not in your library** to hear about the best of what's just out in cinemas too. | Yes |
+| **From your watchlist** | Something on your watchlist is ready to play. | Yes |
+| **Your requests** | Something you asked for is ready, or it was declined. | Yes |
+| **Season premieres** | A new season of a show you've watched starts in the next few days, and again when episode 1 lands. | Yes |
+| **Leaving soon** | Something you started is on the server's Shelf Life list to make room. | No |
+| **Downloads ready** | A smart download finished on your phone. Each phone can turn this off for itself. | Yes |
+| **Watch party invites** | Someone scheduled a watch party, or asked you to one. | Yes |
+| **Messages from the admin** | A message sent from Server Activity. These always come through. | Always |
+| **New music** | A new album from an artist you've played a lot lately. | No |
+| **Memories** | Home videos filmed on this day in past years, once a day at the time you pick. | No |
+
+Nothing is ever about a title your profile can't see: hidden libraries and rating limits apply to notifications too.
+
+> [!TIP]
+> **Send test** in Settings → Notifications shows you what one looks like, in the bell and on your phone.
+`
+        },
+        {
+            id: 'pnotify-when',
+            title: 'Quiet Hours and the Daily Digest',
+            lede: 'Hear about things when it suits you.',
+            body: `
+- **Quiet hours**: nothing arrives between the two times you set, on your own clock. What came in overnight arrives when quiet hours end. Messages from the admin still come through.
+- **Daily digest**: one notification a day, at the time you pick, with everything new instead of one each. Watch party invites and messages from the admin still come straight away.
+
+**Browser notifications**: the web player can also pop notifications up while it's in a background tab. Turn them on from **Settings → Notifications → Browser notifications**; your browser asks once. If you said no before, allow notifications for this site in your browser's site settings.
+
+**On your phone**: the SoulSync app checks for new ones every 15 minutes or so, and whenever you open it. Android asks once for permission, from the app's notification settings. Each kind has its own channel, so Android's own notification settings can tune them too.
+`
+        },
+        {
+            id: 'pnotify-admin',
+            title: 'For Admins',
+            lede: 'One automation keeps everyone up to date.',
+            body: `
+The **Player Notifications** automation runs every 5 minutes. Each run reads only what changed since the last one (new files, new albums, airing dates), so it costs next to nothing. Its first run only marks where it starts: turning it on never sends anyone the whole library.
+
+A message you send to someone's screen from **Server Activity** is kept in their notifications too, so a phone in a pocket sees it later.
+`
+        },
+    ]
+});

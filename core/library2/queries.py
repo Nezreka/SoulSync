@@ -836,9 +836,23 @@ def list_songs(conn, *, search: str = "", letter: str = "all", sort: str = "titl
             params["hits"] = json.dumps(hits)
             where.append("t.id IN (SELECT value FROM json_each(:hits))")
         else:
-            title = f"{_fold_sql('t.title')} LIKE :like ESCAPE '\\'"
-            where.append(f"({title} OR {_fold_sql('t.track_artist')} LIKE :like ESCAPE '\\'"
-                         f" OR {_fold_sql('ar.name')} LIKE :like ESCAPE '\\')")
+            tokens = [tok for tok in fq.split() if tok]
+            if len(tokens) > 1:
+                tok_clauses = []
+                for idx, tok in enumerate(tokens):
+                    esc_tok = tok.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    tk = f"stok_{idx}"
+                    params[tk] = f"%{esc_tok}%"
+                    tok_clauses.append(
+                        f"({_fold_sql('t.title')} LIKE :{tk} ESCAPE '\\'"
+                        f" OR {_fold_sql('t.track_artist')} LIKE :{tk} ESCAPE '\\'"
+                        f" OR {_fold_sql('ar.name')} LIKE :{tk} ESCAPE '\\')"
+                    )
+                where.append("(" + " AND ".join(tok_clauses) + ")")
+            else:
+                title = f"{_fold_sql('t.title')} LIKE :like ESCAPE '\\'"
+                where.append(f"({title} OR {_fold_sql('t.track_artist')} LIKE :like ESCAPE '\\'"
+                             f" OR {_fold_sql('ar.name')} LIKE :like ESCAPE '\\')")
         # the hits carry their folded title (``ft``), read by the ranking
         # below instead of folding every hit again per ORDER BY term
         order = ("CASE WHEN t.ft = :q THEN 0 WHEN t.ft LIKE :prefix ESCAPE '\\' THEN 1"

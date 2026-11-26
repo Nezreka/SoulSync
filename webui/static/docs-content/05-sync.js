@@ -238,12 +238,19 @@ On Plex, an admin also gets **Tag in Plex**: it adds a mood (the playlist's name
 
 ## Cover art
 
+A playlist uses its source's own artwork when the source has one (Spotify, Tidal, Deezer, Qobuz, YouTube, YouTube Music, iTunes and Beatport do), and keeps it current when the playlist refreshes. Without one, the card shows a collage of the playlist's album covers.
+
+To put your own cover on any playlist (mirrored, yours, or a request list), open it and click **Change cover** on the cover: upload a JPG, PNG or WebP, pick one of its songs' artwork, or paste an image link.
+
+- Your cover stays when the playlist refreshes, and syncs to Plex, Jellyfin or Navidrome on its next sync
+- **Restore original cover** (in the same menu, the **⋯** menu, or the playlist's **Settings**) puts the source's artwork back, and the next sync sends it to your server. A playlist with no source artwork goes back to its collage
+- A request list made from a playlist keeps that playlist's cover and its original
+
 Pick **Generate cover art** from a playlist card's **⋯** menu, or the **⋯** inside an open playlist. SoulSync reads the playlist's genres, mood and era from your library (and the playlist's name) and asks [Pollinations](https://pollinations.ai) for an image.
 
 - It opens as a preview. **Try another** paints it again in a different style; **Use this cover** keeps it
 - The playlist's name and where it's from ("Tidal playlist") go across the top. **Show name on cover** in the preview takes them off or puts them back without making a new image
-- A generated cover stays when the playlist refreshes from its source, and syncs to Plex, Jellyfin or Navidrome
-- **Restore original cover** in the same menu puts the source's own cover back
+- A generated cover is your cover like any other: it stays through refreshes, syncs to your server, and **Restore original cover** undoes it
 - Free with no setup: one image every 45 seconds, with a small Pollinations mark in the corner. A key from enter.pollinations.ai in **Settings → Connections** (the Pollinations service) removes both
 
 ## Rotating playlists

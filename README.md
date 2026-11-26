@@ -98,7 +98,7 @@ First-run setup finds your media server and download clients on its own. You don
 | **Metadata** | Spotify (with or without an account), Apple Music / iTunes, Deezer, Discogs, MusicBrainz, plus 14 background enrichment workers |
 | **Media servers** | Plex, Jellyfin, Navidrome, or **SoulSync Standalone** (no server needed) |
 | **Playlist sources** | Spotify, Tidal, Qobuz, Deezer, YouTube, YouTube Music, Apple Music links, ListenBrainz, Last.fm, Beatport, SoulSync's own mixes, CSV / TSV / TXT / M3U files, and NewPipe backups |
-| **Video** | Movies, TV and YouTube channels with TMDB / TVDB, Prowlarr, qBittorrent / Transmission / Deluge / SABnzbd / NZBGet, Plex and Jellyfin |
+| **Video** | Movies, TV and YouTube channels with TMDB / TVDB, Prowlarr, qBittorrent / Transmission / Deluge / SABnzbd / NZBGet, Plex, Jellyfin, or **Standalone** (SoulSync scans your own folders, no server needed). Plex and Jellyfin can be linked as one library with watched kept in step |
 | **Automation** | Visual WHEN → DO → THEN builder, 60+ triggers and actions, Discord / Telegram / Pushbullet / webhook notifications |
 | **Network (optional)** | **MetaSync** companion: share anonymous weekly taste signals with other SoulSync installs and get **SoulSync Charts** back as ready-to-sync playlists |
 | **Runs on** | Docker (amd64 + arm64), Unraid, or plain Python 3.11 |
@@ -198,14 +198,16 @@ Bring a playlist in from anywhere, keep a mirror of it, and keep your media serv
 - **Organize by playlist**: optionally download a playlist into its own folder.
 - **Bootlegs, edits and unofficial remixes**: turn on *Find uncatalogued tracks* in a playlist's Settings and the tracks no catalog has are searched for by the playlist's own artist and title on every sync. A file is only taken when its name says it is that exact version, so the original never stands in for a remix of it, and it is tagged from the playlist.
 - **Rotating playlists**: turn on *Rotating* in a playlist's Settings and a song it downloaded is removed once it leaves the playlist. Anything you played, favourited, rated or still have in another playlist is kept, and removals wait for your approval until you turn dry run off.
+- **Playlist covers**: playlists keep their source's own artwork, and any playlist (mirrored, yours, or a request list) can take your own cover: upload one, use a song's artwork, or paste a link. *Restore original cover* puts the source's back. Your cover survives refreshes and syncs to Plex, Jellyfin or Navidrome.
 - **Cover art**: *Generate cover art* in any playlist's ⋯ menu paints a cover from its genres, mood and era with [Pollinations](https://pollinations.ai). Preview it with or without the playlist's name across the top, try another style, keep the one you like. It survives refreshes and syncs to your server. Free with no key (one image every 45s, small Pollinations mark), or add a key in Settings to lift both.
 
 </details>
 
 ## Search & downloads
 
-One search box with three modes.
+One search box with three modes, and a note button that identifies what is playing.
 
+- **Identify a song**: the note button in the search field records a short clip (or takes an audio file you drop in) and asks Shazam to name it, then opens the song's usual analysis box with Add to Wishlist. The clip goes to Shazam, a third-party service; SoulSync does not keep it. Microphone capture needs an https address — over plain http the button offers the file path instead.
 - **Catalog**: search Spotify, Apple Music, Deezer, Discogs, MusicBrainz or Amazon, or **All sources** at once with the same release shown once. Results show *In library* and *In wishlist*; albums open a download-missing view, artists and labels open their pages.
 - **Videos**: official music videos from YouTube, downloaded straight into your library.
 - **Files**: search a download source directly (like classic Soulseek), filter by format and quality, then choose how it comes in:
@@ -248,7 +250,7 @@ Live batches with speed and ETA, "download this next", and a step-by-step detail
 ## Quality, verification & tagging
 
 - **Quality profiles**: named profiles built from a ranked ladder of formats, bit depths, sample rates and bitrates, with a cutoff. Start from *Audiophile*, *Balanced* or *Space Saver*, then assign profiles per playlist, artist or wishlist item. **Upgrade until cutoff** keeps chasing a better copy, and a file is only ever replaced by a measured upgrade.
-- **Verification**: AcoustID fingerprinting, real-audio checks with ffmpeg (catches padded previews), silence, duration (with an adjustable tolerance) and integrity guards, and a **fake-lossless** detector.
+- **Verification**: AcoustID fingerprinting (link your AcoustID account once in Settings: lookups need it from 1 January 2027), real-audio checks with ffmpeg (catches padded previews), silence, duration (with an adjustable tolerance) and integrity guards, and a **fake-lossless** detector.
 - **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention. The trash icon at the top of the Library opens it. Review stays quiet on its own: near-misses leave once a later candidate for the same track imports, automatic quality upgrades never send anything to Review (your current file stays), and old items can age out after N days (off by default). All of it lands in the recycle bin, restorable.
 - **Tagging**: Picard-style **MusicBrainz release preflight** pins one release per album so every track agrees. Tags are written with mutagen (ID3v2.4, FLAC, Vorbis, MP4), enriched in the order you choose. What the library learns later (a genre, a year, a track total) is filled into the tags a file left blank on its own, never over a tag the file has, and every fill can be undone from **Tools → Filled Tags** (**Fill empty tags automatically**: fill only, fill and update, or off).
 - **Extras**: preferred-source cover art with a minimum size, synced lyrics from LRClib, **ReplayGain 2.0** (track + album), optional lossy copies (MP3 / Opus / AAC), and **atomic album publishing** so half-downloaded albums never appear in your server.
@@ -335,7 +337,7 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 - **Library health score** with a findings inbox that turns thousands of findings into a few decisions, and **Fix all safe** for metadata-only repairs.
 - Findings sorted by what a fix would do (safe, needs your call, review only), **undo** on every dismiss, and keyboard triage (`j` / `k` / `f` / `d`).
 - **Over 40 maintenance jobs**, each with its own schedule.
-- **Database updater** (incremental, full refresh or deep scan), manual library matching, **backups with restore**, a metadata cache browser, and **config export/import** (optionally with credentials).
+- **Database updater** (incremental, full refresh or deep scan), manual library matching, **backups with restore** (each backup is checked, the newest five are kept, the player's and audiobooks' databases are backed up with the music one, and a restore checks the backup and keeps a copy of what was there before it touches anything), a metadata cache browser, and **config export/import** (optionally with credentials).
 - **Update file locations** after moving the music library folder: the library's records follow the files to the new folder (checked, grouped by folder, undoable; scans do it on their own once the old folder is gone).
 
 <details>
@@ -372,6 +374,8 @@ A full web player built into the sidebar.
 - A persistent, reorderable queue that can **auto-download** tracks you don't own yet.
 - **Radio mode**, **Artist Radio** and **Library Radio** (an endless shuffle of your own collection).
 - Tracks you don't own stream from a preview source, so you can hear before you grab.
+- **Home videos**: clips from your phone or camera (a Plex "Other videos" or Jellyfin "Home videos" library, or a folder on disk) as a player library of their own: On this day, folders as albums, a month-by-month timeline. Never looked up or renamed; named and dated from the clip itself, with your own names, dates, pictures and notes kept through every rescan. Set up from Player setup.
+- **Notifications**: a bell in the player (and system notifications in the phone app) for what's new for you: new episodes of shows you watch (one a day per show), well-reviewed films (never more than 3 a week), watchlist titles that arrived, finished requests, season premieres, watch party invites and admin messages, plus new albums and home video memories if you like. Every kind is a switch per profile, with quiet hours and a daily digest. Hidden libraries and rating limits apply.
 
 ## Sample Studio
 
@@ -566,13 +570,14 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
   - **Moderators**: a member who approves and declines other people's requests and manages issues, never settings, people or tools.
   - **A request limit per kind**: music, movies and TV each have their own (YouTube counts with TV), and the People list shows asks used per person, per kind.
   - **Members see only what they can use**, with a "What you can do" card on their own account page. That covers help too: Help & Docs and the help search show a member only the guides for what they can use, the notification panel holds their own notes, downloads and automations (the server's health, numbers and jobs are the admin's, and so are the enrichment workers and Manage Workers on both dashboards), and library actions that download right away (Automatic Search, Enhance Quality) are there only for a profile that may download.
-  - Add person, invites and Plex / OIDC sign-ups start from a template. Every route on the server checks the same rules, and so do automations, scans, Seerr apps and other background adds.
+  - **Import from Plex**: a profile for everyone your Plex server is shared with, picked one by one or all at once, with their Plex name and picture, on the template you choose. Each is linked to their Plex account, so Sign in with Plex lands on it and Seerr apps can ask for them before they ever sign in; anyone already here is never imported twice.
+  - Add person, invites, Plex imports and Plex / OIDC sign-ups start from a template. Every route on the server checks the same rules, and so do automations, scans, Seerr apps and other background adds.
 - **Per-profile everything**: watchlists, wishlists, playlists, queues and listening history.
 - **My Account** for non-admins: their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
 - **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** or **Everything**, then switch single parts on or off. Each template has its own Sidebar & look, and admins can set it for one person and lock it.
 - **Own library per profile** (Plex / Jellyfin / Navidrome 0.58+): a profile can have its own folder and server library. On Navidrome the profile picks its library under its own Navidrome login; its scans read only that library and its playlists are written as that user.
 - **Content caps**: G / PG / PG-13 / R per profile for movies, with TV following it or set on its own, and hide explicit music.
-- **Devices** (Settings > Devices): pair a phone, car or speaker app with a one-time code (or its QR). Each device picks a profile, with that profile's PIN or password, and can only play: never settings, downloads or people. Unpair any device at once. **Use music apps** is a permission, off on the Kids template. The page also holds this server's addresses (home ones found on their own, plus your remote address), a reachability check with a phone link for mobile data, and person invites.
+- **Devices** (Settings > Devices): pair a phone, car or speaker app with a one-time code (or its QR: a phone camera opens it straight in the SoulSync Player app). Each device picks a profile, with that profile's PIN or password, and can only play: never settings, downloads or people. Unpair any device at once. **Use music apps** is a permission, off on the Kids template. The page also holds this server's addresses (home ones found on their own, plus your remote address), a reachability check with a phone link for mobile data, and person invites.
 - **Music apps** (Subsonic / OpenSubsonic API at `/rest`): play your library in any music app that speaks it. **Set up a music app** in Settings > Devices gives one profile its own app password and API key (shown once, with a QR). Browsing, search, album lists, streaming with on-the-fly MP3/Opus conversion, offline downloads, lyrics, cover art, stars (they are Liked Songs), ratings, playlists (yours editable, mirrored ones and Daily Mixes read-only), the play queue and plays recorded like the web player's. Each app sees only its own profile, hidden explicit music stays hidden, and files SoulSync can't read can be played through your media server if you turn that on.
 
 ### Security

@@ -121,8 +121,8 @@ def test_a_liked_artist_becomes_a_seed_even_with_no_plays_of_them():
 
     by_name = {s["name"]: s["weight"] for s in seeds}
     assert set(by_name) == {"Played", "Liked Band"}
-    # a unit is the median play seed (40): two units = 80
-    assert by_name["Liked Band"] == pytest.approx(80.0)
+    # a unit is the median play seed: two units weigh twice the artist you play
+    assert by_name["Liked Band"] == pytest.approx(2 * by_name["Played"])
 
 
 def test_a_favourite_lifts_an_artist_you_also_play():
@@ -157,7 +157,8 @@ def test_a_light_listeners_likes_still_count():
     # one play of someone else doesn't shrink a like to nothing
     seeds = build_recency_weighted_seeds([{"name": "A", "play_count": 1}], {},
                                          favorites={"Liked Band": 1.0})
-    assert {s["name"]: s["weight"] for s in seeds}["Liked Band"] == fs.UNIT_FLOOR
+    by_name = {s["name"]: s["weight"] for s in seeds}
+    assert by_name["Liked Band"] == by_name["A"] >= fs.UNIT_FLOOR
 
 
 def test_daily_mixes_seed_from_a_liked_artist(db, monkeypatch):

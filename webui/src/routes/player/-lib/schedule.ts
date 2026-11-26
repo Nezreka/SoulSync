@@ -39,23 +39,6 @@ export interface Premiere {
   at: number;
 }
 
-/** an episode premieres at 8pm, a film at 9pm */
-const PREMIERE_HOUR = { episode: 20, movie: 21 } as const;
-
-/**
- * when something new premieres: the evening of the day it arrived (or the
- * next one, if it came after its hour). worked out from when it was added,
- * so every screen puts it in the same slot.
- */
-export function premiereAt(addedMs: number, kind: 'episode' | 'movie'): number {
-  const hour = PREMIERE_HOUR[kind];
-  const d = new Date(addedMs);
-  const slot = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, 0, 0, 0).getTime();
-  return addedMs < slot
-    ? slot
-    : new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, hour).getTime();
-}
-
 /** keeps a program long enough to see, and drops broken runtimes */
 export const MIN_SECONDS = 60;
 export const MAX_SECONDS = 6 * 60 * 60;
@@ -93,18 +76,130 @@ export function seededShuffle<T>(items: readonly T[], seed: number): T[] {
   return out;
 }
 
-/** yyyy-mm-dd of a local date: the day part of the seed */
-export function dayKey(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+// ── the guide's clock ───────────────────────────────────────────────────
+//
+// a channel's day starts at midnight and is seeded by the date. each device
+// used its OWN midnight and its own date, so a phone in another timezone (or
+// a server whose TZ isn't the house's) laid out a different guide from the
+// tv in the living room. the server hands its clock out with the day's pool
+// (core/player/guide_day.py clock()) and every day here is counted on it.
+// what a device SHOWS is still its own local time for those instants.
+
+export interface GuideClock {
+  /** the server's zone by name ("America/Los_Angeles"), when it knows it */
+  tz?: string | null;
+  /** its offset from utc right now, in minutes: used when there is no name */
+  offset_minutes?: number | null;
 }
 
+type Zone = { fmt: Intl.DateTimeFormat } | { offset: number } | null;
+let guideZone: Zone = null;
+let guideZoneKey = '';
+
+/** the clock every day is counted on; null or nothing goes back to the device's */
+export function setGuideClock(clock?: GuideClock | null): void {
+  let next: Zone = null;
+  let key = '';
+  const tz = clock?.tz ? String(clock.tz) : '';
+  if (tz) {
+    try {
+      next = {
+        fmt: new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          hourCycle: 'h23',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      };
+      key = tz;
+    } catch {
+      next = null; // a name this browser doesn't know: the offset below
+    }
+  }
+  if (!next && typeof clock?.offset_minutes === 'number' && Number.isFinite(clock.offset_minutes)) {
+    next = { offset: clock.offset_minutes };
+    key = `utc${clock.offset_minutes}`;
+  }
+  guideZone = next;
+  guideZoneKey = key;
+}
+
+interface Wall {
+  y: number;
+  m: number;
+  d: number;
+  h: number;
+  mi: number;
+  s: number;
+}
+
+/** the date and time on the guide's clock at an instant */
+function wall(ms: number): Wall {
+  const zone = guideZone;
+  if (!zone) {
+    const d = new Date(ms);
+    return {
+      y: d.getFullYear(),
+      m: d.getMonth() + 1,
+      d: d.getDate(),
+      h: d.getHours(),
+      mi: d.getMinutes(),
+      s: d.getSeconds(),
+    };
+  }
+  if ('offset' in zone) {
+    const d = new Date(ms + zone.offset * 60_000);
+    return {
+      y: d.getUTCFullYear(),
+      m: d.getUTCMonth() + 1,
+      d: d.getUTCDate(),
+      h: d.getUTCHours(),
+      mi: d.getUTCMinutes(),
+      s: d.getUTCSeconds(),
+    };
+  }
+  const part: Record<string, number> = {};
+  for (const p of zone.fmt.formatToParts(new Date(ms)))
+    if (p.type !== 'literal') part[p.type] = Number(p.value);
+  return {
+    y: part.year,
+    m: part.month,
+    d: part.day,
+    h: part.hour % 24,
+    mi: part.minute,
+    s: part.second,
+  };
+}
+
+/** how far the guide's clock is ahead of utc at an instant, in ms */
+function offsetAt(ms: number): number {
+  const w = wall(ms);
+  return Date.UTC(w.y, w.m - 1, w.d, w.h, w.mi, w.s) - Math.floor(ms / 1000) * 1000;
+}
+
+/** yyyy-mm-dd on the guide's clock: the day part of the seed */
+export function dayKey(date: Date): string {
+  const w = wall(date.getTime());
+  return `${w.y}-${String(w.m).padStart(2, '0')}-${String(w.d).padStart(2, '0')}`;
+}
+
+/** midnight on the guide's clock, at or before an instant */
 export function startOfLocalDay(ms: number): number {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+  if (!guideZone) {
+    const d = new Date(ms);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+  const w = wall(ms);
+  const midnight = Date.UTC(w.y, w.m - 1, w.d);
+  // the offset at midnight can differ from the one now (a clock change in
+  // between): take the guess's own offset and settle on it
+  const guess = midnight - offsetAt(ms);
+  return midnight - offsetAt(guess);
 }
 
 /**
@@ -140,6 +235,23 @@ function airableUncached(items: readonly GuideItem[]): GuideItem[] {
     .map((item) => (item.seconds > MAX_SECONDS ? { ...item, seconds: MAX_SECONDS } : item));
 }
 
+export interface CommercialSpot {
+  id: string;
+  title: string;
+  era: string;
+  year?: number | null;
+  duration_seconds: number;
+}
+
+export interface CommercialScheduleConfig {
+  enabled: boolean;
+  era: string;
+  mode: string;
+  clips: readonly CommercialSpot[];
+  /** stable cache key (e.g. "1:auto:cable:18:arc-...") */
+  key: string;
+}
+
 export interface ScheduleOptions {
   /**
    * keep the pool's own order instead of shuffling (a show channel airs its
@@ -167,14 +279,23 @@ export interface ScheduleOptions {
    * something, then one of something else
    */
   blocks?: number;
+  /**
+   * cable/satellite-style show rotation: every show on the channel gets an
+   * equal turn in each round (instead of long-running shows dominating by
+   * episode count) and the same show never airs back-to-back when >= 2 shows
+   * are in the pool.
+   */
+  rotateShows?: boolean;
   /** what's new on this channel and when it airs; premiereKey names them */
   premieres?: readonly Premiere[];
   premiereKey?: string;
+  /** server-wide shared deterministic retro commercial breaks */
+  commercials?: CommercialScheduleConfig;
 }
 
 /** evening, film time: 6pm to 2am */
 export function filmHour(at: number): boolean {
-  const h = new Date(at).getHours();
+  const h = wall(at).h;
   return h >= 18 || h < 2;
 }
 
@@ -192,9 +313,11 @@ export function scheduleDay(
   day: Date,
   options: ScheduleOptions = {},
 ): GuideProgram[] {
-  const key = `${channelId}|${startOfLocalDay(day.getTime())}|${options.ordered ? 1 : 0}|${
+  const key = `${guideZoneKey}|${channelId}|${startOfLocalDay(day.getTime())}|${options.ordered ? 1 : 0}|${
     options.daypart ? 1 : 0
-  }|${options.seenKey ?? ''}|${options.today ?? ''}|${options.blocks ?? 1}|${options.premiereKey ?? ''}`;
+  }|${options.seenKey ?? ''}|${options.today ?? ''}|${options.blocks ?? 1}|${
+    options.rotateShows ? 1 : 0
+  }|${options.premiereKey ?? ''}|${options.commercials?.key ?? ''}`;
   let days = dayCache.get(pool);
   if (!days) {
     days = new Map();
@@ -217,8 +340,93 @@ function scheduleDayUncached(
   const items = airable(pool);
   if (!items.length) return [];
   const dayStart = startOfLocalDay(day.getTime());
-  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
-  const seed = hashSeed(`${channelId}|${dayKey(new Date(dayStart))}`);
+  // the next local midnight, not +24h: a fall-back day is 25 hours, a spring one 23
+  const dayEnd = startOfLocalDay(dayStart + 36 * 60 * 60 * 1000);
+  const dayStamp = dayKey(new Date(dayStart));
+  const seed = hashSeed(`${channelId}|${dayStamp}`);
+
+  const comm = options.commercials;
+  const commClips = comm?.enabled && comm.clips.length ? comm.clips : null;
+  let contentSinceBreakSec = 0;
+  let lastBreakIds = new Set<string>();
+
+  const inferChannelEra = (cid: string): string => {
+    const low = cid.toLowerCase();
+    if (low.includes('1970') || low.includes('70s')) return '70s';
+    if (low.includes('1980') || low.includes('80s')) return '80s';
+    if (low.includes('1990') || low.includes('90s')) return '90s';
+    if (low.includes('2000') || low.includes('00s')) return '2000s';
+    if (low.includes('kid') || low.includes('animat') || low.includes('family')) return 'kids';
+    if (low.includes('horror') || low.includes('late') || low.includes('thriller')) return 'horror';
+    return 'mix';
+  };
+  const eraForYear = (y: number | null): string | null => {
+    if (y == null) return null;
+    if (y >= 1970 && y <= 1979) return '70s';
+    if (y >= 1980 && y <= 1989) return '80s';
+    if (y >= 1990 && y <= 1999) return '90s';
+    if (y >= 2000 && y <= 2011) return '2000s';
+    return null;
+  };
+  const placeCommercialBreak = (afterItem: GuideItem) => {
+    if (!commClips || !comm || cursor >= dayEnd) return;
+    const ym = /\b(19[5-9]\d|20[0-2]\d)\b/.exec(`${afterItem.subtitle ?? ''} ${afterItem.title}`);
+    const itemYear = ym ? Number(ym[1]) : null;
+    const yearEra = comm.era === 'auto' ? eraForYear(itemYear) : null;
+    const targetEra = yearEra ?? (comm.era === 'auto' ? inferChannelEra(channelId) : comm.era);
+    const brkSeed = hashSeed(`${channelId}|${dayStamp}|brk|${cursor}`);
+
+    const closeYear =
+      comm.era === 'auto' && itemYear != null && yearEra != null
+        ? commClips.filter((c) => c.year != null && Math.abs(c.year - itemYear) <= 4)
+        : [];
+    const exactEra = commClips.filter((c) => c.era === targetEra);
+
+    const tiers = [closeYear, exactEra, commClips];
+    const ordered: CommercialSpot[] = [];
+    const seenIds = new Set<string>();
+    for (let ti = 0; ti < tiers.length; ti++) {
+      const shuf = seededShuffle(tiers[ti], (brkSeed + ti * 7919) >>> 0);
+      for (const c of shuf) {
+        if (!seenIds.has(c.id)) {
+          seenIds.add(c.id);
+          ordered.push(c);
+        }
+      }
+    }
+    const freshFirst = [
+      ...ordered.filter((c) => !lastBreakIds.has(c.id)),
+      ...ordered.filter((c) => lastBreakIds.has(c.id)),
+    ];
+    const targetCount = comm.mode === 'short' ? 2 : 3;
+    const budget = comm.mode === 'short' ? 65 : 120;
+    const chosen: CommercialSpot[] = [];
+    let usedSec = 0;
+    for (const c of freshFirst) {
+      if (chosen.length >= targetCount) break;
+      const dur = Math.max(10, Math.min(95, c.duration_seconds || 30));
+      if (chosen.length > 0 && usedSec + dur > budget) continue;
+      chosen.push(c);
+      usedSec += dur;
+    }
+    if (!chosen.length) return;
+    lastBreakIds = new Set(chosen.map((c) => c.id));
+    for (const c of chosen) {
+      if (cursor >= dayEnd) break;
+      const dur = Math.max(10, Math.min(95, c.duration_seconds || 30));
+      const cEnd = cursor + dur * 1000;
+      out.push({
+        key: `commercial:${c.id}`,
+        kind: 'commercial',
+        title: c.title,
+        subtitle: 'Commercial Break',
+        seconds: dur,
+        start: cursor,
+        end: cEnd,
+      });
+      cursor = cEnd;
+    }
+  };
 
   const out: GuideProgram[] = [];
   let cursor = dayStart;
@@ -243,7 +451,15 @@ function scheduleDayUncached(
     const due = premieres[nextPremiere];
     if (due && due.at < end) end = due.at; // cut at the premiere
     if (end - cursor >= MIN_SECONDS * 1000) out.push({ ...item, start: cursor, end });
+    const airedSec = Math.max(0, Math.round((end - cursor) / 1000));
     cursor = Math.max(cursor, end);
+    if (commClips && airedSec > 0) {
+      contentSinceBreakSec += airedSec;
+      if (contentSinceBreakSec >= 300) {
+        placeCommercialBreak(item);
+        contentSinceBreakSec = 0;
+      }
+    }
     premiereNow();
   };
   // episodes run in blocks of this many, in order (the pool keeps each show's sample in airing order)
@@ -341,12 +557,73 @@ function scheduleDayUncached(
     };
   };
 
+  // Cable/satellite-style show rotation: group episodes by show so a 200-episode
+  // show doesn't drown out a 10-episode show, and never repeat the same show
+  // back-to-back when >= 2 shows are on the channel.
+  const drawRotatedShows = (pool: readonly GuideItem[], salt: number) => {
+    const byShow = new Map<string, GuideItem[]>();
+    const nonEpisodes: GuideItem[] = [];
+    for (const item of pool) {
+      const showKey = item.kind === 'episode' ? item.href || item.title : null;
+      if (showKey) {
+        const list = byShow.get(showKey);
+        if (list) list.push(item);
+        else byShow.set(showKey, [item]);
+      } else {
+        nonEpisodes.push(item);
+      }
+    }
+    const showKeys = [...byShow.keys()];
+    if (showKeys.length < 2) return draw(pool, salt);
+
+    // Order each show's episodes: unseen first, then seen, starting from a daily offset
+    const queues = new Map<string, { list: GuideItem[]; idx: number }>();
+    for (const sk of showKeys) {
+      const eps = byShow.get(sk)!;
+      const ordered = seen
+        ? [...eps.filter((x) => !seen.has(x.key)), ...eps.filter((x) => seen.has(x.key))]
+        : eps;
+      const startOffset = seen
+        ? 0
+        : hashSeed(`${channelId}|${sk}|${dayKey(new Date(dayStart))}`) % ordered.length;
+      queues.set(sk, { list: ordered, idx: startOffset });
+    }
+    // Mix any non-episode items (e.g. YouTube) in as their own bucket if present
+    if (nonEpisodes.length) {
+      const shuffled = seededShuffle(nonEpisodes, seed + salt + 31337);
+      queues.set('__other__', { list: shuffled, idx: 0 });
+      showKeys.push('__other__');
+    }
+
+    let round = 0;
+    let roundOrder = seededShuffle(showKeys, seed + salt);
+    let pos = 0;
+    let lastShow: string | null = null;
+    return () => {
+      if (pos >= roundOrder.length) {
+        round += 1;
+        roundOrder = seededShuffle(showKeys, seed + salt + round * 997);
+        // Prevent back-to-back repeat across round boundary
+        if (roundOrder.length > 1 && roundOrder[0] === lastShow) {
+          [roundOrder[0], roundOrder[1]] = [roundOrder[1], roundOrder[0]];
+        }
+        pos = 0;
+      }
+      const sk = roundOrder[pos++];
+      lastShow = sk;
+      const q = queues.get(sk)!;
+      const item = q.list[q.idx % q.list.length];
+      q.idx = (q.idx + 1) % q.list.length;
+      return item;
+    };
+  };
+
   const films = options.daypart ? items.filter((x) => x.kind === 'movie') : [];
   const shows = options.daypart ? items.filter((x) => x.kind !== 'movie') : [];
   if (films.length && shows.length) {
     // a mixed channel keeps to the clock: films in the evening, episodes by day
     const film = draw(films, 1);
-    const show = draw(shows, 2);
+    const show = options.rotateShows ? drawRotatedShows(shows, 2) : draw(shows, 2);
     while (cursor < dayEnd) {
       const next = filmHour(cursor) ? film() : show();
       if (!next) break;
@@ -355,7 +632,7 @@ function scheduleDayUncached(
     return out;
   }
 
-  const next = draw(items, 0);
+  const next = options.rotateShows ? drawRotatedShows(items, 0) : draw(items, 0);
   while (cursor < dayEnd) {
     const item = next();
     if (!item) break;

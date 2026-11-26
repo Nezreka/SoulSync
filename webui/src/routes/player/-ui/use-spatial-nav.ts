@@ -46,10 +46,6 @@ function candidates(root: HTMLElement): HTMLElement[] {
 /** the last input was a key press: show focus and move it on page changes */
 let keyboardMode = false;
 
-export function usingKeyboard(): boolean {
-  return keyboardMode;
-}
-
 export function useSpatialNav(rootRef: RefObject<HTMLElement | null>) {
   const router = useRouter();
 

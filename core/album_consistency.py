@@ -45,9 +45,15 @@ _ALBUM_LEVEL_TAGS = [
 # of the release it was first tagged with, a 1980 single (#1618)
 _ADOPTED_TAGS = _ALBUM_LEVEL_TAGS + ['DATE', 'LABEL']
 
-# picard writes these as native id3 frames / an mp4 atom, not TXXX (write_tag)
-_NATIVE_ID3 = {'DATE': 'TDRC', 'LABEL': 'TPUB'}
-_NATIVE_MP4 = {'DATE': '\xa9day'}
+# picard writes these as native id3 frames / an mp4 atom, not TXXX. taken from
+# the table write_tag itself writes by (core/metadata/tagfields.py), so this
+# reader can't fall behind it: its own copy knew only DATE and LABEL.
+from core.metadata.musicbrainz_tags import _NATIVE_TAGS as _NATIVE_TAG_NAMES
+from core.metadata.tagfields import FIELDS as _TAG_FIELDS
+
+_NATIVE_ID3 = {t: _TAG_FIELDS[t.lower()].id3 for t in _NATIVE_TAG_NAMES if t != 'LYRICS'}
+_NATIVE_MP4 = {t: _TAG_FIELDS[t.lower()].mp4 for t in _NATIVE_TAG_NAMES
+               if t != 'LYRICS' and not _TAG_FIELDS[t.lower()].mp4.startswith('----:')}
 
 # Vorbis comment keys (FLAC/OGG) — same as _ALBUM_LEVEL_TAGS (uppercase)
 # ID3 TXXX desc mapping

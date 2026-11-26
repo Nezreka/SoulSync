@@ -105,6 +105,65 @@ def _apply_tuning_pragmas(connection) -> None:
         connection.execute(f"PRAGMA mmap_size = {DB_MMAP_MB * 1024 * 1024}")
 
 
+# the python functions every connection gets. resolved once per process, not
+# per connection: three imports and four fresh lambdas ran on every open, and
+# the slow-connect log could not tell them apart from lock waits (#2253). the
+# imports stay lazy because core.library2 imports this module.
+_SQL_FUNCTIONS: Optional[tuple] = None
+_SQL_FUNCTIONS_LOCK = threading.Lock()
+
+
+def _sql_functions() -> tuple:
+    global _SQL_FUNCTIONS
+    if _SQL_FUNCTIONS is not None:
+        return _SQL_FUNCTIONS
+    with _SQL_FUNCTIONS_LOCK:
+        if _SQL_FUNCTIONS is None:
+            try:
+                from unidecode import unidecode as _ud
+
+                def unidecode_lower(x):
+                    return _ud(x).lower() if x else ""
+            except ImportError:
+                def unidecode_lower(x):
+                    return x.lower() if x else ""
+            # the catalogue's stored `name_key` fold, available to SQL. a join
+            # against a table that has no such column (watchlist, playlists)
+            # would otherwise have to use LOWER(), which folds A-Z only and so
+            # never matched a non-ASCII artist.
+            from core.library2.importer import normalize_name as _name_key
+            # norm_text is the exact function the *_norm columns hold, so a
+            # query can COALESCE a not-yet-backfilled row to the same value;
+            # norm_key drops punctuation too: 'ACDC' finds 'AC/DC'
+            from core.text.normalize import normalize_for_comparison as _nfc
+            from core.text.normalize import normalize_key as _nkey
+
+            def name_key(x):
+                return _name_key(x) if x else ""
+
+            def norm_text(x):
+                return _nfc(x) if x else ""
+
+            def norm_key(x):
+                return _nkey(x) if x else ""
+
+            _SQL_FUNCTIONS = (
+                ("unidecode_lower", unidecode_lower, False),
+                ("name_key", name_key, False),
+                ("norm_text", norm_text, True),
+                ("norm_key", norm_key, True),
+            )
+    return _SQL_FUNCTIONS
+
+
+def _register_sql_functions(connection) -> None:
+    for name, fn, deterministic in _sql_functions():
+        if deterministic:
+            connection.create_function(name, 1, fn, deterministic=True)
+        else:
+            connection.create_function(name, 1, fn)
+
+
 _CONNECTION_PLUMBING = frozenset({'_open_connection', '_get_connection', 'acquire'})
 
 
@@ -964,26 +1023,7 @@ class MusicDatabase:
                                              check_same_thread=check_same_thread)
                 _t_connected = time.perf_counter()
                 connection.row_factory = sqlite3.Row
-                # Register Unicode-normalizing function for diacritics-aware LIKE queries
-                try:
-                    from unidecode import unidecode as _ud
-                    connection.create_function("unidecode_lower", 1, lambda x: _ud(x).lower() if x else "")
-                except ImportError:
-                    connection.create_function("unidecode_lower", 1, lambda x: x.lower() if x else "")
-                # The catalogue's stored `name_key` fold, available to SQL. A
-                # join against a table that has no such column (watchlist,
-                # playlists) would otherwise have to use LOWER(), which folds
-                # A-Z only and so never matched a non-ASCII artist.
-                from core.library2.importer import normalize_name as _name_key
-                connection.create_function(
-                    "name_key", 1, lambda x: _name_key(x) if x else "")
-                # the exact function the *_norm columns hold, so a query can
-                # COALESCE a not-yet-backfilled row to the same value
-                from core.text.normalize import normalize_for_comparison as _nfc
-                connection.create_function("norm_text", 1, lambda x: _nfc(x) if x else "", deterministic=True)
-                # punctuation dropped too: 'ACDC' finds 'AC/DC' (track search)
-                from core.text.normalize import normalize_key as _nkey
-                connection.create_function("norm_key", 1, lambda x: _nkey(x) if x else "", deterministic=True)
+                _register_sql_functions(connection)
                 # Enable foreign key constraints and WAL mode for better concurrency.
                 # Docker Desktop bind mounts can briefly fail while SQLite opens the
                 # sidecar WAL/SHM files; retrying avoids surfacing transient 500s.
@@ -3194,6 +3234,23 @@ class MusicDatabase:
                     "ALTER TABLE mirrored_playlists ADD COLUMN source_image_url TEXT DEFAULT NULL"
                 )
                 logger.info("Added source_image_url column to mirrored_playlists table")
+            # #2281: a cover change the media server hasn't had yet. a restore
+            # sets custom_cover back to 0, and without this the next sync
+            # would treat the restored poster as a source poster and skip it
+            if 'cover_push_pending' not in cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists ADD COLUMN cover_push_pending INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.info("Added cover_push_pending column to mirrored_playlists table")
+            # #2279: source_image_url used to fill only when a generated cover
+            # went on. a plain mirror's original sat in image_url, so restore
+            # had nothing to go back to once a custom cover replaced it
+            cursor.execute(
+                "UPDATE mirrored_playlists SET source_image_url = image_url "
+                # a user playlist's old cover was the user's pick, not a source's
+                "WHERE custom_cover = 0 AND source_image_url IS NULL AND source != 'soulsync' "
+                "AND (image_url LIKE 'http://%' OR image_url LIKE 'https://%')"
+            )
         except Exception as e:
             logger.error(f"Error adding custom cover columns to mirrored_playlists: {e}")
 
@@ -12059,7 +12116,11 @@ class MusicDatabase:
                 # #1573: keep the server mount as an observation on its mapping.
                 # Local resolution helps recognition/technical facts; it never
                 # replaces the imported catalogue's file or its owner.
+                from core.library.path_resolver import is_deleted_quarantine_path
+
                 server_path = file_path
+                if is_deleted_quarantine_path(server_path):
+                    return False
                 if file_path:
                     from core.library.server_paths import local_path_for
                     from core.settings import config_manager
@@ -12068,6 +12129,8 @@ class MusicDatabase:
                     # every comparison below is on the path's text
                     from core.library2.track_files import stored_spelling
                     file_path = stored_spelling(cursor, file_path)
+                    if is_deleted_quarantine_path(file_path):
+                        return False
 
                 catalogue_album = resolve_album(cursor, server_source, album_id)
                 catalogue_artist = resolve_artist(cursor, server_source, artist_id)
@@ -12095,6 +12158,17 @@ class MusicDatabase:
                             "AND (? IS NULL OR t.duration IS NULL OR ABS(t.duration-?)<=5000) LIMIT 2",
                             (recording_id, title, duration, duration),
                         ).fetchall()
+                    if len(candidates) != 1:
+                        # the same file under another path: its name and byte
+                        # size name it whatever mount it is reached through
+                        # (#2288, #2290)
+                        from core.library2.media_server_sync import owned_track_by_file_twin
+                        _twin = owned_track_by_file_twin(
+                            cursor, server_path or file_path, file_size, owner_sql=owned_scope)
+                        if _twin is not None:
+                            candidates = cursor.execute(
+                                "SELECT t.id,t.album_id,al.primary_artist_id FROM lib2_tracks t "
+                                "JOIN lib2_albums al ON al.id=t.album_id WHERE t.id=?", (_twin,)).fetchall()
                     if len(candidates) != 1:
                         if adopt_scanned_file(cursor, file_path, server_path, server_source,
                                               server_info=server_track_names(track_obj)):
@@ -20806,6 +20880,57 @@ class MusicDatabase:
                 [(v,) for v in values],
             )
 
+    def _played_source_ids(self, cursor, profile_id: int = 1, limit: int = 150) -> set:
+        """the similar_artists source ids of the artists this profile plays:
+        the last 30 days, or the last 12 months when the month is quiet. keyed
+        the way the similar-artist worker keys them, so a candidate can say
+        whether it came from an artist you actually listen to."""
+        from core.similar_artists_worker import pick_source_artist_id
+        owner = self._listening_owner(profile_id)
+        out: set = set()
+        for window in ('30d', '12m'):
+            where = self._listening_time_filter(window, alias='lh', owner=owner)
+            try:
+                cursor.execute(f"""
+                    SELECT ar.spotify_id, ar.musicbrainz_id, ar.external_ids, COUNT(*) AS plays
+                    FROM listening_history lh
+                    JOIN lib2_tracks t ON t.id = lh.lib2_track_id
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    {where}
+                      AND lh.lib2_track_id IS NOT NULL
+                    GROUP BY ar.id
+                    ORDER BY plays DESC
+                    LIMIT ?
+                """, (limit,))
+            except Exception as exc:  # noqa: BLE001 - no history tables: nothing played
+                logger.debug("played source ids: %s", exc)
+                return out
+            for row in cursor.fetchall():
+                sid = pick_source_artist_id({'spotify_id': row[0], 'musicbrainz_id': row[1], 'external_ids': row[2]})
+                if sid:
+                    out.add(sid)
+            if len(out) >= 10:
+                break
+        return out
+
+    @staticmethod
+    def favor_played(items: list, from_played: list, limit: int, share: float = 2 / 3) -> list:
+        """the pool's picks with room kept for what you listen to: up to
+        ``share`` of ``limit`` goes to candidates similar to an artist you
+        play, the rest to the others (watchlist and library), each in the
+        order it came in (the rotation). a side that runs short leaves its
+        room to the other. pure."""
+        played = [x for x, f in zip(items, from_played, strict=True) if f]
+        other = [x for x, f in zip(items, from_played, strict=True) if not f]
+        want = min(len(played), int(round(limit * share)))
+        picked = played[:want] + other[:max(0, limit - want)]
+        if len(picked) < limit:
+            picked += played[want:want + (limit - len(picked))]
+        chosen = set(map(id, picked))
+        # back in rotation order, so what was featured longest ago still leads
+        return [x for x in items if id(x) in chosen][:limit]
+
     @staticmethod
     def _watchlist_exclusion_keys(cursor, profile_id: int = 1) -> Dict[str, set]:
         """The ids + names of this profile's watchlist artists, for exclusion.
@@ -21001,6 +21126,11 @@ class MusicDatabase:
                 # are tens of thousands.
                 stray_sources = self._stray_similar_artist_sources(cursor, profile_id)
                 excl = self._watchlist_exclusion_keys(cursor, profile_id)
+                # candidates similar to what you play get room of their own, so
+                # the pool follows your listening, not only the watchlist
+                played_sources = self._played_source_ids(cursor, profile_id)
+                if played_sources:
+                    sql_limit = max(sql_limit, limit * 4)
 
                 # the watchlist exclusion was a LEFT JOIN with four OR'd predicates and
                 # no index to serve any of them — every row of similar_artists scanned
@@ -21011,9 +21141,12 @@ class MusicDatabase:
                 self._temp_key_set(cursor, 'sa_excl_spotify', excl['spotify'])
                 self._temp_key_set(cursor, 'sa_excl_itunes', excl['itunes'])
                 self._temp_key_set(cursor, 'sa_excl_deezer', excl['deezer'])
+                self._temp_key_set(cursor, 'sa_played_sources', played_sources)
 
                 cursor.execute(f"""
                     SELECT
+                        MAX(CASE WHEN sa.source_artist_id IN (SELECT v FROM sa_played_sources)
+                                 THEN 1 ELSE 0 END) as from_played,
                         MAX(sa.id) as id,
                         MAX(sa.source_artist_id) as source_artist_id,
                         MAX(sa.similar_artist_spotify_id) as similar_artist_spotify_id,
@@ -21045,6 +21178,7 @@ class MusicDatabase:
 
                 rows = cursor.fetchall()
                 results = []
+                played_flags = []
                 for row in rows:
                     if library_artist_keys:
                         spotify_id = row['similar_artist_spotify_id']
@@ -21081,9 +21215,12 @@ class MusicDatabase:
                         genres=genres_list,
                         popularity=row['popularity'] if 'popularity' in row.keys() else 0,
                     ))
-                    if len(results) >= limit:
+                    played_flags.append(bool(row['from_played']))
+                    if not played_sources and len(results) >= limit:
                         break
-                return results
+                if played_sources:
+                    return self.favor_played(results, played_flags, limit)
+                return results[:limit]
 
         except Exception as e:
             logger.error(f"Error getting top similar artists: {e}")
@@ -26086,7 +26223,7 @@ class MusicDatabase:
             # Cap at 100 entries
             cursor.execute("""
                 DELETE FROM sync_history WHERE id NOT IN (
-                    SELECT id FROM sync_history ORDER BY started_at DESC LIMIT 100
+                    SELECT id FROM sync_history ORDER BY started_at DESC, id DESC LIMIT 100
                 )
             """)
             conn.commit()
@@ -26225,8 +26362,11 @@ class MusicDatabase:
             cursor.execute("""
                 SELECT * FROM sync_history
                 WHERE playlist_id = ?
-            """.rstrip() + owner_sql + " ORDER BY started_at DESC LIMIT 1",
+            """.rstrip() + owner_sql + " ORDER BY started_at DESC, id DESC LIMIT 1",
                 [playlist_id, *owner_params])
+            # (id breaks the tie: started_at is to the second, and since #2271
+            # every run is its own row, two runs in one second made "latest"
+            # the OLDER one. a no-download sync then marked the wrong run done.)
             row = cursor.fetchone()
             return dict(row) if row else None
         except Exception as e:
@@ -26873,6 +27013,13 @@ class MusicDatabase:
 
     # ── Mirrored Playlists ───────────────────────────────────────────────
 
+    @staticmethod
+    def _source_poster_url(url: Any) -> Optional[str]:
+        """a source's poster as restore keeps it: http(s) only. a local
+        /api/... cover is ours (generated or uploaded), never the source's."""
+        text = str(url or '').strip()
+        return text if text.startswith(('http://', 'https://')) else None
+
     def mirror_playlist(self, source: str, source_playlist_id: str, name: str,
                         tracks: List[Dict], profile_id: int = 1,
                         quality_profile_id: Optional[int] = None,
@@ -26923,8 +27070,9 @@ class MusicDatabase:
                     INSERT INTO mirrored_playlists
                         (source, source_playlist_id, name, description, owner,
                          image_url, track_count, profile_id, quality_profile_id,
-                         source_skipped, is_request_list, auto_remove_fulfilled, upstream_playlist_id, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                         source_skipped, is_request_list, auto_remove_fulfilled, upstream_playlist_id,
+                         source_image_url, custom_cover, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(source, source_playlist_id, profile_id) DO UPDATE SET
                         name = excluded.name,
                         description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
@@ -26933,16 +27081,18 @@ class MusicDatabase:
                             WHEN mirrored_playlists.custom_cover THEN mirrored_playlists.image_url
                             ELSE COALESCE(NULLIF(excluded.image_url, ''), mirrored_playlists.image_url)
                         END,
-                        -- a refresh whose source sends no poster hands the row's own
-                        -- image back. that's our generated cover, not the source's,
-                        -- so it never becomes the "original" restore goes back to
+                        -- #2279: the source's own poster, kept current whether or not
+                        -- a custom cover sits on top, so restore always has it.
+                        -- excluded.source_image_url is only ever an http(s) poster.
+                        -- a caller that hands the row's own custom cover back (an
+                        -- echo) isn't the source talking, so it never becomes it
                         source_image_url = CASE
+                            WHEN excluded.source_image_url IS NULL
+                            THEN mirrored_playlists.source_image_url
                             WHEN mirrored_playlists.custom_cover
-                                 AND NULLIF(excluded.image_url, '') IS NOT NULL
-                                 AND excluded.image_url IS NOT mirrored_playlists.image_url
-                                 AND excluded.image_url NOT LIKE '/api/user-playlists/%'
-                            THEN excluded.image_url
-                            ELSE mirrored_playlists.source_image_url
+                                 AND excluded.image_url IS mirrored_playlists.image_url
+                            THEN mirrored_playlists.source_image_url
+                            ELSE excluded.source_image_url
                         END,
                         track_count = excluded.track_count,
                         quality_profile_id = CASE
@@ -26975,6 +27125,8 @@ class MusicDatabase:
                     1 if kwargs.get('is_request_list') else 0,
                     1 if kwargs.get('auto_remove_fulfilled') else 0,
                     kwargs.get('upstream_playlist_id'),
+                    self._source_poster_url(kwargs.get('source_image_url') or kwargs.get('image_url')),
+                    1 if kwargs.get('custom_cover') else 0,
                     1 if quality_profile_id is not None else 0,
                     1 if 'source_skipped' in kwargs else 0,
                     1 if 'is_request_list' in kwargs else 0,
@@ -27127,8 +27279,10 @@ class MusicDatabase:
                 owner_sql, owner_params = self._mirror_owner_clause(profile_id)
                 cursor.execute(
                     "UPDATE mirrored_playlists SET "
-                    "source_image_url = CASE WHEN custom_cover THEN source_image_url ELSE image_url END, "
-                    "image_url = ?, custom_cover = 1, updated_at = CURRENT_TIMESTAMP "
+                    "source_image_url = COALESCE(source_image_url, CASE WHEN custom_cover = 0 "
+                    "AND (image_url LIKE 'http://%' OR image_url LIKE 'https://%') THEN image_url END), "
+                    "image_url = ?, custom_cover = 1, cover_push_pending = 1, "
+                    "updated_at = CURRENT_TIMESTAMP "
                     "WHERE id = ?" + owner_sql,
                     [image_url, int(playlist_id), *owner_params],
                 )
@@ -27151,11 +27305,15 @@ class MusicDatabase:
                 owner_sql, owner_params = self._mirror_owner_clause(profile_id)
                 cursor.execute(
                     # a local cover as the "original" is the generated one an
-                    # echo stashed (fixed since); its file goes, so point at nothing
+                    # echo stashed (fixed since); its file goes, so point at
+                    # nothing. the source's poster itself stays for next time
                     "UPDATE mirrored_playlists SET image_url = CASE "
-                    "WHEN source_image_url LIKE '/api/user-playlists/%' THEN NULL "
-                    "ELSE source_image_url END, "
-                    "source_image_url = NULL, custom_cover = 0, updated_at = CURRENT_TIMESTAMP "
+                    "WHEN source_image_url LIKE 'http://%' OR source_image_url LIKE 'https://%' "
+                    "THEN source_image_url END, "
+                    "source_image_url = CASE "
+                    "WHEN source_image_url LIKE 'http://%' OR source_image_url LIKE 'https://%' "
+                    "THEN source_image_url END, "
+                    "custom_cover = 0, cover_push_pending = 1, updated_at = CURRENT_TIMESTAMP "
                     "WHERE id = ?" + owner_sql,
                     [int(playlist_id), *owner_params],
                 )
@@ -27164,6 +27322,18 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error restoring cover for mirrored playlist {playlist_id}: {e}")
             return False
+
+    def clear_mirrored_playlist_cover_push_pending(self, playlist_id: int) -> None:
+        """the media server has the current cover now."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE mirrored_playlists SET cover_push_pending = 0 WHERE id = ?",
+                    (int(playlist_id),),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error clearing cover push flag for mirrored playlist {playlist_id}: {e}")
 
     def set_mirrored_playlist_description(
         self,
@@ -27438,6 +27608,10 @@ class MusicDatabase:
             description=mirror.get('description'),
             owner=mirror.get('owner'),
             image_url=mirror.get('image_url'),
+            # #2280/#2281: the copy keeps its cover as a cover, and the
+            # parent's original so it can restore too
+            source_image_url=mirror.get('source_image_url'),
+            custom_cover=1 if mirror.get('custom_cover') else 0,
             quality_profile_id=mirror.get('quality_profile_id'),
             is_request_list=1,
             # off until the user turns it on: it deletes tracks from their real
@@ -29483,7 +29657,7 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 self._ensure_music_request_schema(cursor)
                 cursor.execute(
-                    "SELECT spotify_track_id, spotify_data, source_type, date_added "
+                    "SELECT spotify_track_id, spotify_data, source_type, source_info, date_added "
                     "FROM wishlist_tracks WHERE profile_id = ? AND request_status IS NULL "
                     "ORDER BY date_added DESC", (int(profile_id),))
                 out = []
@@ -29492,8 +29666,15 @@ class MusicDatabase:
                         data = json.loads(row['spotify_data'])
                     except (ValueError, TypeError):
                         data = {}
+                    # where the ask came from (a playlist sync names its playlist):
+                    # the requests page groups by it (#2302)
+                    try:
+                        info = json.loads(row['source_info']) if row['source_info'] else {}
+                    except (ValueError, TypeError):
+                        info = {}
                     out.append({'spotify_track_id': row['spotify_track_id'], 'spotify_data': data,
-                                'source_type': row['source_type'], 'date_added': row['date_added']})
+                                'source_type': row['source_type'], 'date_added': row['date_added'],
+                                'source_info': info if isinstance(info, dict) else {}})
                 return out
         except Exception as e:
             logger.error("Error reading pending music requests: %s", e)

@@ -10,6 +10,7 @@ bad value is refused, a missing one reads as its default.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from typing import Any, Callable, Dict, Tuple
@@ -42,6 +43,58 @@ def _int(lo: int, hi: int) -> Callable[[Any], int]:
     return clean
 
 
+ACCENT_COLORS = ("emerald", "violet", "ocean", "amber", "rose", "crimson")
+COMMERCIAL_ERAS = ("auto", "70s", "80s", "90s", "2000s", "kids", "mix")
+COMMERCIAL_MODES = ("short", "cable")
+
+
+def _accent(v: Any) -> str:
+    if isinstance(v, str) and v.strip().lower() in ACCENT_COLORS:
+        return v.strip().lower()
+    raise SettingsError(f"expected one of {', '.join(ACCENT_COLORS)}")
+
+
+def _commercial_era(v: Any) -> str:
+    if isinstance(v, str) and v.strip().lower() in COMMERCIAL_ERAS:
+        return v.strip().lower()
+    raise SettingsError(f"expected one of {', '.join(COMMERCIAL_ERAS)}")
+
+
+def _commercial_mode(v: Any) -> str:
+    if isinstance(v, str) and v.strip().lower() in COMMERCIAL_MODES:
+        return v.strip().lower()
+    raise SettingsError(f"expected one of {', '.join(COMMERCIAL_MODES)}")
+
+
+# a place in the player's sidebar: one of its pages ("/player/movies") or a
+# library with a page of its own ("lib:5")
+_NAV_ID = re.compile(r"^(?:/player(?:/[a-z][a-z-]{0,30}){0,3}|lib:\d{1,9})$")
+MAX_NAV_IDS = 80
+
+
+def _nav_ids(v: Any) -> list:
+    """a list of sidebar places, each once. the player knows its places and
+    skips one it doesn't have (a library that was removed), so only the
+    shape is checked here."""
+    if not isinstance(v, list) or len(v) > MAX_NAV_IDS:
+        raise SettingsError(f"expected a list of at most {MAX_NAV_IDS} sidebar places")
+    out, seen = [], set()
+    for item in v:
+        if not isinstance(item, str) or not _NAV_ID.match(item):
+            raise SettingsError("expected sidebar places like /player/movies or lib:5")
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def _nav_hidden(v: Any) -> list:
+    out = _nav_ids(v)
+    if "/player" in out:
+        raise SettingsError("Home can't be hidden")
+    return out
+
+
 # key: (default, cleaner, what it does)
 SETTINGS: Dict[str, Tuple[Any, Callable[[Any], Any], str]] = {
     "share_activity": (True, _bool,
@@ -49,6 +102,24 @@ SETTINGS: Dict[str, Tuple[Any, Callable[[Any], Any], str]] = {
     "autoplay_next": (True, _bool, "the next episode plays on its own"),
     "still_watching_after": (3, _int(0, 20),
                              "episodes in a row nobody touched before asking (0: never ask)"),
+    "show_movie_ratings": (False, _bool,
+                           "show the star rating badge in the corner of movie poster cards"),
+    "show_tv_episode_count": (True, _bool,
+                              "show the episode count badge on TV show poster cards"),
+    "show_year_on_cards": (True, _bool,
+                           "show the release year beneath movie and TV poster cards"),
+    "accent_color": ("emerald", _accent,
+                     "profile accent color for the player across all devices"),
+    "commercials_enabled": (False, _bool,
+                            "play optional retro commercial breaks between Live Guide programs"),
+    "commercials_era": ("auto", _commercial_era,
+                        "decade or vibe for retro commercials (auto matches each channel)"),
+    "commercials_mode": ("cable", _commercial_mode,
+                         "classic cable continuous breaks or short 1-2 spot breaks"),
+    "sidebar_order": ([], _nav_ids,
+                      "the order of the places in the sidebar; any not listed keep their usual place"),
+    "sidebar_hidden": ([], _nav_hidden,
+                       "places left out of the sidebar (they still open from a link or search)"),
 }
 
 
@@ -69,8 +140,14 @@ def ensure_schema(db: Any) -> None:
     _ready.add(key)
 
 
+def _own(value: Any) -> Any:
+    """a setting's value the caller may change: a list setting is copied, so
+    one profile's (or the default's) list is never another's"""
+    return list(value) if isinstance(value, list) else value
+
+
 def defaults() -> Dict[str, Any]:
-    return {k: v[0] for k, v in SETTINGS.items()}
+    return {k: _own(v[0]) for k, v in SETTINGS.items()}
 
 
 def get(db: Any, profile_id: int) -> Dict[str, Any]:
@@ -79,7 +156,7 @@ def get(db: Any, profile_id: int) -> Dict[str, Any]:
     with _lock:
         hit = _cache.get(ck)
     if hit is not None:
-        return dict(hit)
+        return {k: _own(v) for k, v in hit.items()}
     ensure_schema(db)
     out = defaults()
     with db._get_connection() as conn:
@@ -92,7 +169,7 @@ def get(db: Any, profile_id: int) -> Dict[str, Any]:
             except (ValueError, TypeError):
                 continue  # a value an older version wrote: the default stands
     with _lock:
-        _cache[ck] = dict(out)
+        _cache[ck] = {k: _own(v) for k, v in out.items()}
     return out
 
 

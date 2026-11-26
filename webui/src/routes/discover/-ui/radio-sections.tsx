@@ -185,6 +185,7 @@ function LastfmResultRow({
 
 export interface ListenBrainzSectionProps {
   username: string | null;
+  showsConnect: boolean;
   activeTab: LbTabId;
   /** Which tabs returned playlists — a tab with none is NOT rendered (3462). */
   hasData: Record<string, boolean>;
@@ -199,6 +200,9 @@ export interface ListenBrainzSectionProps {
   onSelectTab: (tab: LbTabId) => void;
   onSelectGroup: (group: string) => void;
   onRefresh: () => void;
+  onRetry: () => void;
+  refreshing?: boolean;
+  refreshError?: string | null;
   /** The connect card's button opens the personal settings (3486). */
   onConnect: () => void;
   onOpenMix: (key: string) => void;
@@ -209,6 +213,7 @@ export interface ListenBrainzSectionProps {
 
 export function ListenBrainzSection({
   username,
+  showsConnect,
   activeTab,
   hasData,
   mixes,
@@ -220,6 +225,9 @@ export function ListenBrainzSection({
   onSelectTab,
   onSelectGroup,
   onRefresh,
+  onRetry,
+  refreshing,
+  refreshError,
   onConnect,
   onOpenMix,
   onPlayMix,
@@ -227,10 +235,6 @@ export function ListenBrainzSection({
 }: ListenBrainzSectionProps) {
   const liveTabs = LB_TABS.filter((tab) => hasData[tab.id]);
   const anyData = liveTabs.length > 0;
-  // the server only names a user when an account is linked. without that
-  // the connect card is right; with it, "connect listenbrainz" was telling a
-  // connected user to connect, and refresh did nothing for an unlinked one.
-  const connected = Boolean(username);
 
   return (
     <DiscoverSection
@@ -240,13 +244,14 @@ export function ListenBrainzSection({
       count={1}
       loaded={loaded}
       actions={
-        !connected && !anyData && !error ? undefined : (
+        showsConnect || (!loaded && !anyData) ? undefined : (
           <button
             type="button"
             className="action-button primary"
             id="listenbrainz-refresh-btn"
             title="Refresh playlists from ListenBrainz"
             onClick={onRefresh}
+            disabled={refreshing || loading}
           >
             <span className="button-icon">🔄</span>
             <span className="button-text">Refresh</span>
@@ -254,21 +259,40 @@ export function ListenBrainzSection({
         )
       }
     >
+      {error && !loading && (
+        <div className="listenbrainz-recovery" role="status">
+          <p>
+            {anyData
+              ? 'Some playlists could not be loaded. Saved playlists remain available.'
+              : LB_LOAD_FAILED}
+          </p>
+          <button type="button" className="action-button" onClick={onRetry} disabled={loading}>
+            Retry loading playlists
+          </button>
+        </div>
+      )}
+      {refreshError && (
+        <p className="listenbrainz-recovery" role="alert">
+          {refreshError}
+        </p>
+      )}
+      {loading && anyData && (
+        <p className="listenbrainz-notice" role="status">
+          Reloading playlists. Saved playlists remain available.
+        </p>
+      )}
       <div className="listenbrainz-tabs" id="listenbrainz-tabs">
-        {loading ? (
+        {loading && !anyData ? (
           <div className="discover-loading">
             <div className="loading-spinner" />
             <p>Loading playlists...</p>
           </div>
-        ) : error ? (
-          <div className="discover-empty">
-            <p>{LB_LOAD_FAILED}</p>
-          </div>
-        ) : !anyData && connected ? (
+        ) : !anyData && error ? null : !anyData && !showsConnect ? (
           <div className="discover-empty">
             <p>
-              No ListenBrainz playlists yet. They show up here once ListenBrainz has made some for{' '}
-              {username}.
+              {username
+                ? `No ListenBrainz playlists yet. They show up here once ListenBrainz has made some for ${username}.`
+                : 'No ListenBrainz playlists yet. Refresh to check for new playlists.'}
             </p>
           </div>
         ) : !anyData ? (
@@ -319,7 +343,7 @@ export function ListenBrainzSection({
       </div>
 
       <div className="listenbrainz-tab-content" id="listenbrainz-tab-content">
-        {anyData && !loading && !error && (
+        {anyData && (
           <>
             {groups && groups.length > 0 && (
               <div className="decade-tabs-inner" id="lb-subtabs-bar" style={{ marginBottom: 16 }}>

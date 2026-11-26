@@ -5,14 +5,23 @@
  * with nothing in them aren't drawn.
  */
 
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import type { RailCard } from '../-lib/rails';
-import type { CatalogMovie, CatalogShow, ExtraTitle, Extras } from '../-player.types';
+import type {
+  CastMember,
+  CatalogMovie,
+  CatalogShow,
+  ExtraTitle,
+  Extras,
+  VideoCatalog,
+} from '../-player.types';
 
 import { remoteImage, youtubeThumb } from '../-lib/images';
 import { movieCard, showCard } from '../-lib/rails';
+import { personQuery, studioCollectionsQuery } from '../-player.api';
 import { BackIcon, ChevronIcon, PlayIcon } from './icons';
 import { Art, CardRail, HScroll, styles as s } from './kit';
 import { inPlayer, VideoDialog } from './trailer';
@@ -331,5 +340,204 @@ export function CollectionRail({
           .map((t) => extraCard(t, owned))}
       />
     </div>
+  );
+}
+
+/**
+ * Plex-style discovery rails on movie & TV show pages:
+ * 1. Collection Studio collections containing this title
+ * 2. More from the director / creator & top-billed cast (other titles in your library)
+ * 3. More from the same studio (movies) or network (TV shows)
+ */
+export function RelatedDiscoveryRails({
+  kind,
+  selfId,
+  cast,
+  leadCrew,
+  studioOrNetwork,
+  catalog,
+  franchiseCollectionName,
+}: {
+  kind: 'movie' | 'show';
+  selfId: number;
+  cast?: CastMember[];
+  leadCrew?: { name: string; tmdb_id?: number | null }[];
+  studioOrNetwork?: string | null;
+  catalog?: VideoCatalog;
+  franchiseCollectionName?: string | null;
+}) {
+  const studioCols = useQuery({ ...studioCollectionsQuery(), retry: false });
+
+  const movieById = useMemo(() => {
+    const m = new Map<number, CatalogMovie>();
+    for (const item of catalog?.movies ?? []) m.set(item.id, item);
+    return m;
+  }, [catalog?.movies]);
+
+  const showById = useMemo(() => {
+    const m = new Map<number, CatalogShow>();
+    for (const item of catalog?.shows ?? []) m.set(item.id, item);
+    return m;
+  }, [catalog?.shows]);
+
+  const ownedMoviesByTmdb = useMemo(() => ownedByTmdb(catalog?.movies ?? []), [catalog?.movies]);
+  const ownedShowsByTmdb = useMemo(() => ownedByTmdb(catalog?.shows ?? []), [catalog?.shows]);
+
+  // 1. Collection Studio collections that include this title
+  const collectionRails = useMemo(() => {
+    const skipName = franchiseCollectionName?.trim().toLowerCase() ?? '';
+    return (studioCols.data ?? [])
+      .filter((col) => {
+        if (col.media_type !== kind) return false;
+        if (!col.members.includes(selfId)) return false;
+        if (skipName && col.name.trim().toLowerCase() === skipName) return false;
+        return true;
+      })
+      .map((col) => {
+        const cards: RailCard[] = [];
+        for (const memberId of col.members) {
+          if (memberId === selfId) continue;
+          if (kind === 'movie') {
+            const mv = movieById.get(memberId);
+            if (mv) cards.push(movieCard(mv));
+          } else {
+            const sh = showById.get(memberId);
+            if (sh) cards.push(showCard(sh));
+          }
+        }
+        return { col, cards: cards.slice(0, 24) };
+      })
+      .filter((entry) => entry.cards.length > 0);
+  }, [studioCols.data, kind, selfId, franchiseCollectionName, movieById, showById]);
+
+  // 2. Pick up to 3 featured people: lead director/creator + top 2 cast members
+  const featuredPeople = useMemo(() => {
+    const out: { tmdbId: number; name: string; title: string }[] = [];
+    const seen = new Set<number>();
+    const firstCrew = (leadCrew ?? []).find((c) => c.tmdb_id && c.tmdb_id > 0);
+    if (firstCrew?.tmdb_id) {
+      seen.add(firstCrew.tmdb_id);
+      out.push({
+        tmdbId: firstCrew.tmdb_id,
+        name: firstCrew.name,
+        title: `More from ${firstCrew.name}`,
+      });
+    }
+    for (const member of cast ?? []) {
+      if (out.length >= 3) break;
+      if (!member.tmdb_id || member.tmdb_id <= 0 || seen.has(member.tmdb_id)) continue;
+      seen.add(member.tmdb_id);
+      out.push({
+        tmdbId: member.tmdb_id,
+        name: member.name,
+        title: `More with ${member.name}`,
+      });
+    }
+    return out;
+  }, [leadCrew, cast]);
+
+  const personQueries = useQueries({
+    queries: featuredPeople.map((p) => ({
+      ...personQuery(p.tmdbId),
+      retry: false,
+    })),
+  });
+
+  const peopleRails = useMemo(() => {
+    return featuredPeople
+      .map((person, idx) => {
+        const credits = personQueries[idx]?.data?.credits ?? [];
+        const seenKeys = new Set<string>();
+        const cards: RailCard[] = [];
+        for (const credit of credits) {
+          const libId =
+            credit.library_id ??
+            (credit.kind === 'movie'
+              ? ownedMoviesByTmdb.get(credit.tmdb_id)
+              : ownedShowsByTmdb.get(credit.tmdb_id));
+          if (!libId) continue;
+          if (credit.kind === kind && libId === selfId) continue;
+          const key = `${credit.kind}:${libId}`;
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          if (credit.kind === 'movie') {
+            const mv = movieById.get(libId);
+            cards.push(mv ? movieCard(mv) : extraCard(credit, ownedMoviesByTmdb));
+          } else {
+            const sh = showById.get(libId);
+            cards.push(sh ? showCard(sh) : extraCard(credit, ownedShowsByTmdb));
+          }
+        }
+        return { person, cards: cards.slice(0, 18) };
+      })
+      .filter((entry) => entry.cards.length > 0);
+  }, [
+    featuredPeople,
+    personQueries,
+    ownedMoviesByTmdb,
+    ownedShowsByTmdb,
+    kind,
+    selfId,
+    movieById,
+    showById,
+  ]);
+
+  // 3. Same studio (movies) or network (TV shows)
+  const makerRail = useMemo(() => {
+    const label = studioOrNetwork?.trim();
+    if (!label) return null;
+    const needle = label.toLowerCase();
+    if (kind === 'movie') {
+      const matches = (catalog?.movies ?? [])
+        .filter((m) => m.id !== selfId && m.studio?.trim().toLowerCase() === needle)
+        .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0) || (b.year ?? 0) - (a.year ?? 0))
+        .slice(0, 18)
+        .map((m) => movieCard(m));
+      if (matches.length < 2) return null;
+      return {
+        title: `More from ${label}`,
+        cards: matches,
+        more: { to: `/player/movies/studio/${encodeURIComponent(label)}`, label: 'See all' },
+      };
+    }
+    const matches = (catalog?.shows ?? [])
+      .filter((sh) => sh.id !== selfId && sh.network?.trim().toLowerCase() === needle)
+      .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0) || (b.year ?? 0) - (a.year ?? 0))
+      .slice(0, 18)
+      .map((sh) => showCard(sh));
+    if (matches.length < 2) return null;
+    return {
+      title: `More on ${label}`,
+      cards: matches,
+      more: { to: `/player/tv/network/${encodeURIComponent(label)}`, label: 'See all' },
+    };
+  }, [studioOrNetwork, kind, catalog, selfId]);
+
+  return (
+    <>
+      {collectionRails.map(({ col, cards }) => (
+        <div key={`col-${col.id}`} className={s.detailRail}>
+          <CardRail
+            title={`In ${col.name}`}
+            cards={cards}
+            more={{ to: `/player/collections/${col.id}`, label: 'View collection' }}
+          />
+        </div>
+      ))}
+      {peopleRails.map(({ person, cards }) => (
+        <div key={`person-${person.tmdbId}`} className={s.detailRail}>
+          <CardRail
+            title={person.title}
+            cards={cards}
+            more={{ to: `/player/person/${person.tmdbId}`, label: 'Filmography' }}
+          />
+        </div>
+      ))}
+      {makerRail ? (
+        <div className={s.detailRail}>
+          <CardRail title={makerRail.title} cards={makerRail.cards} more={makerRail.more} />
+        </div>
+      ) : null}
+    </>
   );
 }

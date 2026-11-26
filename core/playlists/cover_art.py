@@ -726,11 +726,7 @@ def apply_preview(db: Any, playlist: Dict[str, Any], *, base_dir: Optional[str] 
     except OSError:
         pass
     url = up.cover_url(playlist['id'])
-    if up.is_user_playlist(playlist):
-        ok = db.set_mirrored_playlist_image_url(playlist['id'], url, profile_id=playlist.get('profile_id'))
-    else:
-        ok = db.set_mirrored_playlist_custom_cover(playlist['id'], url, profile_id=playlist.get('profile_id'))
-    if not ok:
+    if not db.set_mirrored_playlist_custom_cover(playlist['id'], url, profile_id=playlist.get('profile_id')):
         raise RuntimeError('could not save the cover')
     return url
 

@@ -118,6 +118,7 @@ class ConfigManager:
         # Enrichment services
         'listenbrainz.token',
         'acoustid.api_key',
+        'acoustid.user_key',         # the person's own key, sent on every lookup (#2318)
         'lastfm.api_key',
         'lastfm.api_secret',
         'lastfm.session_key',
@@ -293,6 +294,54 @@ class ConfigManager:
                 logger.info("Sensitive config values encrypted successfully")
         except Exception as e:
             logger.warning(f"Could not migrate encryption: {e}")
+
+    _TRANSFER_PERMANENT_FLAG = 'config_transfer_permanent_on_1289'
+
+    def _migrate_transfer_permanent_on(self):
+        """one-time: turn 'Music library folder is my permanent library' on
+        where it is saved as off.
+
+        the switch was added off by default (#904, june), and the settings
+        page wrote the checkbox on every save, so every install that saved
+        settings before #1289 made it on by default (october) holds an
+        explicit off it never chose. with it off a standalone deep scan
+        moves files it doesn't recognize out of the music folder. on is the
+        safe setting and the intended one; someone who wants a drop area can
+        turn it off again, and this never runs twice."""
+        try:
+            conn = self._connect_db()
+            try:
+                done = conn.execute("SELECT 1 FROM metadata WHERE key = ?",
+                                    (self._TRANSFER_PERMANENT_FLAG,)).fetchall()
+            finally:
+                conn.close()
+            if done:
+                return
+            section = self.config_data.get('import')
+            changed = isinstance(section, dict) and section.get('transfer_is_permanent') is False
+            if changed:
+                section['transfer_is_permanent'] = True
+                if not self._save_to_database(self.config_data):
+                    section['transfer_is_permanent'] = False
+                    return                          # not saved: try again next start
+            self._mark_transfer_permanent_done()
+            if changed:
+                logger.info("Music library folder is now marked your permanent library "
+                            "(it was saved as off from before that became the default)")
+        except Exception as e:
+            logger.warning(f"Could not apply the permanent-library default: {e}")
+
+    def _mark_transfer_permanent_done(self):
+        try:
+            conn = self._connect_db()
+            try:
+                conn.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES (?, '1')",
+                             (self._TRANSFER_PERMANENT_FLAG,))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"Could not record the permanent-library default as applied: {e}")
 
     def _connect_db(self) -> sqlite3.Connection:
         """Open a configured SQLite connection for the config DB.
@@ -736,11 +785,28 @@ class ConfigManager:
                 # the album in its own root folder, so a copy in the library
                 # would be a duplicate; empty = the shared transfer folder.
                 "transfer_path": "",
+                # Lidarr imports every download into its root folder, whatever
+                # the source: SoulSync's files wait in transfer_path (which
+                # Lidarr must read at the same path) and Lidarr takes them at
+                # the end of the batch. Needs transfer_path; off = SoulSync
+                # imports other sources' downloads itself.
+                "import_through_lidarr": False,
                 # Where the Lidarr source copies a track out of Lidarr's import;
                 # empty = soulseek.download_path.
                 "download_path": "",
                 # Seconds to wait for a grabbed album to finish importing.
                 "download_timeout": 21600,
+                # Seconds a grabbed album may sit in Lidarr's queue without a
+                # byte arriving before it is given up (removed from the client,
+                # blocklisted) and the next source tried; 0 = wait out
+                # download_timeout.
+                "stall_timeout": 1800,
+            },
+            # FlareSolverr (or a compatible solver) for the sites behind a
+            # browser check: EXT.to (video Fresh Releases, its search) and the
+            # Beatport scraper when blocked. core.flaresolverr reads it.
+            "flaresolverr": {
+                "url": "http://localhost:8191",
             },
             # Prowlarr — indexer aggregator. Feeds the torrent / usenet
             # download plugins. Not a standalone source.
@@ -781,6 +847,11 @@ class ConfigManager:
                 "password": "",
                 "category": "soulsync",
                 "save_path": "",
+                # #2265: Optional additional named torrent client profiles and
+                # per-library assignments (e.g. audiobooks / 4K Movies -> Deluge).
+                # Any library without an assignment uses the global client above.
+                "clients": [],
+                "library_assignments": {},
                 # qBittorrent only (#2087): start what SoulSync adds even when the
                 # client is set to add torrents stopped, or to stop them once the
                 # metadata is in. Off = the client's own setting decides.
@@ -833,6 +904,7 @@ class ConfigManager:
             },
             "acoustid": {
                 "api_key": "",
+                "user_key": "",
                 "enabled": False  # Disabled by default - requires API key and fpcalc
             },
             "lastfm": {
@@ -1294,6 +1366,7 @@ class ConfigManager:
             self.config_data = self._apply_log_level_overrides(config_data)
             # Ensure sensitive values are encrypted at rest (one-time migration)
             self._migrate_encrypt_if_needed()
+            self._migrate_transfer_permanent_on()
             return
 
         if load_error:
@@ -1335,6 +1408,9 @@ class ConfigManager:
         # Try to save defaults to database
         if self._save_to_database(config_data):
             logger.info("Default configuration saved to database")
+            # a new install starts on today's defaults: whatever it later
+            # saves is its own choice, never the old default to correct
+            self._mark_transfer_permanent_done()
         else:
             logger.warning("Could not save defaults to database - using in-memory config")
 
@@ -1515,6 +1591,20 @@ class ConfigManager:
             config = config[k]
 
         config[keys[-1]] = value
+        self._save_config()
+
+    def clear_secret(self, key: str) -> None:
+        """Blank a stored secret on purpose: a disconnect or unlink. ``set()``
+        reads an empty secret as "keep the existing one", so it can't."""
+        keys = key.split('.')
+        config = self.config_data
+        for k in keys[:-1]:
+            if not isinstance(config.get(k), dict):
+                return
+            config = config[k]
+        if config.get(keys[-1]) in (None, ''):
+            return
+        config[keys[-1]] = ''
         self._save_config()
 
     def resolve_secret(self, key: str, posted: Any) -> str:

@@ -420,23 +420,28 @@ def test_restore_goes_back_and_refreshes_write_again(mdb, tmp_path):
     row = mdb.get_mirrored_playlist(pid)
     assert row["image_url"] == "https://src/b.jpg"
     assert row["custom_cover"] is False
-    assert row["source_image_url"] is None
+    # #2281: the original stays for the next restore
+    assert row["source_image_url"] == "https://src/b.jpg"
     assert not os.path.exists(up.cover_path(pid, str(tmp_path), mkdir=False))
 
     _mirror(mdb, image="https://src/c.jpg")
     assert mdb.get_mirrored_playlist(pid)["image_url"] == "https://src/c.jpg"
 
 
-def test_user_playlist_cover_is_just_its_cover(mdb, tmp_path):
-    """a user playlist has no source to protect it from, so no custom flag:
-    the same as an uploaded cover."""
+def test_user_playlist_cover_is_marked_custom(mdb, tmp_path):
+    """#2280: every cover the user picks is marked custom, a user playlist's
+    too, so restore works the same on every playlist type. no source poster,
+    so restore goes back to none (the collage)."""
     pid = up.create_playlist(mdb, 1, "Mine")
     pl = mdb.get_mirrored_playlist(pid)
     ca.make_preview(mdb, pl, base_dir=str(tmp_path), http_get=_Http())
     url = ca.apply_preview(mdb, pl, base_dir=str(tmp_path))
     row = mdb.get_mirrored_playlist(pid)
     assert row["image_url"] == url
-    assert row["custom_cover"] is False
+    assert row["custom_cover"] is True
+    assert row["source_image_url"] is None
+    ca.restore_original(mdb, row, base_dir=str(tmp_path))
+    assert mdb.get_mirrored_playlist(pid)["image_url"] is None
 
 
 def test_apply_without_a_preview_is_refused(mdb, tmp_path):

@@ -203,10 +203,15 @@ export const DownloadIcon = () => (
   </Icon>
 );
 
+export const BookmarkIcon = ({ filled }: { filled?: boolean }) => (
+  <Icon fill={filled ? 'currentColor' : 'none'}>
+    <path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.6L6 20V5a1 1 0 0 1 1-1Z" />
+  </Icon>
+);
+
 export const WatchlistIcon = () => (
   <Icon>
     <path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.6L6 20V5a1 1 0 0 1 1-1Z" />
-    <path d="M12 8v5M9.5 10.5h5" />
   </Icon>
 );
 
@@ -269,5 +274,42 @@ export const GearIcon = () => (
     <circle cx="12" cy="12" r="3" />
     <path d="M12 2.8v2.4M12 18.8v2.4M4.2 7.5l2.1 1.2M17.7 15.3l2.1 1.2M4.2 16.5l2.1-1.2M17.7 8.7l2.1-1.2" />
     <circle cx="12" cy="12" r="7" />
+  </Icon>
+);
+
+export const PhoneIcon = () => (
+  <Icon>
+    <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+    <path d="M10.5 18.5h3" />
+  </Icon>
+);
+
+export const LaptopIcon = () => (
+  <Icon>
+    <rect x="4" y="4.5" width="16" height="11" rx="1.8" />
+    <path d="M2 19.5h20" />
+  </Icon>
+);
+
+export const SparkIcon = () => (
+  <Icon>
+    <path d="M12 3.5 13.8 9 19.5 10.5 13.8 12 12 17.5 10.2 12 4.5 10.5 10.2 9Z" />
+    <path d="M18.5 16.5 19.2 18.3 21 19 19.2 19.7 18.5 21.5 17.8 19.7 16 19 17.8 18.3Z" />
+  </Icon>
+);
+
+/** home videos: a camcorder */
+export const CamcorderIcon = () => (
+  <Icon>
+    <rect x="2.5" y="6.5" width="13" height="11" rx="2.5" />
+    <path d="m15.5 10.5 6-3.5v10l-6-3.5" />
+    <circle cx="7" cy="12" r="1.6" />
+  </Icon>
+);
+
+export const BellIcon = () => (
+  <Icon>
+    <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4S6 14 6 9" />
+    <path d="M10 19a2 2 0 0 0 4 0" />
   </Icon>
 );

@@ -151,7 +151,8 @@
         }
     </style>
     <style id="soulsync-player-boot">
-        html.ss-player-boot body { background: var(--bg-primary); }
+        html.ss-player-boot,
+        html.ss-player-boot body { background: #000000 !important; }
         /* opacity, not visibility: a child can set itself visible again (the
            manager's nav does), but nothing inside can undo its parent's opacity.
            the profile layers (a pin pad, a forgotten pin) open over the picker
@@ -160,13 +161,32 @@
             opacity: 0;
             pointer-events: none;
         }
+        html.ss-player-boot body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 46% 42% at 44% 44%, rgba(236, 72, 153, 0.16) 0%, transparent 70%),
+                radial-gradient(ellipse 48% 44% at 56% 52%, rgba(34, 211, 238, 0.16) 0%, transparent 72%);
+            pointer-events: none;
+        }
         html.ss-player-boot body::after {
             content: '';
             position: fixed;
             inset: 0;
-            background: url("{{ url_for('static', filename='trans2.png') }}") center / 72px no-repeat;
-            opacity: 0.85;
+            background: url("{{ url_for('static', filename='soulsync-mark.png') }}") center / min(230px, 48vw) no-repeat;
+            animation: ss-html-breathe 3.2s ease-in-out infinite;
             pointer-events: none;
+        }
+        @keyframes ss-html-breathe {
+            0%, 100% {
+                transform: scale(1) translateY(0);
+                filter: drop-shadow(0 0 14px rgba(236, 72, 153, 0.18)) drop-shadow(0 0 24px rgba(34, 211, 238, 0.16));
+            }
+            50% {
+                transform: scale(1.035) translateY(-5px);
+                filter: brightness(1.08) saturate(1.14) drop-shadow(0 0 24px rgba(251, 146, 60, 0.28)) drop-shadow(0 0 38px rgba(56, 189, 248, 0.28));
+            }
         }
     </style>
     <script>
@@ -369,10 +389,19 @@
                 </div>
                 <!-- the player: watch and listen, a separate app (it has "Back to SoulSync") -->
                 <a class="open-player" href="{{ request.script_root }}/player" title="Open the player" data-tour="shell.open-player">
-                    <svg class="open-player-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                        <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11.1-6.86a1 1 0 0 0 0-1.72L9.5 4.28A1 1 0 0 0 8 5.14z" />
+                    <span class="open-player-key" aria-hidden="true">
+                        <svg class="open-player-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11.1-6.86a1 1 0 0 0 0-1.72L9.5 4.28A1 1 0 0 0 8 5.14z" />
+                        </svg>
+                    </span>
+                    <span class="open-player-text">
+                        <span class="open-player-label">Open the player</span>
+                        <span class="open-player-sub">Watch and listen</span>
+                    </span>
+                    <svg class="open-player-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="9 6 15 12 9 18" />
                     </svg>
-                    <span class="open-player-label">Open the player</span>
                 </a>
                 <div id="profile-indicator" class="profile-indicator" data-tour="shell.profile" style="display: none;">
                     <!-- opens the quick switch menu (init.js toggleProfileQuickSwitch) -->
@@ -3755,6 +3784,18 @@
             </div>
             <div class="support-projects">
                 <div class="support-projects-label">My other projects</div>
+                <a href="https://github.com/Nezreka/soulsync-mobile-app" target="_blank" rel="noopener" class="support-project">
+                    <span class="support-project-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3"/><path d="M10.6 8.4v5.2l4.2-2.6z"/>
+                        </svg>
+                    </span>
+                    <span class="support-project-text">
+                        <span class="support-project-name">SoulSync Player app</span>
+                        <span class="support-project-desc">Your server's movies, TV, music and more on Android phones, tablets and TV.</span>
+                    </span>
+                    <span class="support-project-go" aria-hidden="true">&#8599;</span>
+                </a>
                 <a href="https://github.com/Nezreka/MetaSync" target="_blank" rel="noopener" class="support-project">
                     <span class="support-project-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">

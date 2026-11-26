@@ -71,6 +71,23 @@ def test_resolves_by_source_track_id_not_position():
     assert out["id"] == "sp_a"
 
 
+def test_readd_distinguishes_playlist_versions_with_the_same_catalogue_id():
+    clean = {**_full("catalogue"), "source_track_id": "303656585"}
+    explicit = {**_full("catalogue"), "source_track_id": "303658687"}
+    row = {**_tr(0, "catalogue"), "playlist_track_id": "303656585"}
+
+    assert reconstruct_sync_track_data([row], [explicit, clean], 0) == clean
+    assert build_original_tracks_map([explicit, clean])["303658687"] == explicit
+
+def test_legacy_history_recovers_a_native_id_only_when_unambiguous():
+    clean = {**_full("catalogue"), "source_track_id": "303656585"}
+    explicit = {**_full("catalogue"), "source_track_id": "303658687"}
+    rows = [_tr(0, "catalogue")]
+
+    assert reconstruct_sync_track_data(rows, [clean], 0) == clean
+    assert "source_track_id" not in reconstruct_sync_track_data(rows, [clean, explicit], 0)
+
+
 def test_fallback_rebuilds_with_cover_when_track_missing():
     # Track not in tracks_json -> rebuild from the row, seed cover from image_url,
     # run through the same normalizer (album dict + artists dicts).

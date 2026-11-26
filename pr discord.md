@@ -1,19 +1,29 @@
-**SoulSync 3.6.9 is out** :musical_note:
+**SoulSync 3.7.0 is out** :musical_note:
 
-**Heads up.** The auth proxy header is now ignored until you add your proxy's address under Settings > System > Security > Trusted proxy addresses. Until then people get the PIN screen.
+**SoulSync now has its own player.** Your movies, TV, music, YouTube, audiobooks, podcasts and live guide, straight from your server, like a Plex or Jellyfin player. Open it with **Open the player** at the top of the sidebar. The first time, an admin runs a short setup: name the server, sort folders into libraries (4K, Kids, Anime) and choose who sees what. Every profile arranges its own rows.
 
-**The player.** Open the player from the sidebar and everything you own plays in one full-screen app: music, movies, TV, YouTube, audiobooks and podcasts. A home each profile arranges, a TV guide of channels made from your library, SoulSync's own playlists with Get what you don't have, transcoding for files a browser can't play, synced lyrics, watching now and a watchlist.
+**The app.** The player on Android phones, tablets and TV, with offline downloads. Pair it by scanning the QR in Settings, Devices.
+Repo: <https://github.com/Nezreka/soulsync-mobile-app>
+APK: <https://github.com/Nezreka/soulsync-mobile-app/releases/latest>
 
-**Settings, rebuilt.** Nine tabs with pills, side sheets for every source and service, one search over every label, and a save status that says what's holding a save.
+**Notifications.** New episodes, good new films, requests and more, per profile, with quiet hours.
 
-**Music apps.** Any Subsonic or OpenSubsonic app can play from SoulSync as one profile, with conversion for mobile data. Pair it from the new Settings > Devices.
+**Skip intro, parties and casting.** Skip intro from the file's chapters, watch parties, and Chromecast that plays anything.
 
-**Folder watching.** Off by default. Turn it on in Settings > Library > Folders: local disks are watched live, network shares on a timer.
+**Video without a media server.** SoulSync Standalone scans your movie and TV folders itself, and Plex and Jellyfin can run as one library.
 
-**Library and listening.** A coverage check for your media server's folders, Spotify history import, your own plays on every artist page, a full Discover for new profiles, Your Year extras, blends that need consent and filled tags.
+**Backups.** One Backups page, every database covered, a restore that checks first, and a repair for a damaged database. "Keep 5" keeping only one is fixed.
 
-**Downloads.** Downloads wait out a lost Soulseek login, near-misses clear themselves, and Lidarr gets album requests as one album (thanks savemosca, #2219, #2225, #2226).
+**Requests and people.** A playlist's songs are one request (#2302) and members can ask for a feature (#2304).
 
-**Fixes.** Releases stay whole under their first artist (thanks Ericsson, #2239, #2240), manual search for TV shows (thanks Thibs, #2233), the move a track dialog (thanks Vidariondr, #2241), dead files and playlist readback (thanks carlosjfcasero), the download chain and streaming imports (thanks PfannkuchenWolf), Greek and Cyrillic names (thanks selimovd), big wishlists (thanks xcrittpm), and more. First loads are about 3 MB instead of 16.
+**Playlists.** Search public playlists by name (#2305), sync several at once with or without downloading (#2309), and songs only YouTube has download from their own video (#2306).
+
+**Search.** Identify a song by listening (thanks Jygijiji).
+
+**Downloads.** Four ways a download could lose a file are closed, and deep verify can catch fake lossless (off by default).
+
+**Extension 0.3.0.** Faster, more accurate badges: <https://github.com/Nezreka/soulsync-extension/releases/tag/v0.3.0>
+
+**Thanks** to savemosca, EffakT, PapaBearDoes, TaunGadd, jonjomckay, adityaanikam and Jygijiji for their PRs.
 
 Full notes on GitHub.

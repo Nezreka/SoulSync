@@ -179,3 +179,43 @@ def test_quality_first_uses_peer_signal_only_within_same_target_tier():
     assert [r.name for r in order_candidates(
         [slow, high, fast], quality_first=True, targets=TARGETS,
     )] == ['high', 'fast', 'slow']
+
+
+# ── a fallback pool is ordered by quality, then peer ────────────────────────
+
+class _Peer(_Cand):
+    def __init__(self, name, aq, username, **kw):
+        super().__init__(name, aq, **kw)
+        self.username = username
+        self.filename = f"{username}\\\\Album\\\\{name}.x"
+
+
+def test_in_a_fallback_pool_the_better_file_leads_whatever_the_peer(monkeypatch):
+    """a FLAC-24 profile with fallback on: nothing meets it. an MP3 128 from
+    a peer with a free slot was downloaded ahead of a FLAC 16 from a busy
+    one, and kept."""
+    hi_only = [QualityTarget(label='FLAC 24', format='flac', bit_depth=24, min_sample_rate=96000)]
+    mp3 = _Peer('mp3-128', AudioQuality('mp3', bitrate=128), 'idle_peer', confidence=0.90,
+                free_upload_slots=5, queue_length=0, upload_speed=5_000_000)
+    flac = _Peer('flac-16', FLAC_CD, 'busy_peer', confidence=0.90,
+                 free_upload_slots=0, queue_length=40, upload_speed=100_000)
+    ordered = order_candidates([mp3, flac], quality_first=False, targets=hi_only)
+    assert [c.name for c in ordered] == ['flac-16', 'mp3-128']
+
+
+def test_among_files_the_profile_asked_for_the_peer_still_decides():
+    idle = _Peer('cd-idle', FLAC_CD, 'idle_peer', confidence=0.90,
+                 free_upload_slots=5, queue_length=0, upload_speed=5_000_000)
+    busy = _Peer('hi-busy', FLAC_HI, 'busy_peer', confidence=0.90,
+                 free_upload_slots=0, queue_length=40, upload_speed=100_000)
+    ordered = order_candidates([busy, idle], quality_first=False, targets=TARGETS)
+    assert ordered[0].name == 'cd-idle'
+
+
+def test_a_file_the_profile_asked_for_leads_a_fallback_one():
+    hi_only = [QualityTarget(label='FLAC 24', format='flac', bit_depth=24, min_sample_rate=96000)]
+    wanted = _Peer('hi-busy', FLAC_HI, 'busy_peer', confidence=0.90,
+                   free_upload_slots=0, queue_length=40, upload_speed=100_000)
+    other = _Peer('mp3-idle', AudioQuality('mp3', bitrate=320), 'idle_peer', confidence=0.90,
+                  free_upload_slots=5, queue_length=0, upload_speed=5_000_000)
+    assert order_candidates([other, wanted], quality_first=False, targets=hi_only)[0].name == 'hi-busy'

@@ -7,6 +7,8 @@ browser). Falls back to 404 so the frontend shows its placeholder.
 
 from __future__ import annotations
 
+from core.connect.device_access import device_playback
+
 from flask import Response, abort, request, send_file
 from werkzeug.exceptions import HTTPException
 
@@ -45,6 +47,29 @@ def _cached_file(url):
         return None
 
 
+_ART_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def _local_art(path):
+    """a local artwork file safe to serve: an image, inside one of the video
+    library folders. anything else (a path the db was made to hold that
+    points at some other file on the machine) is refused. None when not."""
+    import os
+    try:
+        from core.video.library_roots import library_roots
+        from . import get_video_db
+        real = os.path.realpath(str(path or ""))
+        if not real.lower().endswith(_ART_EXTS) or not os.path.isfile(real):
+            return None
+        for root in library_roots(get_video_db()):
+            base = os.path.realpath(str(root))
+            if os.path.normcase(real).startswith(os.path.normcase(base).rstrip("\\/") + os.sep):
+                return real
+    except Exception:   # noqa: BLE001 - unreadable: not served
+        logger.debug("local art refused for %s", path, exc_info=True)
+    return None
+
+
 def _tmdb_resize(url, w, backdrop):
     """Rewrite a TMDB image URL's size segment (/t/p/<size>/...) to a bucket near
     ``w`` so episode stills load small. Best-effort — unchanged if it doesn't match."""
@@ -72,6 +97,15 @@ def register_routes(bp):
             w = _req_width()
             backdrop = art == "backdrop"
             path = ref["poster_url"]
+            if path.startswith("local:"):
+                # the poster.jpg in the title's own folder, found by soulsync's
+                # folder scan (core/video/disk_source.py)
+                local = _local_art(path[len("local:"):])
+                if local is None:
+                    abort(404)
+                resp = send_file(local, conditional=True)
+                resp.headers["Cache-Control"] = "public, max-age=60, must-revalidate"
+                return resp
             # Enrichment can store a full external URL (e.g. a TMDB season poster) —
             # stream it directly; otherwise it's a server path needing the token.
             if path.startswith("http://") or path.startswith("https://"):
@@ -87,7 +121,7 @@ def register_routes(bp):
                 cached = _cached_file(path)
                 if cached is not None:
                     resp = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
-                    resp.headers["Cache-Control"] = "public, max-age=86400"
+                    resp.headers["Cache-Control"] = "public, max-age=60, must-revalidate"
                     resp.headers["X-SoulSync-Image-Cache"] = cached.status
                     return resp
                 upstream = requests.get(path, timeout=15, stream=True)
@@ -95,7 +129,7 @@ def register_routes(bp):
                     abort(404)
                 resp = Response(upstream.iter_content(8192),
                                 content_type=upstream.headers.get("Content-Type", "image/jpeg"))
-                resp.headers["Cache-Control"] = "public, max-age=86400"
+                resp.headers["Cache-Control"] = "public, max-age=60, must-revalidate"
                 return resp
             # Art is served from the VIDEO side's effective connection (its own
             # creds, or inherited from music) — that's where the item was scanned.
@@ -156,7 +190,7 @@ def register_routes(bp):
             cached = _cached_file(full_url)
             if cached is not None:
                 resp = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
-                resp.headers["Cache-Control"] = "public, max-age=86400"
+                resp.headers["Cache-Control"] = "public, max-age=60, must-revalidate"
                 resp.headers["X-SoulSync-Image-Cache"] = cached.status
                 return resp
 
@@ -167,21 +201,24 @@ def register_routes(bp):
                 abort(404)
             ctype = upstream.headers.get("Content-Type", "image/jpeg")
             resp = Response(upstream.iter_content(8192), content_type=ctype)
-            resp.headers["Cache-Control"] = "public, max-age=86400"
+            resp.headers["Cache-Control"] = "public, max-age=60, must-revalidate"
             return resp
         except Exception:
             logger.exception("video %s proxy failed for %s/%s", art, kind, item_id)
             abort(404)
 
     @bp.route("/poster/<kind>/<int:item_id>", methods=["GET"])
+    @device_playback
     def video_poster(kind, item_id):
         return _stream_art(kind, item_id, "poster")
 
     @bp.route("/backdrop/<kind>/<int:item_id>", methods=["GET"])
+    @device_playback
     def video_backdrop(kind, item_id):
         return _stream_art(kind, item_id, "backdrop")
 
     @bp.route("/img", methods=["GET"])
+    @device_playback
     def video_img_proxy():
         """Same-origin image proxy (SSRF-safe allowlist). TMDB for accent-sampling,
         YouTube CDN (avatars/banners/thumbnails) so channel art loads reliably

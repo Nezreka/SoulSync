@@ -72,6 +72,15 @@ def _file_facts(path: str) -> Tuple[float, Tuple[Tuple[float, str], ...]]:
     return _read(path, st.st_size, st.st_mtime)
 
 
+# how many chapters a book had when it was last played, by its files (the
+# info sheet reads this and never opens a file)
+_chapter_counts: Dict[Tuple[str, ...], int] = {}
+
+
+def known_chapters(paths: List[str]) -> Optional[int]:
+    return _chapter_counts.get(tuple(paths))
+
+
 def timeline(paths: List[str]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], float]:
     """the parts and chapters of a book made of these files, in order"""
     parts: List[Dict[str, Any]] = []
@@ -89,6 +98,9 @@ def timeline(paths: List[str]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any
             stem = os.path.splitext(os.path.basename(path))[0]
             chapters.append({"start": round(at, 3), "title": stem, "part": index, "offset": 0.0})
         at += length
+    if len(_chapter_counts) > 2000:
+        _chapter_counts.clear()
+    _chapter_counts[tuple(paths)] = len(chapters)
     return parts, chapters, at
 
 

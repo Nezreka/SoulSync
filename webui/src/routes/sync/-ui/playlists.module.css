@@ -719,6 +719,115 @@ opened from Add) ---------- */
   max-width: calc(100vw - 32px);
   flex-wrap: wrap;
 }
+/* #2320: the run's pill in the header, which brings the panel back */
+.bulkPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.bulkPill[data-state='done'] {
+  border-color: var(--white-a15);
+  background: none;
+}
+.bulkPill:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+/* #2309: the selection syncing in turn, above the bar */
+.bulkPanel {
+  position: fixed;
+  z-index: var(--z-modal);
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  width: min(460px, calc(100vw - 32px));
+  max-height: 46vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  border: 1px solid var(--white-a10);
+  box-shadow: 0 16px 48px var(--black-a50);
+  overflow: hidden;
+}
+.bulkHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--white-a08);
+  color: var(--text-1);
+}
+.bulkHead b {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+}
+.bulkBtn {
+  flex: none;
+  padding: 6px 12px;
+  border: 1px solid var(--white-a15);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bulkBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.bulkList {
+  margin: 0;
+  padding: 6px 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.bulkList li {
+  display: flex;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.bulkName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+.bulkState {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bulkList li[data-state='running'] .bulkState {
+  color: var(--accent-light);
+}
+.bulkList li[data-state='done'] .bulkState {
+  color: var(--success);
+}
+.bulkList li[data-state='failed'] .bulkState {
+  color: var(--danger);
+}
+
 .selbar b {
   margin-right: 10px;
 }
@@ -1020,6 +1129,99 @@ select.field {
 }
 .hintBad {
   color: var(--warning-strong);
+}
+/* public playlists found by name (#2305) */
+.found {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  display: grid;
+  gap: 4px;
+}
+.foundRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--white-a04);
+  color: var(--text-1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.foundRow:hover,
+.foundRow:focus-visible {
+  background: var(--white-a10);
+}
+.foundArt {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--white-a10);
+  object-fit: cover;
+}
+.foundText {
+  flex: 1;
+  min-width: 0;
+}
+.foundFilter {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+.foundPill {
+  padding: 4px 12px;
+  border: 1px solid var(--white-a15);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.foundPill[aria-pressed='true'] {
+  border-color: var(--accent-light);
+  color: var(--accent-light);
+}
+.foundLook {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.foundSongs {
+  margin: 0;
+  padding-left: 22px;
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 13px;
+  color: var(--text-1);
+}
+.foundActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.foundBack {
+  padding: 0 14px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--white-a10);
+  color: var(--text-1);
+  font: inherit;
+  cursor: pointer;
+}
+.foundSource {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  opacity: 0.8;
 }
 .tiles {
   display: grid;

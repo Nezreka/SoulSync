@@ -4,7 +4,15 @@
  * its turn, so a queue of a hundred tracks costs nothing up front.
  */
 
-export type ItemType = 'track' | 'movie' | 'episode' | 'youtube' | 'audiobook' | 'podcast_episode';
+export type ItemType =
+  | 'track'
+  | 'movie'
+  | 'episode'
+  | 'youtube'
+  | 'home'
+  | 'audiobook'
+  | 'podcast_episode'
+  | 'commercial';
 
 export type MediaKind = 'audio' | 'video';
 
@@ -40,6 +48,8 @@ export const MEDIA_KIND: Record<ItemType, MediaKind> = {
   movie: 'video',
   episode: 'video',
   youtube: 'video',
+  home: 'video',
+  commercial: 'video',
 };
 
 /** long-form things: speed, chapters, skip buttons, a sleep timer, and saved progress */

@@ -40,6 +40,7 @@ import { ActivityModal, type ActivityTab } from './activity-modal';
 import { AddPlaylistSheet } from './add-playlist-sheet';
 import { AutoSyncModal } from './autosync-modal';
 import { BeatportTab } from './beatport-tab';
+import { BulkRunHost } from './bulk-run-host';
 import { ImportFileTab } from './import-file-tab';
 import { LastfmSyncTab } from './lastfm-sync-tab';
 import { ListenBrainzSyncTab } from './lb-sync-tab';
@@ -402,6 +403,7 @@ export function SyncPage() {
         onAutoSync={() => setAutoSyncOpen(true)}
         onActivity={() => setActivityOpen(true)}
         registerOpenTab={registerOpenTab}
+        status={<BulkRunHost onFinished={() => page.reloadMirrored()} />}
       />
 
       <SyncModals

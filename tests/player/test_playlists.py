@@ -179,3 +179,38 @@ def test_a_manual_match_is_trusted_whatever_its_title(mdb, lib):
     _stamp(mdb, pid, position, lib["Geyser"], "lib2")
     out = P.detail(mdb, 1, pid, scope="shared", hide_explicit=False)
     assert out["songs"][0]["track_id"] == lib["Geyser"]
+
+
+def test_a_featured_credit_counts_and_a_name_inside_another_does_not(mdb, lib):
+    """credits come from lib2_track_artists (indexed). the old LIKE on the
+    track artist string scanned every track and matched "U2" inside other
+    names"""
+    with mdb._get_connection() as conn:
+        u2 = conn.execute("INSERT INTO lib2_artists (name) VALUES ('U2')").lastrowid
+        other = conn.execute("INSERT INTO lib2_artists (name) VALUES ('Someone')").lastrowid
+        al = conn.execute("INSERT INTO lib2_albums (primary_artist_id, title) VALUES (?, 'Other')",
+                          (other,)).lastrowid
+        feat = conn.execute("INSERT INTO lib2_tracks (album_id, title, duration, track_artist) "
+                            "VALUES (?, 'With U2', 1, 'Someone feat. U2')", (al,)).lastrowid
+        fake = conn.execute("INSERT INTO lib2_tracks (album_id, title, duration, track_artist) "
+                            "VALUES (?, 'Not them', 1, 'MU2SIC')", (al,)).lastrowid
+        for tid in (feat, fake):
+            conn.execute("INSERT INTO lib2_track_files (track_id, path, format, is_primary, file_state) "
+                         "VALUES (?, ?, 'flac', 1, 'active')", (tid, f"/m/{tid}.flac"))
+        conn.execute("INSERT INTO lib2_track_artists (track_id, artist_id, role) VALUES (?, ?, 'featured')",
+                     (feat, u2))
+        conn.commit()
+        top = P.top_tracks(conn, u2, scope="shared", hide_explicit=False)
+    assert [t["title"] for t in top] == ["With U2"]
+
+
+def test_the_lobby_picks_an_owned_track_without_sorting_the_library(mdb, lib, monkeypatch):
+    import api.player as player_api
+    seen = set()
+    for _ in range(40):
+        pick = player_api._pick_default_lobby_track()
+        assert pick is not None
+        seen.add(int(pick["track_id"]))
+    # only tracks with a file; "Gone" has none
+    assert seen <= {lib["Geyser"], lib["Nobody"]}
+    assert lib["Gone"] not in seen

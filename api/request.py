@@ -140,8 +140,8 @@ def _notify_async(req):
     global _notify_pool
     with _watcher_lock:
         if _notify_pool is None:
-            from concurrent.futures import ThreadPoolExecutor
-            _notify_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="api-request-notify")
+            from core.idle_executor import IdleThreadPool
+            _notify_pool = IdleThreadPool(max_workers=4, thread_name_prefix="api-request-notify")
         pool = _notify_pool
     try:
         pool.submit(_notify, req)

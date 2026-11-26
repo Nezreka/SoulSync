@@ -129,6 +129,10 @@ def similarity_from_rank(rank: object, max_rank: int = 10) -> float:
     return round((max_rank - r + 1) / max_rank, 4)
 
 
+# how far the seed weights lean on this month over all time: with the default
+# recency_factor of 1.5, recent is 1.5 / (1.5 + 0.8), about two thirds
+RECENT_LEAN = 0.8
+
 # most artists favourites alone may add as seeds (ones you also play are
 # always lifted)
 MAX_FAVORITE_ONLY_SEEDS = 25
@@ -141,28 +145,68 @@ def build_recency_weighted_seeds(
     recency_factor: float = 1.5,
     favorites: Optional[Dict[str, float]] = None,
 ) -> List[dict]:
-    """Blend lifetime + recent play counts into seed weights — "what you're into NOW".
+    """Seed weights from what you play: "what you're into NOW", then the rest.
 
-    ``weight = lifetime_plays + recency_factor × recent_plays``. An artist you've played a
-    lot *recently* outranks one you played a lot years ago, so the recommendations track
-    your current taste instead of your all-time history. ``recency_factor`` is the dial
-    (0 = pure lifetime). Returns ``[{'name', 'weight'}]`` for :func:`rank_recommended_artists`.
-    Pure — the caller supplies both play-count maps from the listening history.
+    The first version was ``lifetime_plays + 1.5 x plays_in_the_last_30_days``,
+    and three things were wrong with it for anyone with years of history:
+
+    * lifetime swamped recent. 4,000 plays of a band since 2019 against 60 of
+      the artist you found this month is 4,000 against 90;
+    * an artist you play ONLY recently wasn't a seed at all: the recent counts
+      were looked up for the lifetime list's names and the rest thrown away;
+    * the weight grew with the raw play count, and a recommendation's score is
+      the sum of seed weight x similarity, so the three most played artists
+      decided nearly everything ("it recommended me songs from the 3 artists I
+      have the most listens on").
+
+    Now each artist gets two shares, 0 to 1: of your most played artist ever,
+    and of your most played artist this month. Each is taken at its square
+    root, so ten times the plays is about three times the pull, not ten. The
+    weight is a blend that leans on the recent share (``recency_factor`` sets
+    how far: 1.5 is about two thirds recent, 0 is lifetime only and leaves the
+    given weights exactly as they are). Every artist in ``recent_play_counts``
+    is a seed, on the lifetime list or not.
+
+    Returns ``[{'name', 'weight'}]`` for :func:`rank_recommended_artists`,
+    weights on a 0 to 100 scale. Pure: the caller supplies both maps.
 
     ``favorites`` is ``{artist name: units}`` from what you said you love (Liked
     Songs, server stars, the Watchlist; core.discovery.favorite_seeds). A unit
     weighs the median of your play seeds, so a liked artist sits among the
     artists you play, and one you never played still becomes a seed.
     """
-    recent = {_norm(k): _positive_float(v, 0.0) for k, v in (recent_play_counts or {}).items()}
+    recent: Dict[str, float] = {}
+    recent_names: Dict[str, str] = {}
+    for key, value in (recent_play_counts or {}).items():
+        norm = _norm(key)
+        if norm:
+            recent[norm] = recent.get(norm, 0.0) + _positive_float(value, 0.0)
+            recent_names.setdefault(norm, str(key).strip())
     out: List[dict] = []
+    lifetime_of: Dict[str, float] = {}
     for a in top_artists or ():
         name = str(a.get("name") or "").strip()
         if not name:
             continue
         lifetime = _positive_float(a.get("play_count", a.get("weight", 1.0)))
-        boost = recency_factor * recent.get(_norm(name), 0.0)
-        out.append({"name": name, "weight": lifetime + boost})
+        lifetime_of[_norm(name)] = lifetime
+        out.append({"name": name, "weight": lifetime})
+    if recency_factor and recency_factor > 0:
+        # an artist of this month alone is a seed too
+        for norm, plays in recent.items():
+            if plays > 0 and norm not in lifetime_of:
+                lifetime_of[norm] = 0.0
+                out.append({"name": recent_names[norm], "weight": 0.0})
+        top_lifetime = max(lifetime_of.values(), default=0.0) or 1.0
+        top_recent = max(recent.values(), default=0.0)
+        recent_part = (recency_factor / (recency_factor + RECENT_LEAN)) if top_recent > 0 else 0.0
+        for seed in out:
+            norm = _norm(seed["name"])
+            lifetime_share = (lifetime_of.get(norm, 0.0) / top_lifetime) ** 0.5
+            recent_share = (recent.get(norm, 0.0) / top_recent) ** 0.5 if top_recent > 0 else 0.0
+            seed["weight"] = round(
+                100.0 * ((1.0 - recent_part) * lifetime_share + recent_part * recent_share), 4)
+        out = [seed for seed in out if seed["weight"] > 0]
     if favorites:
         from core.discovery.favorite_seeds import seed_unit
         unit = seed_unit(s["weight"] for s in out)

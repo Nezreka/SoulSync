@@ -1,0 +1,160 @@
+/* the More menu: one list of actions for a card, a row or a page, opened by
+   right-click, a long press or the ⋯ button */
+
+.menu {
+  position: fixed;
+  box-sizing: border-box;
+  padding: calc(var(--u) * 0.4);
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-lg);
+  background: var(--pl-panel-solid);
+  box-shadow: 0 calc(var(--u) * 1.5) calc(var(--u) * 4) var(--black-a60);
+  color: var(--pl-text);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.7);
+  margin-bottom: calc(var(--u) * 0.3);
+  padding: calc(var(--u) * 0.5) calc(var(--u) * 0.6) calc(var(--u) * 0.7);
+  border-bottom: 1px solid var(--white-a08);
+}
+
+.headArt {
+  flex: none;
+  width: calc(var(--u) * 2.6);
+  height: calc(var(--u) * 2.6);
+  border-radius: var(--radius-sm);
+  background: var(--white-a06);
+  object-fit: cover;
+}
+
+.headText {
+  flex: 1;
+  min-width: 0;
+}
+
+.headTitle,
+.headSub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headTitle {
+  font-size: calc(var(--u) * 0.93);
+  font-weight: 700;
+}
+
+.headSub {
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.8);
+}
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.7);
+  width: 100%;
+  min-height: calc(var(--u) * 2.6);
+  padding: 0 calc(var(--u) * 0.8);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--pl-text);
+  font: inherit;
+  font-size: calc(var(--u) * 0.93);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover,
+.item:focus-visible {
+  outline: none;
+  background: var(--white-a10);
+}
+
+.item[data-tone='accent'] {
+  color: var(--accent-light);
+  font-weight: 600;
+}
+
+.item[data-tone='danger'] {
+  color: var(--danger-light);
+}
+
+.glyph {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 1.2);
+  color: var(--pl-text-2);
+}
+
+.item[data-tone] .glyph {
+  color: inherit;
+}
+
+.busy {
+  padding: calc(var(--u) * 0.7) calc(var(--u) * 0.8);
+  color: var(--accent-light);
+  font-size: calc(var(--u) * 0.88);
+  font-weight: 600;
+}
+
+.note {
+  margin-top: calc(var(--u) * 0.4);
+  padding: calc(var(--u) * 0.4) calc(var(--u) * 0.7);
+  border-radius: var(--radius-md);
+  background: var(--white-a06);
+  color: var(--danger-light);
+  font-size: calc(var(--u) * 0.8);
+}
+
+/* the ⋯ button on a row */
+.more {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 2);
+  height: calc(var(--u) * 2);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: none;
+  color: var(--pl-text-2);
+  cursor: pointer;
+}
+
+.more:hover,
+.more:focus-visible,
+.more[aria-expanded='true'] {
+  background: var(--white-a10);
+  color: var(--pl-text);
+}
+
+.more svg {
+  width: calc(var(--u) * 1.15);
+  height: calc(var(--u) * 1.15);
+}
+
+/* the ⋯ button at the end of a page's hero buttons: as tall as they are,
+   square (doubled to beat the hero's own .btn padding) */
+.moreHero.moreHero {
+  justify-content: center;
+  aspect-ratio: 1;
+  padding: 0;
+}
+
+.moreHero svg {
+  width: calc(var(--u) * 1.2);
+  height: calc(var(--u) * 1.2);
+}

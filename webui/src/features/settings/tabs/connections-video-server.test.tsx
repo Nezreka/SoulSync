@@ -107,7 +107,7 @@ describe('the video media server', () => {
     // one heading: the old group's own "Server Connection" heading went
     expect(container.querySelectorAll('h3')).toHaveLength(0);
     const radios = [...container.querySelectorAll('[role="radio"]')];
-    expect(radios.map((r) => r.textContent)).toEqual(['Plex', 'Jellyfin']);
+    expect(radios.map((r) => r.textContent)).toEqual(['Plex', 'Jellyfin', 'Standalone']);
     expect(q('[data-video-server-toggle="jellyfin"]').getAttribute('aria-checked')).toBe('true');
     fireEvent.click(
       [...container.querySelectorAll('button')].find(
@@ -179,6 +179,84 @@ describe('the video media server', () => {
     );
   });
 
+  it('Standalone: no server to test or configure, no libraries to pick, and it says what it does', async () => {
+    const { container } = render(<VideoServerConnection />);
+    await shown();
+    fireEvent.click(q('[data-video-server-toggle="soulsync"]'));
+    await waitFor(() => expect(posts('/api/video/server')).toEqual([{ server: 'soulsync' }]));
+    expect(q('[data-video-server-toggle="soulsync"]').getAttribute('aria-checked')).toBe('true');
+    expect(shell.showToast).toHaveBeenCalledWith(
+      'Video library set to Standalone: SoulSync scans your folders',
+      'success',
+    );
+    expect(document.querySelector('[data-video-lib-select]')).toBeNull();
+    expect(q<HTMLElement>('[data-video-standalone]').textContent).toMatch(
+      /scans your Movies and TV folders/,
+    );
+    const btn = (label: string) =>
+      [...container.querySelectorAll('button')].find((b) => b.textContent === label)!;
+    expect(btn('Test server').disabled).toBe(true);
+    expect(btn('View configuration').disabled).toBe(true);
+    expect(document.querySelector('[data-testid="state"]')!.textContent).toBe(
+      'ok: no media server',
+    );
+    // and back: the libraries return
+    fireEvent.click(q('[data-video-server-toggle="plex"]'));
+    await waitFor(() =>
+      expect(document.querySelector('[data-video-lib-select="tv"]')).not.toBeNull(),
+    );
+  });
+
+  it('with both servers connected: a switch to keep them in step, its state in words, Link now', async () => {
+    answers['GET /api/video/server/links'] = {
+      success: true,
+      enabled: false,
+      other: 'plex',
+      movies: 0,
+      movies_total: 8929,
+      shows: 0,
+      shows_total: 3482,
+      last: { state: 'idle' },
+    };
+    answers['POST /api/video/server/links'] = {
+      success: true,
+      started: true,
+      enabled: true,
+      other: 'plex',
+      movies: 8812,
+      movies_total: 8929,
+      shows: 3400,
+      shows_total: 3482,
+      last: { state: 'done' },
+    };
+    render(<VideoServerConnection />);
+    await shown();
+    await waitFor(() =>
+      expect(q<HTMLElement>('[data-video-links-status]').textContent).toBe(
+        'Off. Plex is connected too.',
+      ),
+    );
+    expect(q<HTMLButtonElement>('[data-video-links-run]').disabled).toBe(true);
+    fireEvent.click(q('[data-video-links-switch]'));
+    await waitFor(() => expect(posts('/api/video/server/links')).toEqual([{ enabled: true }]));
+    await waitFor(() =>
+      expect(q<HTMLElement>('[data-video-links-status]').textContent).toBe(
+        '8,812 of 8,929 movies and 3,400 of 3,482 shows are on Plex too.',
+      ),
+    );
+    fireEvent.click(q('[data-video-links-run]'));
+    await waitFor(() =>
+      expect(posts('/api/video/server/links')).toEqual([{ enabled: true }, { run: true }]),
+    );
+  });
+
+  it('one server: nothing to link, no row', async () => {
+    answers['GET /api/video/server/links'] = { success: true, enabled: false, other: null };
+    render(<VideoServerConnection />);
+    await shown();
+    expect(document.querySelector('[data-video-links-switch]')).toBeNull();
+  });
+
   it('Test saves quietly first, then says what the server said', async () => {
     answers['POST /api/video/server-config/test'] = { success: false, error: 'refused' };
     render(<VideoServerConnection />);
@@ -218,6 +296,7 @@ describe('the video media server', () => {
     await waitFor(() => expect(posts('/api/video/libraries')).toHaveLength(1));
     expect(posts('/api/video/libraries')[0]).toEqual({
       movies: 'Movies',
+      movies_more: [],
       tv: 'TV',
       tv_more: ['Anime', 'Kids TV'],
       anime: ['Anime', 'TV'],
@@ -230,6 +309,7 @@ describe('the video media server', () => {
     await waitFor(() => expect(posts('/api/video/libraries')).toHaveLength(2));
     expect(posts('/api/video/libraries')[1]).toEqual({
       movies: 'Movies',
+      movies_more: [],
       tv: 'Kids TV',
       tv_more: ['Anime'],
       anime: ['TV', 'Anime'],
@@ -273,5 +353,19 @@ describe('the video media server', () => {
       'Add the server URL to finish this connection.',
     );
     expect(connNote('plex', true, true, false)).toBe('Custom video connection.');
+  });
+});
+
+describe('the note under a half-filled video connection', () => {
+  it('says music’s connection is in use instead of not set up', async () => {
+    const { connNote } = await import('./video-server');
+    expect(connNote('plex', true, false, false, true)).toBe(
+      'Using your music Plex connection until this one has both a server URL and a token.',
+    );
+    // without a working music connection it still asks for the token
+    expect(connNote('plex', true, false, false, false)).toBe(
+      'Add the token to finish this connection.',
+    );
+    expect(connNote('plex', false, false, true, true)).toMatch(/^Not connected/);
   });
 });

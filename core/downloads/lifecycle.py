@@ -131,7 +131,7 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
     if not staging_root or not transfer_dir or not os.path.isdir(staging_root):
         return True
     try:
-        from core.downloads.atomic_album_publish import publish_album_batch, to_final_path
+        from core.downloads.atomic_album_publish import to_final_path
         from core.imports.file_ops import safe_move_file
         from database.music_database import MusicDatabase
 
@@ -144,7 +144,15 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
         from core.downloads.atomic_recovery import make_db_path_updater
         _db_update = make_db_path_updater(db)
 
-        result = publish_album_batch(staging_root, transfer_dir, safe_move_file, _db_update)
+        # never on top of a file that reached the album's folder while this
+        # batch was downloading (core/downloads/atomic_recovery.py)
+        from core.downloads.atomic_recovery import publish_without_overwriting
+        result = publish_without_overwriting(staging_root, transfer_dir, safe_move_file, _db_update)
+        if result.get('superseded'):
+            logger.warning(
+                "[Atomic Publish] Batch %s: %d track(s) were already in the library; those "
+                "staged copies went to the recycle bin and the library's files were kept",
+                batch_id, result['superseded'])
 
         # Remap the consistency roster (staged -> final) so the album-consistency
         # pass later in this block operates on the now-published files.
@@ -1073,6 +1081,15 @@ def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: Lifecyc
         # missing song): the file still has to join whatever album is
         # already in its folder, or navidrome shows two albums
         _adopt_loose_tracks(_cons_files, cons_tag, batch.get('album_context'))
+
+    # LIDARR HANDOFF (lidarr_download.import_through_lidarr): Lidarr imports
+    # the batch into the library. Last, because it identifies each file by the
+    # album tags the consistency pass above has just made agree.
+    try:
+        from core.downloads.lidarr_handoff import hand_batch_to_lidarr
+        hand_batch_to_lidarr(batch_id, batch, tasks_snapshot)
+    except Exception as _handoff_err:  # noqa: BLE001 — the batch is already complete
+        logger.warning(f"{tag} Lidarr handoff failed (files stay in the Lidarr imports folder): {_handoff_err}")
 
 
 def on_download_completed(batch_id: str, task_id: str, success: bool, deps: LifecycleDeps) -> None:

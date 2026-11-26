@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 
 import type { BrowseTab } from '../-lib/video';
 import type { YtVideo } from '../-player.types';
@@ -24,6 +24,7 @@ import {
   styles as s,
 } from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
+import { usePageRows } from '../-ui/page-rows';
 import { openVideoFrom, useYoutubePlay } from '../-ui/playback/youtube';
 import { useSections } from '../-ui/sections';
 import { useYoutubeWatchlistActions } from '../-ui/watchlist';
@@ -72,6 +73,17 @@ function categoryRails(videos: YtVideo[]) {
   ].filter((r) => r.videos.length >= 3);
 }
 
+/** the rows the page shows before its layout has loaded: the defaults that are on */
+const YOUTUBE_ROWS = ['continue', 'latest', 'channels', 'downloaded', 'by-channel'] as const;
+/** an extra row's id -> the category it shows (categoryRails' titles start with these) */
+const CATEGORY_ROWS: Record<string, string> = {
+  'this-week': 'This week',
+  quick: 'Quick watches',
+  'sit-down': 'Sit-down watches',
+  long: 'Long watches',
+  'most-viewed': 'Most viewed',
+};
+
 /** how many channels get a rail of their own below the shared ones */
 const CHANNEL_RAILS = 8;
 
@@ -88,6 +100,11 @@ function YoutubeHome() {
     () => categoryRails([...(home.data?.latest ?? []), ...(home.data?.downloads ?? [])]),
     [home.data],
   );
+  const { rows, editor, customize } = usePageRows({
+    page: 'youtube',
+    name: 'YouTube',
+    fallback: YOUTUBE_ROWS,
+  });
 
   if (!sections.video) return <NotPartOfProfile what="YouTube" single />;
   if (home.isLoading)
@@ -165,6 +182,52 @@ function YoutubeHome() {
       </>
     );
 
+  // for you: the rows its layout names, in order (core/player/page_layout.py)
+  const forYou: ReactNode[] = [];
+  for (const r of rows) {
+    const videoRail = (key: string, title: string, videos: YtVideo[], channel?: string) => {
+      const shown = videos.slice(0, 30);
+      if (!shown.length) return;
+      const rail = (
+        <CardRail
+          title={title}
+          more={
+            channel
+              ? { to: `/player/youtube/${encodeURIComponent(channel)}`, label: 'Channel' }
+              : undefined
+          }
+          cards={shown.map((v) => ytVideoCard(v, !channel))}
+          onOpen={openVideoFrom(playYoutube, shown)}
+          actionsFor={ytActions}
+        />
+      );
+      forYou.push(
+        r.style === 'large' ? (
+          <div key={key} className={s.rowLarge}>
+            {rail}
+          </div>
+        ) : (
+          <div key={key}>{rail}</div>
+        ),
+      );
+    };
+    if (r.id === 'continue')
+      forYou.push(<CardRail key="continue" title="Continue watching" cards={continuing} />);
+    else if (r.id === 'latest') videoRail('latest', 'Latest from your channels', latest);
+    else if (r.id === 'channels')
+      forYou.push(
+        <CardRail key="channels" title="Your channels" cards={channels.map(ytChannelCard)} round />,
+      );
+    else if (r.id === 'downloaded') videoRail('downloaded', 'Downloaded', downloads);
+    else if (r.id === 'by-channel')
+      for (const { channel, videos } of byChannel)
+        videoRail(`ch:${channel.id}`, channel.title, videos, channel.id);
+    else if (CATEGORY_ROWS[r.id]) {
+      const found = categories.find((c) => c.title.startsWith(CATEGORY_ROWS[r.id]));
+      if (found) videoRail(r.id, found.title, found.videos);
+    }
+  }
+
   if (!lead && !channels.length)
     return (
       <>
@@ -235,32 +298,11 @@ function YoutubeHome() {
 
       {tabs}
       {tab !== 'foryou' ? body : null}
-      {tab === 'foryou' ? <CardRail title="Continue watching" cards={continuing} /> : null}
       {tab === 'foryou' ? (
         <>
-          <CardRail
-            title="Latest from your channels"
-            cards={latest.slice(0, 30).map((v) => ytVideoCard(v))}
-            onOpen={openVideoFrom(playYoutube, latest.slice(0, 30))}
-            actionsFor={ytActions}
-          />
-          <CardRail title="Your channels" cards={channels.map(ytChannelCard)} round />
-          <CardRail
-            title="Downloaded"
-            cards={downloads.slice(0, 30).map((v) => ytVideoCard(v))}
-            onOpen={openVideoFrom(playYoutube, downloads.slice(0, 30))}
-            actionsFor={ytActions}
-          />
-          {byChannel.map(({ channel, videos }) => (
-            <CardRail
-              key={channel.id}
-              title={channel.title}
-              more={{ to: `/player/youtube/${encodeURIComponent(channel.id)}`, label: 'Channel' }}
-              cards={videos.map((v) => ytVideoCard(v, false))}
-              onOpen={openVideoFrom(playYoutube, videos)}
-              actionsFor={ytActions}
-            />
-          ))}
+          {forYou}
+          {customize}
+          {editor}
         </>
       ) : null}
       {youtubeDialog}

@@ -58,9 +58,11 @@ A handful of pages are **shared** across both sides — **Chat**, **Issues**, an
             id: 'vid-server',
             needs: 'admin',
             title: 'Connecting a Media Server',
-            lede: 'Point the video side at Plex or Jellyfin, pick your libraries, and scan them in.',
+            lede: 'Point the video side at Plex or Jellyfin, or let SoulSync scan your own folders, and scan them in.',
             body: `
 The video side reads your libraries from **Plex** or **Jellyfin**. Configure the connection under **Video → Settings**, pick which libraries to include, then run a scan to import them.
+
+Pick a main Movies and TV library, then switch on **Scan** for any other movie or TV library on the same server (a separate **4K Movies** library on another drive, say) and every scan reads it too. A film in two scanned libraries is two copies of one title. Switching a library off stops reading it; nothing is deleted.
 
 ![Video server settings: the Plex/Jellyfin connection panel with server URL, token and library pickers](vid-server.jpg)
 
@@ -70,6 +72,59 @@ SoulSync stores a lightweight copy of every movie/show/episode row and enriches 
 |--------|--------------------|------|
 | **Plex** | Movie & TV libraries, watch state, collections, incremental delta via \`addedAt\` | URL + Token |
 | **Jellyfin** | Movie & TV libraries, watch state, BoxSets, incremental delta via \`MinDateLastSaved\` | URL + API Key (+ user for watch state) |
+
+## Standalone: no media server
+
+You don't need Plex or Jellyfin. Pick **Standalone** in the server row and SoulSync scans your own **Movies** and **TV** folders (the ones set under Settings → Library) and keeps the library itself. An install with folders set and no server connected uses it automatically.
+
+How SoulSync works out what each folder is, in order:
+
+1. What it already knows about that folder (so a scan never asks twice, and a match you fixed stays yours).
+2. An id in a \`.nfo\` file in the folder (\`movie.nfo\`, \`tvshow.nfo\`).
+3. An id tag in the folder name: \`The Matrix (1999) {tmdb-603}\`, \`[imdbid-tt0133093]\`, \`{tvdb-121361}\`.
+4. The folder's name and year searched on TMDB, used only when the title and year clearly match.
+
+If the folder's name says nothing, the main file's own name is tried, then the file's fingerprint (an OpenSubtitles lookup, when the subtitles side has its API key). A title it still isn't sure of is added under its folder name and listed on the **Tools** page as unmatched for you to pick. It is never guessed.
+
+What the scan understands:
+
+- **Episodes** by \`S01E02\`, by air date for daily shows, and by absolute number for anime (\`Show - 127\`). The last two are placed once the show's episode list has been fetched; until then those files wait. A \`Season 1\` folder supplies the season when the name has none.
+- **Two folders of one show** (\`9-1-1 Nashville\` and \`9-1-1 - Nashville\`) are one show. A folder nothing identifies joins the show in your library with exactly its title.
+- **Editions**: a \`{edition-Director's Cut}\` tag or words like Extended, Unrated, Theatrical and IMAX in the file name show as a badge on that version.
+- **Extras**: trailers, featurettes and \`-trailer\` style files are not counted as versions of the movie. They are listed under **Extras** on the title's page, where each one plays in place (see below).
+- **Your artwork**: a \`poster.jpg\` in the title's folder is its poster until you choose another.
+- **Renames and moves**: a renamed folder or file keeps its library entry, history and your choices.
+- **Real file facts**: the Media Info job reads each file's actual resolution, codecs, HDR and Atmos, so a file named just \`Movie (1999).mkv\` still shows them.
+
+New files are noticed on their own: a file dropped into a library folder shows up about half a minute after it finishes copying. A network share that can't be watched is checked every 15 minutes.
+
+> [!NOTE]
+> If a library folder can't be reached (a drive or network share that is offline), the scan stops and removes nothing.
+
+## Plex and Jellyfin together
+
+With both servers connected, switch on **Keep Jellyfin in step** (or **Keep Plex in step**) under the server row. The server you picked stays your library; SoulSync also reads the other one and works out which of its items are the same movies, shows and episodes.
+
+- **Watched follows.** Mark something watched or unwatched on either server, or in SoulSync, and the other server is marked the same. If both changed in opposite directions, watched wins.
+- **Switching keeps your library.** Pick the other server as the video server and every linked title keeps its entry, with its monitored setting, fixed match, quality profile and history.
+
+Titles are matched by the file itself first (the same file name and size on both servers), then by TMDB, TVDB or IMDb id. Nothing is matched on a guess: a title only one server has is simply not linked, and the row says how much of your library both have. The other server is read after each library scan, or right away with **Link now**.
+
+> [!NOTE]
+> The watch state that is kept in step is the server account's. A profile signed in with its own Plex account keeps its own, as before. Resume positions are not carried over.
+
+## Extras
+
+A movie's or show's page lists the extras in its folder, with any video source: trailers, featurettes, behind the scenes, deleted scenes, interviews, scenes and shorts. SoulSync reads the layout Plex and Jellyfin both use:
+
+- a folder inside the title's folder named for the kind: \`Trailers\`, \`Featurettes\`, \`Behind The Scenes\`, \`Deleted Scenes\`, \`Interviews\`, \`Scenes\`, \`Shorts\`, \`Other\` (or \`Extras\`);
+- a file beside the movie ending \`-trailer\`, \`-featurette\`, \`-behindthescenes\`, \`-deleted\`, \`-interview\`, \`-scene\`, \`-short\` or \`-other\`.
+
+A show's season folders are read too. **Play** opens one right on the page.
+
+## Downloads appear at once
+
+With any source, a movie or episode SoulSync downloads is in the library the moment it lands: it doesn't wait for your media server to scan the file in. When Plex or Jellyfin later scans it, the server takes over that same entry, so nothing is listed twice.
 
 ## Scan types
 
@@ -121,7 +176,7 @@ Plex and Jellyfin report every file at the path *they* see it under, like \`/mnt
 - The folders SoulSync already reaches, like your Movies and TV output folders, are recognised from their files and ticked. You never type them twice.
 - For the rest, type where SoulSync reaches each one. It checks a sample of that folder's real files right away (**48 of 50 sample files found**).
 - A reached folder is a full library folder of its kind: every file in it is found, renamed to your templates, recycled on delete (into that drive's own recycle bin) and has its languages read. New downloads still go to your output folders.
-- **Folders your server doesn't list** (in the same section) is for a collection SoulSync should manage that your server doesn't read.
+- **Extra folders** (in the same section) is for folders SoulSync should also manage that the libraries it scans from your server don't include. On Standalone it's where you add more movie and TV folders to scan, like a second drive. New downloads never go there.
 - A folder left blank works the way it always did.
 
 ## 4K libraries
@@ -1001,6 +1056,10 @@ After a download completes, a lightweight post-download scan probes your media s
 
 Set your **naming scheme** (how files and folders are named — title, year, edition tags, season/episode patterns) and your **folder layout** once, and every import follows it. Consistent naming keeps Plex/Jellyfin matching clean. **Colons in titles** picks what a ':' becomes, since file systems don't allow one: deleted (Dexter Resurrection, the default), smart (Dexter - Resurrection, and 12:30 becomes 12-30), space dash space, or a dash. Mass Rename brings files you already have in line.
 
+**\`$absolute\`** in an episode template is the episode's absolute number, its place in the show's aired order with specials left out, at three digits: \`Frieren - S01E05 - 005\` (wider past 999, \`005-006\` for a two-episode file). A special has none, so it is named without it and the separator before it goes too.
+
+**Anime episode template** names the episodes of an anime show (set to anime by hand, or in a library marked anime) by its own template, so anime can carry \`$absolute\` while every other show keeps the episode template. Left empty, anime is named like any other show.
+
 **Two shows with one name** never share a folder. The first one in the library keeps the plain folder (\`The Office\`); a later show whose title renders to that same folder is filed with its year (\`The Office (2001)\`), or with its TMDB id when the year is the same too. SoulSync knows a folder is another show's from the library, from its own finished downloads, and from the folder's \`tvshow.nfo\`, so this holds before your media server has scanned anything.
 
 ## Mass rename
@@ -1223,7 +1282,7 @@ Every action below is a DO block you can drop into your own automations. Config 
 | Action | What it does | Key config |
 |--------|--------------|------------|
 | **Scan Video Library** | Tell the media server to rescan your movie/TV sections, then read what it found into SoulSync | Mode (Full), Library (Movies + TV) |
-| **Scan Video Server** | Get the server to index new downloads (skips if it already has them), wait, then fire *Video Library Scan Done* | Library (all), Skip if present (on), Grace 2 min, Max wait 60 min, Fallback wait 120 sec |
+| **Index New Video Files** | Make sure new downloads are in your library: your media server is asked to index them (skipped if it already has them) and SoulSync waits; with Standalone they are already in. Then fires *Video Library Scan Done* | Library (all), Skip if present (on), Grace 2 min, Max wait 60 min, Fallback wait 120 sec |
 | **Update Video Database** | Read newly-indexed media from the server into SoulSync | Mode (Incremental), Library (all) |
 | **Update Video Database (Hourly)** | Same incremental read for an hourly schedule — pair with a 1-hour Schedule trigger | — |
 | **Deep Scan TV Library** | Full reconcile of TV: re-read every show, drop what the server no longer has (never touches movies) | — |
@@ -1297,7 +1356,7 @@ Triggers with conditions let you filter (e.g. only fire when \`kind\` is \`movie
 :::
 
 > [!TIP]
-> The classic post-download chain is already seeded for you: **Auto-Scan Video After Downloads** (Video Download Batch Done → Scan Video Server) and **Auto-Update Video Database After Scan** (Video Library Scan Done → Update Video Database). Chain your own steps after them — e.g. *Video Database Updated → Apply Overlays → Discord*.
+> The classic post-download chain is already seeded for you: **Auto-Scan Video After Downloads** (Video Download Batch Done → Index New Video Files) and **Auto-Update Video Database After Scan** (Video Library Scan Done → Update Video Database). Chain your own steps after them — e.g. *Video Database Updated → Apply Overlays → Discord*.
 
 See [Automations](#auto-overview) for the full builder reference.
 `
@@ -1329,6 +1388,15 @@ Videos show as a **grid** of thumbnails, like YouTube's own Videos tab: title, v
 Upload years show as pills above the videos, and search, sort and the Downloaded / Not downloaded / length filters work in both layouts. **Grab year** downloads every missing video in the selected year. A playlist page has no years: **Grab all** downloads every missing video in it.
 
 A channel without a banner uses a blurred version of its most-viewed video as the page backdrop. The first six playlists are listed under the videos, with **Show all** for the rest.
+
+### Your library on the channel page
+
+For an admin, a channel you've downloaded from is a library you manage, the same as a show:
+
+- **The line under the title** says how many videos are on disk, their total size, the quality mix when it's known, and what the channel's retention keeps. **Quality, retention and download settings** opens the channel's settings
+- **Needs attention** lists what's wrong: files gone from disk (**Get them again** downloads them fresh), wished videos that keep failing or were removed from YouTube, videos retention removes next (**Clean now** removes them without waiting for the nightly clean), and new uploads switched off
+- **Your files** shows each downloaded video with its thumbnail, upload date, file name and size, newest first. **Find a video** searches them. Pick some, or use **Delete all**: **Delete** moves the files to the recycle bin and SoulSync remembers the videos so it never downloads them again; **Delete and get again** lets them download again. Every delete offers **Undo** for a little while
+- **Where it lives** shows the channel's folder, with **Copy path**
 
 ## Per-channel settings
 

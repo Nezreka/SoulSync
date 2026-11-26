@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 
 import { runtime, shortDate } from '../-lib/format';
@@ -15,6 +15,7 @@ import {
   videoCatalogQuery,
 } from '../-player.api';
 import { Comments } from '../-ui/comments';
+import { MoreButton } from '../-ui/context-menu';
 import {
   CollectionRail,
   DetailLayout,
@@ -24,6 +25,7 @@ import {
   Keywords,
   MoreLikeThis,
   ownedByTmdb,
+  RelatedDiscoveryRails,
   Section,
 } from '../-ui/detail';
 import { Badge, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
@@ -52,6 +54,7 @@ export const Route = createFileRoute('/player/movies/$movieId')({
 function MoviePage() {
   const sections = useSections();
   const id = Number(Route.useParams().movieId);
+  const navigate = useNavigate();
   const ok = sections.movies && Number.isFinite(id);
   const detail = useQuery({ ...movieDetailQuery(id), enabled: ok, retry: false });
   const files = useQuery({ ...movieFilesQuery(id), enabled: ok, retry: false });
@@ -119,19 +122,51 @@ function MoviePage() {
         actions={
           <>
             <PlayButton
-              label={resuming ? `Resume from ${runtime(resume.position_seconds)}` : 'Play'}
+              label={resuming ? `Resume · ${runtime(resume.position_seconds)}` : 'Play'}
               onPlay={best ? () => playItems([movieItem(m, playFile)]) : undefined}
               why="There's no file for this yet."
             />
             {resuming && best ? (
               <PlayButton
-                label="From the start"
+                label="Restart"
                 primary={false}
                 onPlay={() => playItems([movieItem(m, playFile)], 0, { startAt: 0 })}
               />
             ) : null}
             <WatchlistButton kind="movie" id={id} />
             <TrailerButton kind="movie" id={id} />
+            <MoreButton
+              label={m.title}
+              heroClassName={s.btn}
+              target={() => ({
+                kind: 'movie',
+                page: true,
+                id: String(id),
+                title: m.title,
+                artwork: m.has_poster ? `/api/video/poster/movie/${id}` : null,
+                download: best ? { type: 'movie', id: String(id) } : null,
+                report: { entityType: 'movie', entityId: id, title: m.title },
+                extraActions: best
+                  ? [
+                      {
+                        label: 'Start a Watch Party',
+                        onSelect: () =>
+                          void navigate({
+                            to: '/player/watching',
+                            search: {
+                              start: `movie:${id}`,
+                              title: m.title,
+                              artwork: m.has_poster ? `/api/video/poster/movie/${id}` : undefined,
+                              backdrop: m.has_backdrop
+                                ? `/api/video/backdrop/movie/${id}`
+                                : undefined,
+                            },
+                          }),
+                      },
+                    ]
+                  : undefined,
+              })}
+            />
             {ends ? (
               <span className={s.notYet}>
                 Ends at {ends.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
@@ -153,6 +188,15 @@ function MoviePage() {
             <ExtrasVideos videos={extras.data?.videos} />
             <CastRow cast={m.cast} />
             <CollectionRail collection={extras.data?.collection} owned={owned} selfTmdb={tmdbId} />
+            <RelatedDiscoveryRails
+              kind="movie"
+              selfId={id}
+              cast={m.cast}
+              leadCrew={director}
+              studioOrNetwork={m.studio}
+              catalog={catalog.data}
+              franchiseCollectionName={extras.data?.collection?.name}
+            />
             <MoreLikeThis
               extras={extras.data}
               owned={owned}

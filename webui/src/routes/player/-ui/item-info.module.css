@@ -1,0 +1,142 @@
+/* the info sheet: headed label / value lists inside the player's sheet */
+
+.button {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 2);
+  height: calc(var(--u) * 2);
+  padding: 0;
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-circle);
+  background: var(--white-a06);
+  color: var(--pl-text-2);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.button:hover,
+.button:focus-visible {
+  background: var(--white-a12);
+  color: var(--pl-text);
+}
+
+.glyph {
+  display: inline-grid;
+  place-items: center;
+}
+
+.glyph svg {
+  width: calc(var(--u) * 1);
+  height: calc(var(--u) * 1);
+}
+
+.glyph[data-labelled='true'] {
+  margin-right: calc(var(--u) * 0.35);
+}
+
+.note {
+  margin: calc(var(--u) * 0.6) 0;
+  color: var(--pl-text-2);
+}
+
+.problem {
+  margin: 0 0 calc(var(--u) * 0.8);
+  color: var(--danger-light);
+}
+
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 1.1);
+}
+
+.section[data-first-of-group='true'] {
+  padding-top: calc(var(--u) * 0.9);
+  border-top: 1px solid var(--white-a08);
+}
+
+.heading {
+  margin: 0 0 calc(var(--u) * 0.4);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.8);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.rows {
+  margin: 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(calc(var(--u) * 5.5), 34%) minmax(0, 1fr);
+  gap: calc(var(--u) * 0.8);
+  align-items: baseline;
+  padding: calc(var(--u) * 0.32) 0;
+  border-bottom: 1px solid var(--white-a05);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.label {
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.85);
+}
+
+.value {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 0.4);
+  min-width: 0;
+  margin: 0;
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 0.88);
+  font-weight: 600;
+}
+
+.text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.value[data-mono='true'] .text {
+  font-family: var(--font-mono);
+  font-size: calc(var(--u) * 0.8);
+  font-weight: 500;
+}
+
+.copy {
+  display: grid;
+  flex: none;
+  place-items: center;
+  align-self: center;
+  width: calc(var(--u) * 1.6);
+  height: calc(var(--u) * 1.6);
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--white-a06);
+  color: var(--pl-text-2);
+  cursor: pointer;
+}
+
+.copy:hover,
+.copy:focus-visible {
+  background: var(--white-a12);
+  color: var(--pl-text);
+}
+
+.copy[data-copied='true'] {
+  color: var(--success);
+}
+
+.copy svg {
+  width: calc(var(--u) * 0.85);
+  height: calc(var(--u) * 0.85);
+}

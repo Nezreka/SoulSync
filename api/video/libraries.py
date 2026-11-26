@@ -2,9 +2,10 @@
 
 GET  /api/video/libraries -> discover the active server's Movies/TV libraries
                              + the user's current selection.
-POST /api/video/libraries -> save {movies, tv, tv_more?, anime?} (library titles)
-                             for the active server. The scanner then reads only
-                             those: the main TV pick plus ``tv_more``. ``anime``
+POST /api/video/libraries -> save {movies, movies_more?, tv, tv_more?, anime?, home_more?}
+                             (library titles) for the active server. The scanner
+                             then reads only those: each main pick plus its
+                             ``*_more`` list. ``anime``
                              marks TV libraries whose shows are anime.
 """
 
@@ -15,9 +16,58 @@ from flask import jsonify, request
 from utils.logging_config import get_logger
 
 logger = get_logger("video_api.libraries")
+_unread_checked = False
+_asked: set = set()   # libraries queued this run, so a save never re-queues one
+
+
+def _start_library_scans(db, server, before) -> list:
+    """read each newly switched on movie / tv library in the background
+    (core/video/library_scan.py). the names of those started."""
+    from core.video import library_scan
+    from core.video.sources import video_jellyfin_config, video_plex_config
+    if server not in ("plex", "jellyfin"):
+        return []
+    after = db.get_library_selection(server)
+    new = library_scan.added(before, after)
+    # one switched on before it was read on switch-on: read it once this run
+    new += [p for p in library_scan.unread_extras(db, after)
+            if p not in new and p not in _asked]
+    cfg = video_plex_config(db) if server == "plex" else video_jellyfin_config(db)
+    if not cfg.get("base_url"):
+        if new:
+            logger.info("video libraries switched on but no %s address is set, so not read yet: %s",
+                        server, ", ".join(t for _k, t in new))
+        return []
+    # never on the request: the scan runs on its own thread
+    _asked.update(new)
+    library_scan.start(db, new, keep=library_scan.picks(after))
+    if new:
+        logger.info("video libraries switched on, reading now: %s", ", ".join(t for _k, t in new))
+    return [t for _k, t in new]
 
 
 def register_routes(bp):
+    # one library being read after it was switched on (core/video/library_scan)
+    @bp.route("/libraries/scan", methods=["GET"])
+    def video_library_scans():
+        from core.video import library_scan
+        global _unread_checked
+        # once per run: an extra library switched on before it was read when
+        # switched on is read now, so nobody has to switch it off and on
+        if not _unread_checked:
+            _unread_checked = True
+            try:
+                from core.video.sources import resolve_video_server
+
+                from . import get_video_db
+                db = get_video_db()
+                server = resolve_video_server()
+                if server:
+                    _start_library_scans(db, server, db.get_library_selection(server))
+            except Exception:  # noqa: BLE001 - the status still answers
+                logger.debug("unread library check failed", exc_info=True)
+        return jsonify({"scans": library_scan.status()})
+
     # your library's folders (core/video/drive_map): every folder the server's
     # libraries read and where soulsync reaches it. under /libraries so the
     # admin-only guard covers it.
@@ -135,6 +185,8 @@ def register_routes(bp):
                                     libs.get("server"), libs, get_video_db().get_library_selection(server),
                                     db=get_video_db())
                                 if server else {"movies": None, "tv": None})
+            from core.video import library_scan
+            libs["scans"] = library_scan.status()
             return jsonify(libs)
         except Exception:
             logger.exception("Failed to list video libraries")
@@ -161,10 +213,69 @@ def register_routes(bp):
         from . import get_video_db
         body = request.get_json(silent=True) or {}
         choice = body.get("server")
-        if choice not in ("plex", "jellyfin"):
+        # soulsync: its own folder scan is the library (core/video/disk_source.py)
+        if choice not in ("plex", "jellyfin", "soulsync"):
             return jsonify({"error": "bad server"}), 400
+        moved, was = None, None
+        try:
+            # with the two servers linked, the library follows the pick: every
+            # linked title keeps its row (core/video/server_links.py)
+            from core.video import server_links
+            from core.video.sources import resolve_video_server
+            was = resolve_video_server(get_video_db())
+            if server_links.enabled(get_video_db()) and was != choice:
+                moved = server_links.rekey_library(get_video_db(), was, choice)
+        except Exception:
+            logger.exception("video server switch: the library could not follow the pick")
         get_video_db().set_setting("video_server", choice)
-        return jsonify({"status": "saved", "server": choice})
+        try:
+            # the "changed since the last scan" mark was the OTHER library's:
+            # kept, the new one's first quick scan would read only what changed
+            # since then and leave the library mostly empty
+            if choice != was:
+                get_video_db().set_setting("video_last_scan_at", "")
+        except Exception:
+            logger.debug("video server switch: scan baseline not cleared", exc_info=True)
+        try:
+            from core.video.sources import invalidate_video_source_cache
+            invalidate_video_source_cache()
+        except Exception:   # noqa: BLE001, S110 - a stale cached connection ages out by itself
+            pass
+        return jsonify({"status": "saved", "server": choice, **({"moved": moved} if moved else {})})
+
+    @bp.route("/server/links", methods=["GET"])
+    def video_server_links():
+        """plex and jellyfin as one library: whether it's on, how much of the
+        library is on the other server too, and the last pass."""
+        from . import get_video_db
+        from core.video import server_links
+        try:
+            return jsonify({"success": True, **server_links.counts(get_video_db()),
+                            "last": server_links.status()})
+        except Exception:
+            logger.exception("video server links status failed")
+            return jsonify({"success": False, "error": "Couldn't read the link status"}), 500
+
+    @bp.route("/server/links", methods=["POST"])
+    def video_server_links_set():
+        """body ``{enabled?: bool, run?: bool}``: switch linking on or off,
+        and/or read the other server now (in the background)."""
+        from . import get_video_db
+        from core.video import server_links
+        body = request.get_json(silent=True) or {}
+        db = get_video_db()
+        if isinstance(body.get("enabled"), bool):
+            db.set_setting(server_links.SETTING, "1" if body["enabled"] else "0")
+        started = False
+        if body.get("run") or body.get("enabled") is True:
+            if not server_links.other_server(db):
+                if body.get("run"):
+                    return jsonify({"success": False,
+                                    "error": "Connect both Plex and Jellyfin first."}), 400
+            else:
+                started = server_links.run_async(db)
+        return jsonify({"success": True, "started": started, **server_links.counts(db),
+                        "last": server_links.status()})
 
     @bp.route("/service-status", methods=["GET"])
     def video_service_status():
@@ -190,9 +301,11 @@ def register_routes(bp):
             return jsonify({
                 "metadata": {"configured": bool(tmdb and tvdb), "tmdb": tmdb, "tvdb": tvdb,
                              "name": "TMDB / TVDB"},
-                "server": {"active": server, "configured": bool(plex_ok or jelly_ok),
+                "server": {"active": server,
+                           "configured": bool(plex_ok or jelly_ok or server == "soulsync"),
                            "plex": plex_ok, "jellyfin": jelly_ok,
-                           "name": server.capitalize() if server else "No server"},
+                           "name": ("SoulSync" if server == "soulsync" else server.capitalize())
+                           if server else "No server"},
                 "download": {"configured": True, "mode": mode, "hybrid_order": order,
                              "name": dl_name},
             })
@@ -235,14 +348,22 @@ def register_routes(bp):
                 v = v or ""
                 return ("•" * 12) if v else ""
 
-            pu, pt, p_inh = view("video_plex_url", "video_plex_token", video_plex_config(db))
-            ju, jk, j_inh = view("video_jellyfin_url", "video_jellyfin_key",
-                                 video_jellyfin_config(db))
+            p_eff, j_eff = video_plex_config(db), video_jellyfin_config(db)
+            pu, pt, p_inh = view("video_plex_url", "video_plex_token", p_eff)
+            ju, jk, j_inh = view("video_jellyfin_url", "video_jellyfin_key", j_eff)
+
+            def in_use(eff):
+                """the connection video really uses is whole (its own when both
+                halves are saved, else music's). a half-filled own one is
+                ignored by the connection, so the form can show a half while
+                video still works through music's"""
+                return {"ready": bool(eff.get("base_url") and (eff.get("token") or eff.get("api_key"))),
+                        "source": eff.get("source") or "music"}
             return jsonify({
                 "plex": {"base_url": pu, "token": mask(pt),
-                         "has_token": bool(pt), "inherited": p_inh},
+                         "has_token": bool(pt), "inherited": p_inh, "in_use": in_use(p_eff)},
                 "jellyfin": {"base_url": ju, "api_key": mask(jk),
-                             "has_key": bool(jk), "inherited": j_inh},
+                             "has_key": bool(jk), "inherited": j_inh, "in_use": in_use(j_eff)},
             })
         except Exception:
             logger.exception("video server-config get failed")
@@ -347,13 +468,28 @@ def register_routes(bp):
             server = resolve_video_server()
             if not server:
                 return jsonify({"error": "no video server"}), 400
-            # tv_more / anime are optional: an older client that sends only
-            # movies + tv leaves them as they are
+            # movies_more / tv_more / anime are optional: an older client that
+            # sends only movies + tv leaves them as they are
+            def listed(key):
+                return body.get(key) if isinstance(body.get(key), list) else None
+            before = get_video_db().get_library_selection(server)
             get_video_db().set_library_selection(
                 server, body.get("movies"), body.get("tv"),
-                tv_more=body.get("tv_more") if isinstance(body.get("tv_more"), list) else None,
-                anime=body.get("anime") if isinstance(body.get("anime"), list) else None)
-            return jsonify({"status": "saved", "server": server})
+                tv_more=listed("tv_more"), anime=listed("anime"),
+                movies_more=listed("movies_more"), home_more=listed("home_more"))
+            if listed("home_more") is not None:
+                # a home video library switched on is read now, not at the next scan
+                from core.video import home_videos
+                home_videos.scan_async(get_video_db())
+            # a movie or tv library switched on is read now, just that one,
+            # not at the next scan. one switched off: nothing is deleted
+            from core.video import library_scan
+            started = _start_library_scans(get_video_db(), server, before)
+            # the folders list follows the picks at once, not in 10 minutes
+            from core.video import drive_map
+            drive_map.forget_server_folders()
+            return jsonify({"status": "saved", "server": server, "started": started,
+                            "scans": library_scan.status()})
         except Exception:
             logger.exception("Failed to save video library selection")
             return jsonify({"error": "Failed to save selection"}), 500

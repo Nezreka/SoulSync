@@ -7,6 +7,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 import { CardSizeSlider, type CardSizeRange } from '@/components/card-size';
@@ -15,9 +16,10 @@ import { appURL } from '@/platform/url-base';
 import type { PlayerProfile } from '../-player.types';
 
 import { currentProfileQuery, profilesQuery, selectProfile } from '../-player.api';
-import { ChevronDownIcon, ExitIcon, LockIcon } from './icons';
+import { ExitIcon, GearIcon, LockIcon } from './icons';
+import { getEngine } from './playback/use-player';
 import s from './player.module.css';
-import { inPlayer, useTrailersSetting } from './trailer';
+import { inPlayer } from './trailer';
 
 /** the manager's "always open as me on this device" choice */
 const OPEN_AS_KEY = 'ss_open_as_profile';
@@ -106,10 +108,15 @@ function usePicker(currentId: number | null, onStay: () => void) {
     }
     setBusy(true);
     setError('');
+    // what's playing is this profile's: save it now, while the session is
+    // still theirs. the reload after the switch saved it into the new one
+    getEngine().saveNow();
     const result = await selectProfile(profile.id, secret);
     setBusy(false);
     if (result.ok) {
       markGatePassed(profile.id);
+      // nothing more of the old profile's playback may save as the new one
+      getEngine().stop({ save: false });
       window.location.reload();
       return;
     }
@@ -286,7 +293,6 @@ export function ProfileChip({
 }) {
   const { data: profiles = [] } = useQuery(profilesQuery());
   const current = useQuery(currentProfileQuery());
-  const [trailers, setTrailers] = useTrailersSetting();
   const [open, setOpen] = useState(false);
   const [switchTo, setSwitchTo] = useState<PlayerProfile | 'pick' | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -326,14 +332,13 @@ export function ProfileChip({
         className={s.chipButton}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={me?.name ?? 'Profile'}
+        title={me?.name ?? 'Profile'}
         onClick={() => setOpen((v) => !v)}
         data-nav
+        style={{ padding: 3 }}
       >
         {me ? <Avatar profile={me} /> : <span className={s.avatar} />}
-        <span className={s.chipName}>{me?.name ?? 'Profile'}</span>
-        <span className={s.chipCaret} aria-hidden="true">
-          <ChevronDownIcon />
-        </span>
       </button>
       {open ? (
         <div className={s.profileMenu} role="menu" aria-label="Profile">
@@ -388,25 +393,7 @@ export function ProfileChip({
           ) : null}
 
           <div className={s.menuSection}>
-            <div className={s.menuLabel}>On this device</div>
-            <button
-              type="button"
-              role="menuitemcheckbox"
-              aria-checked={trailers}
-              className={s.menuToggle}
-              onClick={() => setTrailers(!trailers)}
-              data-nav
-            >
-              <span>
-                <span className={s.menuToggleTitle}>Background trailers</span>
-                <span className={s.menuToggleSub}>Movie and show pages play their trailer</span>
-              </span>
-              <span
-                className={s.switch}
-                data-on={trailers ? 'true' : undefined}
-                aria-hidden="true"
-              />
-            </button>
+            <div className={s.menuLabel}>Display</div>
             <div className={s.menuRow}>
               <span className={s.menuToggleTitle}>Card size</span>
               <CardSizeSlider
@@ -419,6 +406,15 @@ export function ProfileChip({
           </div>
 
           <div className={s.menuSection}>
+            <Link
+              to="/player/settings"
+              role="menuitem"
+              className={s.menuItem}
+              onClick={() => setOpen(false)}
+              data-nav
+            >
+              <GearIcon /> Player settings
+            </Link>
             <a role="menuitem" className={s.menuItem} href={appURL('/')} data-nav>
               <ExitIcon /> Back to SoulSync
             </a>

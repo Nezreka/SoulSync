@@ -22,7 +22,7 @@ logger = get_logger("player.tracks")
 
 bp = Blueprint("player_tracks", __name__)
 
-VIDEO_TYPES = ("movie", "episode", "youtube")
+VIDEO_TYPES = ("movie", "episode", "youtube", "home")
 SECTIONS = ("movies.access", "tv.access")
 
 

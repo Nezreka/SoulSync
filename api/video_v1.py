@@ -71,6 +71,83 @@ def _download_statuses(raw):
     return out
 
 
+_CHECK_MAX = 300
+
+
+def _check_items(raw):
+    """[(kind, tmdb_id, season, episode)] from the body, junk dropped, capped"""
+    out = []
+    for it in raw if isinstance(raw, list) else []:
+        if not isinstance(it, dict) or it.get("kind") not in ("movie", "show"):
+            continue
+        try:
+            tid = int(it.get("tmdb_id"))
+        except (TypeError, ValueError):
+            continue
+        if tid <= 0:
+            continue
+        season = episode = None
+        if it["kind"] == "show" and it.get("season") is not None and it.get("episode") is not None:
+            try:
+                season, episode = int(it["season"]), int(it["episode"])
+            except (TypeError, ValueError):
+                season = episode = None
+        out.append((it["kind"], tid, season, episode))
+        if len(out) >= _CHECK_MAX:
+            break
+    return out
+
+
+def _video_check(items):
+    """one query per kind for ownership and the wishlist, one read of the
+    show watchlist, one lookup per asked episode"""
+    from api.video import get_video_db
+    from api.video.title_status import _kids_ids
+    from core.profile_context import get_current_profile_id
+    from core.video.sources import resolve_video_server
+
+    db = get_video_db()
+    me = int(get_current_profile_id() or 1)
+    server = resolve_video_server(db)
+    want = {"movie": sorted({t for k, t, _s, _e in items if k == "movie"}),
+            "show": sorted({t for k, t, _s, _e in items if k == "show"})}
+    # a kids profile hears only about titles under its cap
+    allowed = {k: {int(t) for t in v} for k, v in _kids_ids(db, want).items()}
+    owned = {k: {int(t) for t in (db.library_ids_for_tmdb(k, sorted(allowed[k]), server) or {})}
+             for k in ("movie", "show") if allowed.get(k)}
+    wished_movies = set()
+    if allowed.get("movie"):
+        wished_movies = {int(t) for t in
+                         (db.wishlist_state(movie_ids=sorted(allowed["movie"]), profile_id=me) or {})
+                         .get("movies") or ()}
+    show_keys, following = {}, set()
+    if allowed.get("show"):
+        show_keys = {int(k): v for k, v in
+                     (db.wishlist_keys_for_shows(sorted(allowed["show"]), profile_id=me) or {}).items()}
+        following = {int(t) for t in (db.watchlist_state(
+            "show", sorted(allowed["show"]), server_source=server, profile_id=me) or {})}
+    out = []
+    for kind, tid, season, episode in items:
+        row = {"kind": kind, "tmdb_id": tid}
+        if tid not in allowed.get(kind, ()):
+            row.update(in_library=None, on_wishlist=None, following=None)
+            out.append(row)
+            continue
+        row["in_library"] = tid in owned.get(kind, ())
+        if kind == "movie":
+            row["on_wishlist"] = tid in wished_movies
+            row["following"] = None
+        else:
+            keys = show_keys.get(tid) or set()
+            row["on_wishlist"] = bool(keys)
+            row["following"] = tid in following
+            if season is not None:
+                row["episode_in_library"] = bool(db.episode_in_library(tid, season, episode))
+                row["episode_on_wishlist"] = f"{season}_{episode}" in keys
+        out.append(row)
+    return out
+
+
 def register_routes(bp):
 
     # ---- stats ----
@@ -126,6 +203,27 @@ def register_routes(bp):
         """Fix match. Body: {tmdb_id}. Re-points the title and locks it, so a
         scan can't switch it back."""
         return _relay("video_identify", error_code="MATCH_ERROR")
+
+    @bp.route("/video/check", methods=["POST"])
+    @require_api_key
+    def video_check():
+        """Batch status for page badges, by tmdb id. Body: {"items": [{kind:
+        movie|show, tmdb_id, season?, episode?}]} (at most 300). Answers
+        {"items": [{kind, tmdb_id, in_library, on_wishlist, following,
+        episode_in_library?, episode_on_wishlist?}]} in the order asked.
+        following is the effective show watchlist (follows plus airing
+        library shows, less mutes), null for a movie. No provider calls."""
+        if f"{VIDEO_BLUEPRINT}.video_title_status_batch" not in current_app.view_functions:
+            return api_error("NOT_AVAILABLE", "The video side is not enabled on this server.", 503)
+        body = request.get_json(silent=True) or {}
+        items = _check_items(body.get("items"))
+        if not items:
+            return api_error("BAD_REQUEST", "Provide 'items': [{kind, tmdb_id}].", 400)
+        try:
+            return api_success({"items": _video_check(items)})
+        except Exception:
+            logger.exception("video check failed")
+            return api_error("VIDEO_ERROR", "Video check failed.", 500)
 
     # ---- search ----
 

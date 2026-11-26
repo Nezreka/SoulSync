@@ -348,9 +348,15 @@ def lidarr_root_for_context(context) -> Optional[str]:
     media server reads. ``lidarr_download.transfer_path`` sends those copies
     somewhere else (a scratch folder) while every other source keeps the
     transfer folder. Empty (the default) changes nothing.
+
+    With ``lidarr_download.import_through_lidarr`` every download goes there:
+    Lidarr imports it into its root folder at the end of the batch
+    (core.downloads.lidarr_handoff), so that folder is the library's only way in.
     """
     if not isinstance(context, dict):
         return None
+    if imports_through_lidarr():
+        return lidarr_transfer_root()
     result = context.get('original_search_result') or context.get('search_result') or {}
     if not isinstance(result, dict) or str(result.get('username') or '').lower() != 'lidarr':
         return None
@@ -363,6 +369,19 @@ def lidarr_transfer_root() -> Optional[str]:
     per-track Lidarr download land in the same folder."""
     path = _get_config_manager().get('lidarr_download.transfer_path', '') or ''
     return config_root_path(path) if str(path).strip() else None
+
+
+def imports_through_lidarr() -> bool:
+    """Whether Lidarr imports every download (``lidarr_download.import_through_lidarr``).
+
+    Needs ``lidarr_download.transfer_path``: SoulSync's files wait there for
+    Lidarr, which has to read that folder at the same path. Without one the
+    setting does nothing, so no download lands in a folder Lidarr was never
+    told about.
+    """
+    # `is True`: a switch, and a stray string ("false") must not turn it on
+    cfg = _get_config_manager()
+    return cfg.get('lidarr_download.import_through_lidarr', False) is True and lidarr_transfer_root() is not None
 
 
 def transfer_root_for_context(context) -> str:

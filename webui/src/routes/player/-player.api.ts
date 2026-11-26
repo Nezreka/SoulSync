@@ -1,11 +1,13 @@
 import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 
-import { apiClient, readJson } from '@/app/api-client';
+import { apiClient, readJson, refusalText } from '@/app/api-client';
 
 import type { HomeLayout, LayoutCatalog } from './-lib/home-layout';
+import type { ServerPremiere } from './-lib/premieres';
 import type { ServerResume } from './-lib/rails';
 import type {
   CatalogBook,
+  PlayerLibrary,
   Extras,
   ExtraTitle,
   LibAlbum,
@@ -31,6 +33,7 @@ import type {
 } from './-player.types';
 
 import { decodeCatalog, type CatalogWire } from './-lib/catalog';
+import { setGuideClock } from './-lib/schedule';
 
 const MINUTE = 60_000;
 
@@ -89,7 +92,32 @@ export const videoCatalogQuery = () =>
     queryKey: ['player', 'video-catalog'],
     queryFn: async (): Promise<VideoCatalog> =>
       decodeCatalog(await apiClient.get('player/video-catalog').json<CatalogWire>()),
-    staleTime: 5 * MINUTE,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+  });
+
+/**
+ * the Live Guide's pool: the catalog as it was the first time anyone asked
+ * today (core/player/guide_day.py). every device (this, the android app)
+ * schedules channels from it, so a download mid-day doesn't re-seed the
+ * shared timeline. browsing and the home rails keep videoCatalogQuery
+ */
+export const guideCatalogQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'video-catalog', 'guide'],
+    queryFn: async (): Promise<VideoCatalog> => {
+      const wire = await apiClient
+        .get('player/video-catalog', { searchParams: { guide: '1' } })
+        .json<CatalogWire>();
+      // before anything is scheduled from this pool: days are counted on
+      // the server's clock, so every device lays out the same guide
+      if (wire.clock) setGuideClock(wire.clock);
+      return decodeCatalog(wire);
+    },
+    // it only changes once a day; a check now and then catches the new day
+    staleTime: 10 * 60_000,
+    refetchInterval: 15 * 60_000,
   });
 
 // ── music (library v2) ─────────────────────────────────────────────────
@@ -176,10 +204,15 @@ export const artistQuery = (id: number) =>
 export const albumQuery = (id: number) =>
   queryOptions({
     queryKey: ['player', 'music', 'album', id],
+    // resolve=1: the server fetches the release's real tracklist in the
+    // background (the manager's album page does the same), so missing songs
+    // get their names; the page asks again until it lands
     queryFn: async () =>
-      (await apiClient.get(`library/v2/albums/${id}`).json<{ album?: LibAlbumDetail }>()).album ??
-      null,
+      (await apiClient.get(`library/v2/albums/${id}?resolve=1`).json<{ album?: LibAlbumDetail }>())
+        .album ?? null,
     staleTime: 2 * MINUTE,
+    refetchInterval: (query) =>
+      query.state.data?.tracklist_sync?.status === 'pending' ? 2000 : false,
   });
 
 // ── playlists (music): yours and mirrored ─────────────────────────────
@@ -379,19 +412,129 @@ export const playlistEdits = {
 
 // ── player settings (per profile) and watching now ────────────────────
 
+export type PlayerAccentColor = 'emerald' | 'violet' | 'ocean' | 'amber' | 'rose' | 'crimson';
+
+export type CommercialEra = 'auto' | '70s' | '80s' | '90s' | '2000s' | 'kids' | 'mix';
+export type CommercialMode = 'short' | 'cable';
+
 export interface PlayerSettings {
   share_activity: boolean;
   autoplay_next: boolean;
   still_watching_after: number;
+  show_movie_ratings: boolean;
+  show_tv_episode_count: boolean;
+  show_year_on_cards: boolean;
+  accent_color?: PlayerAccentColor;
+  commercials_enabled?: boolean;
+  commercials_era?: CommercialEra;
+  commercials_mode?: CommercialMode;
+  /** the sidebar's places in this profile's order ("/player/movies", "lib:5") */
+  sidebar_order?: string[];
+  /** places left out of the sidebar */
+  sidebar_hidden?: string[];
+}
+
+export interface CommercialClip {
+  id: string;
+  title: string;
+  era: string;
+  year?: number | null;
+  duration_seconds: number;
+  source: string;
+  stream_path: string;
+}
+
+export interface CommercialsConfig {
+  enabled: boolean;
+  era: CommercialEra;
+  mode: CommercialMode;
+  can_edit?: boolean;
+  clips: CommercialClip[];
+  status?: CommercialsStatus;
+}
+
+export const commercialsConfigQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'commercials-config'],
+    queryFn: () => apiClient.get('player/commercials/config').json<CommercialsConfig>(),
+    staleTime: 30_000,
+  });
+
+/** the clips the day's breaks are scheduled from, frozen for the day like the pool */
+export const guideCommercialsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'commercials-config', 'guide'],
+    queryFn: () =>
+      apiClient
+        .get('player/commercials/config', { searchParams: { guide: '1' } })
+        .json<CommercialsConfig>(),
+    staleTime: 10 * 60_000,
+    refetchInterval: 15 * 60_000,
+  });
+
+/**
+ * what's new and when it airs: the slot, the item and the channels it could
+ * go on, all from the server, so every device airs it in the same place.
+ * asked again every few minutes: something that lands this afternoon
+ * premieres tonight. the server gives a slot at least half an hour ahead.
+ */
+export const guidePremieresQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'guide', 'premieres'],
+    queryFn: () =>
+      apiClient
+        .get('player/guide/premieres')
+        .json<{ success: boolean; premieres: ServerPremiere[] }>()
+        .then((d) => d.premieres ?? []),
+    staleTime: 2 * 60_000,
+    refetchInterval: 5 * 60_000,
+  });
+
+export async function saveCommercialsConfig(
+  changes: Partial<Pick<CommercialsConfig, 'enabled' | 'era' | 'mode'>>,
+): Promise<CommercialsConfig> {
+  return apiClient.put('player/commercials/config', { json: changes }).json<CommercialsConfig>();
+}
+
+export interface CommercialsStatus {
+  ready: boolean;
+  total_count: number;
+  cached_count: number;
+  local_count: number;
+  cache_mb: number;
+  max_cache_mb?: number;
+  warming: boolean;
+  eras: Record<string, number>;
+  error?: string | null;
+  /** the fetch button's answer: false when the cache is already full */
+  started?: boolean;
+}
+
+export const commercialsStatusQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'commercials-status'],
+    queryFn: () => apiClient.get('player/commercials/status').json<CommercialsStatus>(),
+    staleTime: 15_000,
+  });
+
+export async function warmCommercials(era: CommercialEra = 'mix'): Promise<CommercialsStatus> {
+  return apiClient.post('player/commercials/warm', { json: { era } }).json<CommercialsStatus>();
+}
+
+export async function clearCommercialsCache(): Promise<CommercialsStatus> {
+  return apiClient.delete('player/commercials/cache').json<CommercialsStatus>();
 }
 
 export const playerSettingsQuery = () =>
   queryOptions({
     queryKey: ['player', 'settings'],
     queryFn: async () =>
-      apiClient
-        .get('player/settings')
-        .json<{ settings: PlayerSettings; about: Record<keyof PlayerSettings, string> }>(),
+      apiClient.get('player/settings').json<{
+        settings: PlayerSettings;
+        about: Record<keyof PlayerSettings, string>;
+        /** what the admin set for everyone (player setup) */
+        server?: { name: string; sidebar_order: string[]; sidebar_hidden: string[] };
+      }>(),
     staleTime: 5 * MINUTE,
   });
 
@@ -450,6 +593,159 @@ export const togetherQuery = () =>
       (await apiClient.get('player/presence/together').json<{ titles: TogetherTitle[] }>()).titles,
     staleTime: MINUTE,
   });
+
+// ── watch parties (watch together + theater waiting rooms) ────────────
+
+export interface WatchPartyLobbyTrack {
+  track_id: string;
+  title: string;
+  artist: string;
+  album_id: number | null;
+  artwork: string | null;
+  duration_ms: number | null;
+  started_at: number;
+  live_position?: number;
+}
+
+export interface WatchPartyMember {
+  profile_id: number;
+  profile: WatchingSession['profile'];
+  status: 'rsvp' | 'joined';
+  ready: boolean;
+  joined_at: number;
+  seen_at: number;
+  is_host: boolean;
+  you: boolean;
+}
+
+export interface WatchPartyMessage {
+  id: number;
+  profile_id: number;
+  profile: WatchingSession['profile'];
+  kind: 'chat' | 'reaction' | 'system';
+  body: string;
+  created_at: number;
+  you: boolean;
+}
+
+export interface WatchPartyPeeBreak {
+  profile_id: number;
+  profile?: WatchingSession['profile'];
+  started_at: number;
+  ends_at: number;
+}
+
+export interface WatchParty {
+  id: string;
+  host_profile_id: number;
+  host_profile: WatchingSession['profile'];
+  is_host: boolean;
+  is_member: boolean;
+  can_control: boolean;
+  majority_ready?: boolean;
+  title: string;
+  item_type: 'movie' | 'episode' | 'youtube';
+  item_id: string;
+  meta: ProgressMeta;
+  pee_break?: WatchPartyPeeBreak | null;
+  resume_at?: number | null;
+  pee_cooldown_remaining?: number;
+  show_id: number | null;
+  status: 'scheduled' | 'lobby' | 'playing' | 'paused' | 'ended';
+  scheduled_for: number | null;
+  control_mode: 'host' | 'everyone';
+  position: number;
+  position_at: number;
+  live_position: number;
+  server_now: number;
+  lobby_track: WatchPartyLobbyTrack | null;
+  members: WatchPartyMember[];
+  member_count: number;
+  ready_count: number;
+  messages: WatchPartyMessage[];
+  created_at: number;
+  updated_at: number;
+}
+
+export const watchPartiesQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'parties'],
+    queryFn: async () =>
+      (await apiClient.get('player/parties').json<{ parties: WatchParty[] }>()).parties,
+    staleTime: 4_000,
+    refetchInterval: 6_000,
+  });
+
+export const watchPartyQuery = (partyId: string) =>
+  queryOptions({
+    queryKey: ['player', 'party', partyId],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get(`player/parties/${encodeURIComponent(partyId)}`)
+          .json<{ party: WatchParty }>()
+      ).party,
+    staleTime: 1_500,
+    // a party that's gone stops asking (the room says so instead of spinning)
+    refetchInterval: (q) => (q.state.status === 'error' ? false : 2_500),
+    retry: 1,
+  });
+
+export const watchPartyApi = {
+  get: async (partyId: string): Promise<WatchParty> =>
+    (
+      await apiClient
+        .get(`player/parties/${encodeURIComponent(partyId)}`)
+        .json<{ party: WatchParty }>()
+    ).party,
+  create: async (payload: {
+    title?: string;
+    item_type: 'movie' | 'episode' | 'youtube';
+    item_id: string;
+    meta?: ProgressMeta;
+    show_id?: number | null;
+    scheduled_for?: number | null;
+    control_mode?: 'host' | 'everyone';
+    lobby_music?: boolean;
+  }): Promise<WatchParty> =>
+    (await apiClient.post('player/parties', { json: payload }).json<{ party: WatchParty }>()).party,
+  join: async (partyId: string, opts?: { ready?: boolean; rsvp?: boolean }): Promise<WatchParty> =>
+    (
+      await apiClient
+        .post(`player/parties/${encodeURIComponent(partyId)}/join`, { json: opts ?? {} })
+        .json<{ party: WatchParty }>()
+    ).party,
+  leave: async (partyId: string): Promise<void> => {
+    await apiClient.post(`player/parties/${encodeURIComponent(partyId)}/leave`).json();
+  },
+  state: async (
+    partyId: string,
+    payload: {
+      action?: 'start' | 'play' | 'resume' | 'pause' | 'pee_break' | 'seek' | 'lobby' | 'end';
+      position?: number;
+      shuffle_lobby_music?: boolean;
+      control_mode?: 'host' | 'everyone';
+    },
+  ): Promise<WatchParty> =>
+    (
+      await apiClient
+        .post(`player/parties/${encodeURIComponent(partyId)}/state`, { json: payload })
+        .json<{ party: WatchParty }>()
+    ).party,
+  chat: async (
+    partyId: string,
+    kind: 'chat' | 'reaction',
+    body: string,
+  ): Promise<WatchPartyMessage> =>
+    (
+      await apiClient
+        .post(`player/parties/${encodeURIComponent(partyId)}/chat`, { json: { kind, body } })
+        .json<{ message: WatchPartyMessage }>()
+    ).message,
+  remove: async (partyId: string): Promise<void> => {
+    await apiClient.delete(`player/parties/${encodeURIComponent(partyId)}`).json();
+  },
+};
 
 // ── notes: comments on a title, marks on a moment ─────────────────────
 
@@ -570,14 +866,6 @@ export const guideEdits = {
 };
 
 // ── what the guide knows beyond its catalog ───────────────────────────
-
-export const guideWatchedQuery = () =>
-  queryOptions({
-    queryKey: ['player', 'guide', 'watched'],
-    queryFn: async () =>
-      apiClient.get('player/guide/watched').json<{ movies: number[]; episodes: number[] }>(),
-    staleTime: 10 * MINUTE,
-  });
 
 export interface GuidePerson {
   id: number;
@@ -708,18 +996,6 @@ export interface FollowedChannel {
   video_count?: number;
   owned_count?: number;
 }
-
-export const followedChannelsQuery = () =>
-  queryOptions({
-    queryKey: ['player', 'yt-channels'],
-    queryFn: async () =>
-      (
-        await apiClient
-          .get('video/library', { searchParams: { kind: 'channels', limit: 200 } })
-          .json<{ items?: FollowedChannel[] }>()
-      ).items ?? [],
-    staleTime: 5 * MINUTE,
-  });
 
 // ── podcasts + audiobooks ──────────────────────────────────────────────
 
@@ -881,6 +1157,59 @@ export const videoPrefsQuery = () =>
     retry: false,
   });
 
+export interface EpisodeExtra {
+  guest_stars?: {
+    name: string;
+    character?: string | null;
+    tmdb_id?: number | null;
+    photo?: string | null;
+  }[];
+  crew?: {
+    name: string;
+    job: string;
+    tmdb_id?: number | null;
+    photo?: string | null;
+  }[];
+  still_url?: string | null;
+  rating?: number | null;
+  overview?: string | null;
+  runtime_minutes?: number | null;
+  air_date?: string | null;
+}
+
+export const episodeExtraQuery = (tmdbId: number, season: number, episode: number) =>
+  queryOptions({
+    queryKey: ['player', 'episode-extra', tmdbId, season, episode],
+    queryFn: () =>
+      readJson<EpisodeExtra>(apiClient.get(`video/episode/${tmdbId}/${season}/${episode}`)),
+    staleTime: 30 * MINUTE,
+    retry: false,
+  });
+
+export type VideoIssueEntityType = 'movie' | 'show' | 'episode';
+
+export async function submitVideoIssue(body: {
+  entity_type: VideoIssueEntityType;
+  entity_id: number;
+  category: string;
+  title: string;
+  description?: string;
+}): Promise<{ success: boolean; issue?: { id: number }; error?: string }> {
+  const res = await apiClient.post('video/issues', {
+    json: body,
+    throwHttpErrors: false,
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    issue?: { id: number };
+    error?: string;
+  };
+  if (!res.ok || data.success === false) {
+    throw new Error(data.error || `Failed to submit issue (${res.status})`);
+  }
+  return { success: true, issue: data.issue };
+}
+
 export const personQuery = (tmdbId: number) =>
   queryOptions({
     queryKey: ['player', 'person', tmdbId],
@@ -987,9 +1316,11 @@ export type RequestResult =
 
 /** file it through the video side's own request route: its rules, its quotas */
 export async function requestTitle(body: {
-  kind: 'movie' | 'show';
+  kind: 'movie' | 'show' | 'episode';
   tmdb_id: number;
   title: string;
+  season?: number;
+  episode?: number;
   year?: number | string | null;
   poster_url?: string | null;
   /** a profile that may download (admins always) gets it now: straight to the wishlist */
@@ -1016,6 +1347,47 @@ export async function requestTitle(body: {
   if ((data.error ?? '').toLowerCase().includes('already in the library'))
     return { state: 'owned' };
   return { state: 'error', message: data.message || data.error || 'Could not ask for it' };
+}
+
+export type MusicTrackRequestResult =
+  | { state: 'wishlist' }
+  | { state: 'requested' }
+  | { state: 'owned' }
+  | { state: 'error'; message: string };
+
+/** Put a missing album track onto this profile's wishlist (or pending music request queue). */
+export async function requestMusicTrack(body: {
+  title: string;
+  artist: string;
+  album?: string | null;
+  album_id?: number | null;
+  artist_id?: number | null;
+  track_id?: number | string | null;
+  track_number?: number | null;
+  disc_number?: number | null;
+  duration_ms?: number | null;
+  year?: number | null;
+  image_url?: string | null;
+}): Promise<MusicTrackRequestResult> {
+  const res = await apiClient.post('player/music/request-track', {
+    json: body,
+    throwHttpErrors: false,
+  });
+  let data: {
+    success?: boolean;
+    skipped?: boolean;
+    mode?: 'download' | 'ask';
+    error?: string;
+    message?: string;
+  } = {};
+  try {
+    data = await res.json();
+  } catch {
+    data = {};
+  }
+  if (data.success && data.skipped) return { state: 'owned' };
+  if (data.success) return { state: data.mode === 'ask' ? 'requested' : 'wishlist' };
+  return { state: 'error', message: data.message || data.error || 'Could not request track' };
 }
 
 /** the media server's own resume list, as the video side's dashboard shows it */
@@ -1074,6 +1446,7 @@ export interface StudioCollection {
   media_type: 'movie' | 'show';
   summary?: string | null;
   poster?: string | null;
+  member_posters?: string[];
   pinned?: boolean;
   /** library ids of the members this profile can see */
   members: number[];
@@ -1191,6 +1564,94 @@ export async function resetHomeLayout(device?: string) {
   });
 }
 
+// ── the rows of the movies, tv, music and youtube pages ────────────────
+
+export const pageLayoutQuery = (page: string, device: string) =>
+  queryOptions({
+    queryKey: ['player', 'page-layout', page, device],
+    queryFn: async () =>
+      await apiClient
+        .get(`player/page-layout/${encodeURIComponent(page)}`, { searchParams: { device } })
+        .json<{
+          layout?: { rows: HomeLayout['rows'] };
+          scope?: 'device' | 'all' | null;
+          catalog?: LayoutCatalog;
+        }>(),
+    staleTime: 5 * MINUTE,
+  });
+
+/** save for this screen, or for every screen of the profile ('*') */
+export async function savePageLayout(
+  page: string,
+  layout: unknown,
+  device: string,
+  fromDevice?: string,
+) {
+  await apiClient.put(`player/page-layout/${encodeURIComponent(page)}`, {
+    json: { layout, device, ...(fromDevice ? { from_device: fromDevice } : {}) },
+  });
+}
+
+/** this screen follows the shared layout again; without a device, the page goes to its default */
+export async function resetPageLayout(page: string, device?: string) {
+  await apiClient.delete(`player/page-layout/${encodeURIComponent(page)}`, {
+    searchParams: device ? { device } : {},
+  });
+}
+
+// ── the music page's listening rows ────────────────────────────────────
+
+export interface ListeningAlbum {
+  album_id: number;
+  title: string;
+  artist: string | null;
+  year: number | null;
+  image_url: string | null;
+  plays?: number;
+}
+export interface ListeningArtist {
+  artist_id: number;
+  name: string;
+  plays: number;
+  image_url: string | null;
+}
+export interface ListeningTrack {
+  track_id: number;
+  title: string;
+  artist: string | null;
+  album_id: number;
+  album: string | null;
+  plays: number;
+  image_url: string | null;
+}
+export interface MusicListening {
+  recent: ListeningAlbum[];
+  heavy_rotation: ListeningArtist[];
+  top_albums: ListeningAlbum[];
+  top_tracks: ListeningTrack[];
+  all_time_artists: ListeningArtist[];
+}
+
+/** this profile's plays as albums, artists and tracks of its library */
+export const musicListeningQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'music-listening'],
+    queryFn: async () => await apiClient.get('player/music/listening').json<MusicListening>(),
+    staleTime: 2 * MINUTE,
+  });
+
+// ── libraries: their own pages, and who can't see them ─────────────────
+
+/** the video libraries this profile can see */
+export const playerLibrariesQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'libraries'],
+    queryFn: async () =>
+      (await apiClient.get('player/libraries').json<{ libraries?: PlayerLibrary[] }>()).libraries ??
+      [],
+    staleTime: 5 * MINUTE,
+  });
+
 // ── watchlist (per profile, in player.db) ──────────────────────────────
 
 export type WatchlistKind = 'movie' | 'show' | 'youtube';
@@ -1250,5 +1711,233 @@ export const playableQuery = (itemType: string, itemId: string) =>
         .get(`player/playable/${itemType}/${encodeURIComponent(itemId)}`)
         .json<{ duration?: number; chapters?: { start: number; title: string }[] }>(),
     staleTime: 10 * MINUTE,
+    retry: false,
+  });
+
+// ── player media issue reports (all media types) ───────────────────────
+
+export type PlayerIssueItemType =
+  | 'movie'
+  | 'episode'
+  | 'youtube'
+  | 'home'
+  | 'track'
+  | 'podcast'
+  | 'podcast_episode'
+  | 'audiobook'
+  | 'music_video'
+  | 'commercial';
+
+export type PlayerIssueCategory =
+  | 'playback'
+  | 'audio'
+  | 'subtitles'
+  | 'metadata'
+  | 'quality'
+  | 'other';
+
+export interface PlayerIssue {
+  id: number;
+  profile_id: number;
+  profile_name: string;
+  item_type: PlayerIssueItemType;
+  item_id: string;
+  title: string;
+  subtitle: string;
+  file_path: string;
+  category: PlayerIssueCategory;
+  note: string;
+  position_sec: number;
+  status: 'open' | 'resolved' | 'dismissed';
+  admin_note: string;
+  created_at: number;
+  resolved_at?: number | null;
+}
+
+export interface PlayerIssuesResponse {
+  success: boolean;
+  can_manage: boolean;
+  open_count: number;
+  issues: PlayerIssue[];
+}
+
+export const playerIssuesQuery = (status?: string) =>
+  queryOptions({
+    queryKey: ['player', 'issues', status ?? 'all'],
+    queryFn: () =>
+      apiClient
+        .get('player/issues', { searchParams: status ? { status } : {} })
+        .json<PlayerIssuesResponse>(),
+    staleTime: 30_000,
+  });
+
+export async function reportPlayerIssue(payload: {
+  item_type: PlayerIssueItemType;
+  item_id: string;
+  title: string;
+  subtitle?: string;
+  category: PlayerIssueCategory;
+  note?: string;
+  position_sec?: number;
+}): Promise<{ success: boolean; issue: PlayerIssue }> {
+  return apiClient.post('player/issues', { json: payload }).json();
+}
+
+export async function updatePlayerIssue(
+  issueId: number,
+  changes: { status?: 'open' | 'resolved' | 'dismissed'; admin_note?: string },
+): Promise<{ success: boolean; issue: PlayerIssue }> {
+  return apiClient.put(`player/issues/${issueId}`, { json: changes }).json();
+}
+
+// ── notifications (core/player/notifications.py) ────────────────────────
+
+export type NotificationKind =
+  | 'new_episode'
+  | 'featured_movie'
+  | 'watchlist_available'
+  | 'request_done'
+  | 'season_premiere'
+  | 'leaving_soon'
+  | 'download_ready'
+  | 'party_invite'
+  | 'admin_message'
+  | 'new_music'
+  | 'home_memories'
+  | 'digest'
+  | 'test';
+
+export interface PlayerNotification {
+  id: number;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  image: string | null;
+  /** a /player path */
+  link: string | null;
+  created_at: number;
+  read: boolean;
+  group_key?: string | null;
+}
+
+export interface NotificationList {
+  notifications: PlayerNotification[];
+  unread: number;
+  latest_id: number;
+}
+
+export interface NotificationPrefs {
+  kinds: Record<string, boolean>;
+  featured_not_in_library: boolean;
+  memories_time: string;
+  quiet_hours: boolean;
+  quiet_start: string;
+  quiet_end: string;
+  digest: boolean;
+  digest_time: string;
+  timezone: string;
+}
+
+export interface NotificationKindInfo {
+  id: string;
+  label: string;
+  help: string;
+  default: boolean;
+  locked?: boolean;
+  device?: string;
+}
+
+export const notificationsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'notifications'],
+    queryFn: async () =>
+      apiClient
+        .get('player/notifications', { searchParams: { limit: 50 } })
+        .json<NotificationList>(),
+    staleTime: 30_000,
+  });
+
+export const notificationPrefsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'notification-prefs'],
+    queryFn: async () =>
+      apiClient
+        .get('player/notifications/prefs')
+        .json<{ prefs: NotificationPrefs; kinds: NotificationKindInfo[] }>(),
+    staleTime: 5 * MINUTE,
+  });
+
+export async function markNotificationsRead(ids: number[] | 'all'): Promise<void> {
+  await apiClient.post('player/notifications/read', {
+    json: ids === 'all' ? { all: true } : { ids },
+  });
+}
+
+export async function deleteNotification(id: number): Promise<void> {
+  await apiClient.delete(`player/notifications/${id}`);
+}
+
+export type NotificationPrefsChange = Partial<Omit<NotificationPrefs, 'kinds'>> & {
+  kinds?: Record<string, boolean>;
+};
+
+export async function saveNotificationPrefs(changes: NotificationPrefsChange) {
+  return apiClient
+    .put('player/notifications/prefs', { json: changes })
+    .json<{ prefs: NotificationPrefs; kinds: NotificationKindInfo[] }>();
+}
+
+export async function sendTestNotification(): Promise<NotificationList> {
+  return apiClient.post('player/notifications/test').json<NotificationList>();
+}
+
+// ── item info (scrap/ITEM_INFO_CONTRACT.md) ────────────────────────────
+
+export type InfoItemType =
+  | 'movie'
+  | 'episode'
+  | 'track'
+  | 'audiobook'
+  | 'podcast_episode'
+  | 'home'
+  | 'youtube';
+
+export interface InfoRow {
+  label: string;
+  value: string;
+  mono?: boolean;
+  copy?: boolean;
+}
+
+export interface InfoSection {
+  id: string;
+  title: string;
+  group?: string;
+  rows: InfoRow[];
+}
+
+export interface ItemInfo {
+  item_type: InfoItemType;
+  item_id: string;
+  title: string;
+  subtitle: string;
+  artwork: string | null;
+  sections: InfoSection[];
+}
+
+/** what an item is and what file it is: the server words every value */
+export const itemInfoQuery = (type: InfoItemType, id: string) =>
+  queryOptions({
+    queryKey: ['player', 'info', type, id],
+    queryFn: async () => {
+      try {
+        return await apiClient
+          .get(`player/info/${type}/${encodeURIComponent(id)}`)
+          .json<ItemInfo & { success: boolean }>();
+      } catch (e) {
+        throw new Error(await refusalText(e, "Couldn't load this item's info."));
+      }
+    },
+    staleTime: MINUTE,
     retry: false,
   });

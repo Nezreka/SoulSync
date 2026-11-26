@@ -211,11 +211,11 @@ def test_lookups_never_raise(db):
 # ── library picks: several TV libraries, some anime ───────────────────────────
 
 def test_library_selection_round_trip(db):
-    assert db.get_library_selection("plex") == {"movies": None, "tv": None, "tv_more": [], "anime": []}
+    assert db.get_library_selection("plex") == {"movies": None, "movies_more": [], "tv": None, "tv_more": [], "anime": [], "home_more": []}
     db.set_library_selection("plex", "Movies", "TV Shows",
                              tv_more=["Anime", " Kids ", "", "TV Shows", "Anime"], anime=["Anime"])
     assert db.get_library_selection("plex") == {
-        "movies": "Movies", "tv": "TV Shows", "tv_more": ["Anime", "Kids"], "anime": ["Anime"]}
+        "movies": "Movies", "movies_more": [], "tv": "TV Shows", "tv_more": ["Anime", "Kids"], "anime": ["Anime"], "home_more": []}
     # an older caller saving only movies + tv keeps the lists
     db.set_library_selection("plex", "Movies", "TV")
     assert db.get_library_selection("plex")["tv_more"] == ["Anime", "Kids"]
@@ -675,10 +675,10 @@ def test_libraries_endpoint_saves_the_lists(api, monkeypatch):
     import core.video.sources as vs
     monkeypatch.setattr(vs, "resolve_video_server", lambda: "plex")
     r = client.post("/api/video/libraries", json={
-        "movies": "Movies", "tv": "TV Shows", "tv_more": ["Anime"], "anime": ["Anime"]})
+        "movies": "Movies", "movies_more": [], "tv": "TV Shows", "tv_more": ["Anime"], "anime": ["Anime"], "home_more": []})
     assert r.status_code == 200, r.get_json()
     assert vdb.get_library_selection("plex") == {
-        "movies": "Movies", "tv": "TV Shows", "tv_more": ["Anime"], "anime": ["Anime"]}
+        "movies": "Movies", "movies_more": [], "tv": "TV Shows", "tv_more": ["Anime"], "anime": ["Anime"], "home_more": []}
     # an older client sending only movies + tv keeps the lists
     client.post("/api/video/libraries", json={"movies": "Movies", "tv": "TV Shows"})
     assert vdb.get_library_selection("plex")["anime"] == ["Anime"]

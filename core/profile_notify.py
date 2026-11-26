@@ -18,6 +18,8 @@ logger = get_logger("profile_notify")
 
 _emitter: Optional[Callable[[str, dict, str], None]] = None
 _journal: Optional[Callable[[int, str, str], None]] = None
+# others who hear every note (the player's notifications)
+_listeners: list = []
 
 
 def register_emitter(emit: Callable[[str, dict, str], None]) -> None:
@@ -30,6 +32,12 @@ def register_journal(journal: Callable[[int, str, str], None]) -> None:
     """``journal(profile_id, type, message)``: overrides the default db write."""
     global _journal
     _journal = journal
+
+
+def register_listener(listener: Callable[[int, str, str, Optional[str]], None]) -> None:
+    """``listener(profile_id, message, kind, link)`` after every note. idempotent."""
+    if listener not in _listeners:
+        _listeners.append(listener)
 
 
 def _default_journal(profile_id: int, kind: str, message: str) -> None:
@@ -61,6 +69,11 @@ def notify_profile(profile_id, message: str, kind: str = "info", link: Optional[
                      f"profile:{pid}")
         except Exception:  # noqa: BLE001
             logger.debug("profile notify push failed for %s", pid, exc_info=True)
+    for listener in list(_listeners):
+        try:
+            listener(pid, message, kind, link)
+        except Exception:  # noqa: BLE001 - a listener never fails the note
+            logger.debug("profile notify listener failed for %s", pid, exc_info=True)
     return journaled
 
 
@@ -68,6 +81,7 @@ def _reset_for_tests() -> None:
     global _emitter, _journal
     _emitter = None
     _journal = None
+    _listeners.clear()
 
 
-__all__ = ["notify_profile", "register_emitter", "register_journal"]
+__all__ = ["notify_profile", "register_emitter", "register_journal", "register_listener"]

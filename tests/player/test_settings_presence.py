@@ -47,7 +47,20 @@ BEAT = {"session": "tab1", "item_type": "movie", "item_id": "7", "position": 61.
 # ── settings ─────────────────────────────────────────────────────────────
 
 def test_settings_default_then_save_per_profile(db):
-    assert settings.get(db, 2) == {"share_activity": True, "autoplay_next": True, "still_watching_after": 3}
+    assert settings.get(db, 2) == {
+        "share_activity": True,
+        "autoplay_next": True,
+        "still_watching_after": 3,
+        "show_movie_ratings": False,
+        "show_tv_episode_count": True,
+        "show_year_on_cards": True,
+        "accent_color": "emerald",
+        "commercials_enabled": False,
+        "commercials_era": "auto",
+        "commercials_mode": "cable",
+        "sidebar_order": [],
+        "sidebar_hidden": [],
+    }
     settings.put(db, 2, {"share_activity": False, "still_watching_after": 0})
     assert settings.get(db, 2)["share_activity"] is False
     assert settings.get(db, 3)["share_activity"] is True

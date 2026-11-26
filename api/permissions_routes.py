@@ -320,6 +320,112 @@ def my_asks():
     return jsonify({"success": True, "asks": out})
 
 
+# ── asking for a feature (#2304) ──────────────────────────────────────────
+
+def _me_and_effective():
+    """(profile row, its effective permissions) for the person asking"""
+    pid = get_current_profile_id()
+    prof = get_database().get_profile(int(pid)) if pid is not None else None
+    if not prof:
+        raise store.PermissionRequestError("Pick a profile first.", 401, "profile_required")
+    payload = store.me_payload(get_database(), prof)
+    return prof, (payload.get("effective") or {})
+
+
+@bp.route("/api/profiles/me/feature-requests", methods=["GET"])
+@self_only
+def my_feature_requests():
+    """what this person could ask for, what they have asked for, and the
+    last few answers"""
+    from core import feature_requests as fr
+    try:
+        prof, effective = _me_and_effective()
+        if P.is_admin_row(prof):
+            return jsonify({"success": True, "requestable": [], "pending": [], "answered": []})
+        return jsonify({"success": True, **fr.mine(get_database(), prof["id"], effective)})
+    except store.PermissionRequestError as exc:
+        return _err(exc)
+    except store.PermissionsUnavailable as exc:
+        return _unavailable(exc)
+
+
+@bp.route("/api/profiles/me/feature-requests", methods=["POST"])
+@self_only
+def ask_for_feature():
+    """{feature}: ask an admin to switch it on"""
+    from core import feature_requests as fr
+    try:
+        prof, effective = _me_and_effective()
+        row = fr.ask(get_database(), prof, _body().get("feature"), effective)
+    except fr.FeatureRequestError as exc:
+        return jsonify({"success": False, "error": str(exc)}), exc.status
+    except store.PermissionRequestError as exc:
+        return _err(exc)
+    except store.PermissionsUnavailable as exc:
+        return _unavailable(exc)
+    try:
+        from core.profile_notify import notify_profile
+        for admin in (get_database().get_all_profiles() or []):
+            if P.is_admin_row(admin):
+                notify_profile(admin["id"], f"{prof.get('name') or 'Someone'} asked for {row['label']}",
+                               "info", link="/requests")
+    except Exception as exc:  # noqa: BLE001 - the request is saved; the nudge is extra
+        logger.debug("feature request: admins not notified: %s", exc)
+    return jsonify({"success": True, "request": row})
+
+
+@bp.route("/api/feature-requests", methods=["GET"])
+@admin_only
+def list_feature_requests():
+    from core import feature_requests as fr
+    return jsonify({"success": True, "pending": fr.pending(get_database())})
+
+
+def _answer_feature_request(request_id: int, approve: bool):
+    from core import feature_requests as fr
+    db = get_database()
+
+    def grant(requester_id, feature):
+        # the People editor's own call, so the policy has the last word
+        store.change_profile(db, _profile_or_404(requester_id), {"set": {feature: True}})
+
+    try:
+        row = fr.resolve(db, request_id, approve=approve, by=get_current_profile_id(),
+                         response=_body().get("response"), grant=grant)
+    except fr.FeatureRequestError as exc:
+        return jsonify({"success": False, "error": str(exc)}), exc.status
+    except store.PermissionRequestError as exc:
+        return _err(exc)
+    except store.PermissionsUnavailable as exc:
+        return _unavailable(exc)
+    _audit("feature_request_" + ("approved" if approve else "declined"),
+           target_id=row["requester_id"], target_name=row.get("requester_name"),
+           detail={"feature": row["feature"]})
+    try:
+        from core.profile_notify import notify_profile
+        note = f" ({row['admin_response']})" if row.get("admin_response") else ""
+        notify_profile(row["requester_id"],
+                       (f"{row['label']} is switched on for you now" if approve
+                        else f"Your ask for {row['label']} was declined") + note,
+                       "success" if approve else "info")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("feature request: requester not notified: %s", exc)
+    return jsonify({"success": True, "request": row})
+
+
+@bp.route("/api/feature-requests/<int:request_id>/approve", methods=["POST"])
+@admin_only
+def approve_feature_request(request_id):
+    """switches the feature on for the person who asked"""
+    return _answer_feature_request(request_id, True)
+
+
+@bp.route("/api/feature-requests/<int:request_id>/decline", methods=["POST"])
+@admin_only
+def decline_feature_request(request_id):
+    return _answer_feature_request(request_id, False)
+
+
 @bp.route("/api/profiles/me/permissions", methods=["GET"])
 @self_only
 def my_permissions():

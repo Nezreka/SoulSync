@@ -149,6 +149,58 @@ describe('groupWishlistArtists', () => {
   it('is empty for no tracks', () => {
     expect(groupWishlistArtists([], [])).toEqual([]);
   });
+
+  it('keeps a guest-led album under its album artist (#2300)', () => {
+    // 93 Empire's album credits every track to a guest
+    const albumRow = (name: string, guest: string) =>
+      row({
+        spotify_track_id: name,
+        spotify_data: {
+          name,
+          album: { name: '93 Empire', artists: [{ name: '93 Empire' }] },
+          artists: [{ name: guest }],
+        },
+      });
+    const parsed = [albumRow('One', 'Sofiane'), albumRow('Two', 'Kaaris')].map(
+      (r) => parseWishlistTrack(r, 'album') as ParsedWishlistTrack,
+    );
+    expect(parsed.map((t) => [t.artist, t.albumArtist])).toEqual([
+      ['Sofiane', '93 Empire'],
+      ['Kaaris', '93 Empire'],
+    ]);
+    const groups = groupWishlistArtists(parsed, []);
+    expect(groups.map((g) => g.name)).toEqual(['93 Empire']);
+    expect(groups[0].albums.map((a) => [a.name, a.tracks.length])).toEqual([['93 Empire', 2]]);
+  });
+
+  it("leaves a normal album and a guest's single where they were", () => {
+    const own = parseWishlistTrack(
+      row({
+        spotify_data: {
+          name: 'Xtal',
+          album: { name: 'Selected Ambient Works', artists: [{ name: 'Aphex Twin' }] },
+          artists: [{ name: 'Aphex Twin' }],
+        },
+      }),
+      'album',
+    ) as ParsedWishlistTrack;
+    expect(own.albumArtist).toBeUndefined();
+    const single = parseWishlistTrack(
+      row({
+        spotify_data: {
+          name: 'Feature',
+          album: { name: 'Feature', artists: [{ name: 'Host' }] },
+          artists: [{ name: 'Guest' }],
+        },
+      }),
+      'single',
+    ) as ParsedWishlistTrack;
+    expect(single.albumArtist).toBeUndefined();
+    expect(groupWishlistArtists([own], [single]).map((g) => g.name)).toEqual([
+      'Aphex Twin',
+      'Guest',
+    ]);
+  });
 });
 
 describe('buildArtistImageMap', () => {

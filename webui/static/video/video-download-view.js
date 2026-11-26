@@ -1221,6 +1221,38 @@
             '</details>';
     }
 
+    // #2261: Infer missing resolution / codec / audio / HDR / indexer from the
+    // release title when an indexer omits structured fields.
+    function _inferReleaseMeta(r) {
+        var t = String((r && (r.title || r.release_title)) || '');
+        var res = r && r.resolution;
+        if (!res) {
+            var rm = t.match(/\b(2160p|1080p|720p|480p|4K|UHD)\b/i);
+            if (rm) res = rm[1].toUpperCase() === '4K' || rm[1].toUpperCase() === 'UHD' ? '2160p' : rm[1].toLowerCase();
+        }
+        var codec = r && r.codec;
+        if (!codec) {
+            var cm = t.match(/\b(x265|h\.?265|hevc|x264|h\.?264|avc|av1|vp9|xvid)\b/i);
+            if (cm) {
+                var c = cm[1].toLowerCase().replace('.', '');
+                codec = (c === 'x265' || c === 'h265' || c === 'hevc') ? 'HEVC'
+                    : (c === 'x264' || c === 'h264' || c === 'avc') ? 'H.264' : c.toUpperCase();
+            }
+        }
+        var audio = r && r.audio;
+        if (!audio) {
+            var am = t.match(/\b(Atmos|TrueHD|DTS-HD\.?MA|DTS-HD|DTS|DDP?5\.1|EAC3|AC3|AAC|FLAC|Opus)\b/i);
+            if (am) audio = am[1].toUpperCase();
+        }
+        var hdr = r && r.hdr;
+        if (!hdr) {
+            var hm = t.match(/\b(DV|DoVi|Dolby\.?Vision|HDR10\+|HDR10|HDR|HLG)\b/i);
+            if (hm) hdr = hm[1].toUpperCase().replace(/\./g, ' ');
+        }
+        var indexer = (r && (r.indexer || r.indexer_name || r.tracker)) || '';
+        return { resolution: res || '', codec: codec || '', audio: audio || '', hdr: hdr || '', indexer: indexer };
+    }
+
     function resultCardHTML(r, i, scope) {
         // a pack by its name, or by the server's reading of it in a pack
         // search: 'Show.Complete.Series' names no season to spot (#2233)
@@ -1230,11 +1262,13 @@
         // line 1, an UPPERCASE dot-separated spec line, then the verdict + a hard
         // [ GET ] button. Monospace, sharp, no chrome. .vdl-res stays a column so the
         // live download tracker docks under it on grab.
+        var inferred = _inferReleaseMeta(r);
         var meta = [SRC_LABEL[r.source] || r.source || ''];
-        if (r.codec) meta.push(String(r.codec).toUpperCase());
-        if (r.audio) meta.push(String(r.audio).toUpperCase().replace('-', ' '));
-        if (r.hdr) meta.push(String(r.hdr).toUpperCase());
+        if (inferred.codec) meta.push(String(inferred.codec).toUpperCase());
+        if (inferred.audio) meta.push(String(inferred.audio).toUpperCase().replace('-', ' '));
+        if (inferred.hdr) meta.push(String(inferred.hdr).toUpperCase());
         if (r.repack) meta.push('REPACK');
+        if (inferred.indexer && !r.username) meta.push(inferred.indexer);
         meta.push(r.username ? r.username + (r.peers > 1 ? ' (' + r.peers + ')' : '') : (r.seeders || 0) + ' SEED');
         if (r.group) meta.push(r.group);
         meta.push(r.size_gb + ' GB');
@@ -1265,7 +1299,7 @@
         return '<div class="vdl-res' + (r.accepted ? ' vdl-res--ok' : ' vdl-res--rejected') + (isBest ? ' vdl-res--best' : '') + '" data-vdl-card="' + i + '">' +
             '<div class="vdl-res-main">' +
                 '<div class="vdl-r-l1">' +
-                    '<span class="vdl-r-q vdl-r-q--' + resKind(r.resolution) + '">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</span>' +
+                    '<span class="vdl-r-q vdl-r-q--' + resKind(inferred.resolution) + '">' + esc(RES_LABEL[inferred.resolution] || inferred.resolution || '?') + '</span>' +
                     '<span class="vdl-r-title" title="' + esc(r.title) + '">' + esc(r.title) + '</span>' +
                     (isBest ? '<span class="vdl-r-best">Best match</span>' : '') +
                     // in a show's search: which episode this is, and whether you have it

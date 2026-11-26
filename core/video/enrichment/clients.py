@@ -687,7 +687,26 @@ class TMDBClient:
         guests = [{"name": g["name"], "character": g.get("character"), "tmdb_id": g.get("id"),
                    "photo": (self.PROFILE + g["profile_path"]) if g.get("profile_path") else None}
                   for g in (d.get("guest_stars") or [])[:20] if g.get("name")]
-        return {"guest_stars": guests,
+        raw_crew = d.get("crew") or (d.get("credits") or {}).get("crew") or []
+        key_jobs = ("Director", "Writer", "Teleplay", "Story", "Screenplay")
+        crew = []
+        seen_crew = set()
+        for c in raw_crew:
+            job = c.get("job") or ""
+            name = c.get("name") or ""
+            if not name or job not in key_jobs:
+                continue
+            key = (c.get("id") or name, job)
+            if key in seen_crew:
+                continue
+            seen_crew.add(key)
+            crew.append({
+                "name": name,
+                "job": job,
+                "tmdb_id": c.get("id"),
+                "photo": (self.PROFILE + c["profile_path"]) if c.get("profile_path") else None,
+            })
+        return {"guest_stars": guests, "crew": crew[:10],
                 "still_url": (self.IMG + d["still_path"]) if d.get("still_path") else None,
                 "rating": d.get("vote_average") or None, "overview": d.get("overview") or None,
                 "runtime_minutes": d.get("runtime"), "air_date": d.get("air_date") or None}

@@ -39,15 +39,16 @@ def test_none_track_number_defaults_to_one():
 
 
 def test_zero_track_number_defaults_to_one():
-    """Track 0 isn't valid in any convention — coerce to 1."""
-    # Note: 0 is non-negative so falls into the default-0 path which
-    # the formatter then treats as "default" via the explicit default
-    # arg. Since 0 is technically valid output of `int(0)`, the helper
-    # passes it through. Document the behavior here.
-    # Actually re-checking: 0 satisfies `>= 0` so returns 0. That
-    # means format would emit "0/13" for malformed input. Not great
-    # but at least it doesn't crash. Test pins current behavior.
-    assert format_track_number_tag(0, 13) == "0/13"
+    """Track 0 isn't valid in any convention — coerce to 1.
+
+    this used to pin "0/13" with a note that it wasn't great: zero passed
+    the non-negative check. the import marks an unknown position 0, so that
+    was a real tag on real files. the tag writer now leaves an explicit
+    unknown out altogether (track_number_known); asked anyway, the formatter
+    falls back to 1 as it does for a missing number."""
+    assert format_track_number_tag(0, 13) == "1/13"
+    # a TOTAL of zero still means unknown, not one
+    assert format_track_number_tag(6, 0) == "6"
 
 
 def test_negative_total_treated_as_unknown():
@@ -119,20 +120,37 @@ def test_the_retag_writer_splits_vorbis_and_keeps_id3_combined(tmp_path):
     """Both conventions at once: TRCK is DEFINED as 'N/M', TRACKNUMBER is not.
     The bug was applying ID3's rule to FLAC, where players and taggers show the
     field as written — track number '1/1'."""
-    from core.tag_writer import _write_vorbis
+    import shutil
+    from pathlib import Path
 
-    class _Fake(dict):
-        pass
+    import mutagen
 
-    audio = _Fake()
-    _write_vorbis(audio, None, None, None, None, None, None,
+    from core.tag_writer import _write_fields
+
+    fixtures = Path(__file__).resolve().parent.parent / "fixtures" / "audio"
+
+    def _file(ext, name):
+        dest = tmp_path / f"{name}.{ext}"
+        shutil.copy(fixtures / f"silence.{ext}", dest)
+        audio = mutagen.File(dest)
+        if audio.tags is None:
+            audio.add_tags()
+        return audio
+
+    audio = _file("flac", "a")
+    _write_fields(audio, None, None, None, None, None, None,
                   track_num=1, total_tracks=1, disc_num=None, bpm=None)
     assert audio["tracknumber"] == ["1"]
     assert audio["tracktotal"] == ["1"]
     assert audio["totaltracks"] == ["1"]
 
-    audio = _Fake()
-    _write_vorbis(audio, None, None, None, None, None, None,
+    mp3 = _file("mp3", "b")
+    _write_fields(mp3, None, None, None, None, None, None,
+                  track_num=1, total_tracks=1, disc_num=None, bpm=None)
+    assert [str(t) for t in mp3.tags["TRCK"].text] == ["1/1"]
+
+    audio = _file("flac", "c")
+    _write_fields(audio, None, None, None, None, None, None,
                   track_num=6, total_tracks=None, disc_num=None, bpm=None)
     assert audio["tracknumber"] == ["6"]
     assert "tracktotal" not in audio, "an unknown total must not be written"

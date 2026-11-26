@@ -25,7 +25,9 @@ contract is shared.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait
+from concurrent.futures import FIRST_COMPLETED, wait
+
+from core.idle_executor import IdleThreadPool
 import threading
 import time
 from dataclasses import dataclass, field
@@ -41,7 +43,7 @@ logger = get_logger('metadata.multi_source_search')
 DEFAULT_SEARCH_TIMEOUT_SECONDS = 12.0
 # Timed-out calls can still be inside a provider. Reuse a bounded pool across
 # requests, and bound queued work too; never allocate another pool per timeout.
-_search_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="MetadataSearch")
+_search_pool = IdleThreadPool(max_workers=8, thread_name_prefix="MetadataSearch")
 _search_slots = threading.BoundedSemaphore(24)
 
 

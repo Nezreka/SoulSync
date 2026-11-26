@@ -212,6 +212,8 @@ const _ma: {
   /** asks used in each limited kind's window, for "5 asks a week, 2 used" */
   asksUsed: Partial<Record<LimitKind, number>> | null;
   adminName: string;
+  /** what this person could ask an admin to switch on, and what they have (#2304) */
+  features: { requestable: { key: string; label: string }[]; pending: string[] } | null;
   open: string | null;
   poll: ReturnType<typeof setTimeout> | null;
 } = {
@@ -224,6 +226,7 @@ const _ma: {
   privacy: null,
   asksUsed: null,
   adminName: '',
+  features: null,
   open: null,
   poll: null,
 };
@@ -386,6 +389,13 @@ async function _maLoadCanDo(): Promise<void> {
   ]);
   _ma.adminName = admin;
   _ma.asksUsed = null;
+  if (!perms.isAdmin) {
+    const f = await _maJson<{
+      requestable?: { key: string; label: string }[];
+      pending?: string[];
+    }>('/api/profiles/me/feature-requests');
+    _ma.features = f ? { requestable: f.requestable ?? [], pending: f.pending ?? [] } : null;
+  }
   if (LIMIT_KINDS.some((k) => requestLimit(perms, k))) {
     // music, movies and TV each count on their own (/api/profiles/me/asks)
     const q = await _maJson<{ asks?: Partial<Record<LimitKind, { used?: number }>> }>(
@@ -575,7 +585,7 @@ const _CAN_ICONS: Record<CanDoRow['id'], string> = {
 export function _maCanDoSection(): string {
   const perms = getMyPermissions();
   if (perms.isAdmin) return '';
-  const can = describePermissions(perms, { used: _ma.asksUsed });
+  const can = describePermissions(perms, { used: _ma.asksUsed, forMember: true });
   const rows = can.rows
     .map((r) => {
       const lead = r.strong
@@ -595,12 +605,27 @@ export function _maCanDoSection(): string {
     })
     .join('');
   const who = escapeHtml(_ma.adminName || 'your admin');
-  const ask = can.anyOff
-    ? `<p class="ma-can-ask">Something you'd like that isn't here? Ask ${who}. Changes reach you right away.</p>`
-    : '';
-  const never = can.never.length
-    ? `<div class="ma-can-never"><b>Not part of your profile:</b> ${escapeHtml(can.never.join(', '))}.</div>`
-    : '';
+  // what else there is, as something to ask for, not a list of what is denied
+  // (#2303), each with a button that asks (#2304). when the list of what can
+  // be asked for didn't load, the names alone, as before.
+  const askable = _ma.features?.requestable ?? [];
+  const waiting = new Set(_ma.features?.pending ?? []);
+  const never = askable.length
+    ? `<div class="ma-can-never"><b>There's more you can ask ${who} for:</b>
+        <div class="ma-can-asks">${askable
+          .map((f) =>
+            waiting.has(f.key)
+              ? `<span class="ma-can-ask-chip" data-asked="true">${escapeHtml(f.label)} · asked</span>`
+              : `<button type="button" class="ma-can-ask-chip" data-ma="ask-feature" data-id="${escapeHtml(f.key)}" aria-label="Ask for ${escapeHtml(f.label)}">${escapeHtml(f.label)} · Ask</button>`,
+          )
+          .join('')}</div></div>`
+    : can.never.length
+      ? `<div class="ma-can-never"><b>There's more you can ask ${who} for:</b> ${escapeHtml(can.never.join(', '))}.</div>`
+      : '';
+  const ask =
+    can.anyOff && !can.never.length
+      ? `<p class="ma-can-ask">Something you'd like that isn't here? Ask ${who}.</p>`
+      : '';
   return `
     <section class="ma-section" id="ma-cando" aria-labelledby="ma-cando-h">
       <h4 class="ma-section-title" id="ma-cando-h">What you can do</h4>
@@ -1191,6 +1216,27 @@ function _maAgo(stamp: string | null | undefined): string {
 
 // ── events ──────────────────────────────────────────────────────────────────
 
+/** ask an admin to switch a feature on (#2304) */
+async function askForFeature(feature: string): Promise<void> {
+  try {
+    const res = await fetch('/api/profiles/me/feature-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feature }),
+    });
+    const data = (await res.json()) as { success?: boolean; error?: string };
+    if (!res.ok || !data.success) {
+      toast(data.error || 'Could not send that. Try again.', 'error');
+      return;
+    }
+    if (_ma.features && !_ma.features.pending.includes(feature)) _ma.features.pending.push(feature);
+    toast(`Asked ${_ma.adminName || 'your admin'}. You'll hear when it's answered.`, 'success');
+    _maRender();
+  } catch {
+    toast('Could not send that. Try again.', 'error');
+  }
+}
+
 function _maOnClick(e: Event): void {
   const overlay = e.currentTarget as HTMLElement;
   if (e.target === overlay) {
@@ -1210,6 +1256,9 @@ function _maOnClick(e: Event): void {
       break;
     case 'oauth':
       connectMyAccount(id);
+      break;
+    case 'ask-feature':
+      void askForFeature(id);
       break;
     case 'save':
       void saveMyAccountToken(id);

@@ -675,20 +675,31 @@ function VdlGroup({
   let fail = 0;
   let pctSum = 0;
   let speed = 0;
-  let eta = 0;
+  let maxEta = 0;
+  let remainingBytes = 0;
   for (const d of episodes) {
     if (d.status === 'completed') {
       done++;
       pctSum += 100;
     } else if (vdlIsActive(d.status)) {
       act++;
-      pctSum += clampPct(d.progress);
+      const epPct = clampPct(d.progress);
+      pctSum += epPct;
       speed += Number(d.speed_bps) || 0;
-      eta = Math.max(eta, Number(d.eta_seconds) || 0);
+      maxEta = Math.max(maxEta, Number(d.eta_seconds) || 0);
+      if (d.size_bytes && d.size_bytes > 0) {
+        remainingBytes += d.size_bytes * (1 - epPct / 100);
+      }
     } else {
       fail++;
     }
   }
+  // #2268: Under a shared bandwidth cap (e.g. VPN), one fast file at 15 MB/s
+  // plus several slow files at 100 KB/s makes Math.max(eta) report days even
+  // though the slower files inherit the full bandwidth as soon as the first
+  // finishes. Use cumulative remainingBytes / total active speed when known.
+  let eta =
+    remainingBytes > 0 && speed > 0 ? Math.max(1, Math.round(remainingBytes / speed)) : maxEta;
   const packActive = Boolean(pack && vdlIsActive(pack.status));
   if (packActive && pack) {
     speed = Number(pack.speed_bps) || speed;
@@ -765,7 +776,12 @@ function VdlGroup({
         )}
         <div className="dlc-main">
           <div className="dlc-eyebrow">
-            TV · {c0.season != null ? `Season ${c0.season}` : 'Episodes'}
+            TV ·{' '}
+            {c0.season != null
+              ? `Season ${c0.season}`
+              : c0.scope === 'series'
+                ? 'Complete Series'
+                : 'Episodes'}
           </div>
           <div className="dlc-gtitle">
             {first.title || 'Show'}
@@ -806,11 +822,20 @@ function VdlGroup({
       </div>
       {open ? (
         <div className="dlc-group-rows">
-          {episodes.map((d) => (
-            <div key={d.id} style={{ display: vdlMatchesFilter(d.status, filter) ? '' : 'none' }}>
-              {renderCard(d, true)}
+          {episodes.length > 0 ? (
+            episodes.map((d) => (
+              <div key={d.id} style={{ display: vdlMatchesFilter(d.status, filter) ? '' : 'none' }}>
+                {renderCard(d, true)}
+              </div>
+            ))
+          ) : pack ? (
+            <div
+              key={pack.id}
+              style={{ display: vdlMatchesFilter(pack.status, filter) ? '' : 'none' }}
+            >
+              {renderCard(pack, true)}
             </div>
-          ))}
+          ) : null}
         </div>
       ) : null}
     </div>

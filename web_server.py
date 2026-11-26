@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from core.idle_executor import IdleThreadPool
 
 # localhost connects try the loopback address that answers, before any client
 # opens one: ::1 first cost ~2s per connection to an IPv4-only server on
@@ -52,7 +53,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.6.9"
+_SOULSYNC_BASE_VERSION = "3.7.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -202,6 +203,7 @@ from core.metadata.source import (
 from core import direct_download_state
 from core.downloads import music_video as _music_video
 from core import runtime_state as _rt_state
+from core import acoustid_account as _acoustid_account
 from core.runtime_state import (
     activity_feed,
     activity_feed_lock,
@@ -1779,7 +1781,8 @@ stream_lock = stream_state.lock
 # behind each other. Single-user behavior is unchanged (one cookie → one session).
 stream_background_task = None                # legacy alias (default session)
 stream_tasks = {}                            # session_id -> Future
-stream_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="StreamPrep")
+# idle threads end (#2253); stream prep is a fetch, nothing to finish at exit
+stream_executor = IdleThreadPool(max_workers=4, thread_name_prefix="StreamPrep")
 
 
 def _stream_session_id():
@@ -3784,27 +3787,30 @@ def spa_catch_all(page):
 
 def _get_windowed_calls(key, current_total):
     """Record current cumulative total and return (calls_1h, calls_24h).
-    Deque stores (timestamp, cumulative_total) in chronological order.
-    To get calls in a window: current_total minus the oldest total within that window."""
+    Deque stores (timestamp, cumulative_total) in chronological order, one entry
+    per change of the total: the status poll runs every ~5 s and an idle
+    service's total does not move, and appending every poll kept up to 17,300
+    identical entries per service. Calls in a window: current_total minus the
+    total in force when the window opened (the last entry at or before its start;
+    the first entry when the history begins inside the window)."""
     now = time.time()
     cutoff_1h = now - 3600
     cutoff_24h = now - 86400
 
     with _enrichment_activity_lock:
         history = _enrichment_activity_log.setdefault(key, collections.deque(maxlen=17300))
-        history.append((now, current_total))
+        if not history or history[-1][1] != current_total:
+            history.append((now, current_total))
 
-        # Forward scan: first entry with ts >= cutoff is the oldest in that window
-        oldest_1h_total = current_total
-        oldest_24h_total = current_total
-        found_24h = False
+        oldest_1h_total = oldest_24h_total = history[0][1]
         for ts, total in history:
-            if not found_24h and ts >= cutoff_24h:
-                oldest_24h_total = total
-                found_24h = True
-            if ts >= cutoff_1h:
-                oldest_1h_total = total
+            if ts > cutoff_24h:
                 break
+            oldest_24h_total = total
+        for ts, total in history:
+            if ts > cutoff_1h:
+                break
+            oldest_1h_total = total
 
     return max(0, current_total - oldest_1h_total), max(0, current_total - oldest_24h_total)
 
@@ -3906,7 +3912,8 @@ def _get_enrichment_status():
     # Non-worker services (configured status only)
     services['acoustid'] = {
         'name': 'AcoustID',
-        'configured': bool(config_manager.get('acoustid.api_key', '')),
+        'configured': bool(_acoustid_account.app_key(config_manager)),
+        'user_key': bool(_acoustid_account.user_key(config_manager)),
     }
     services['listenbrainz'] = {
         'name': 'ListenBrainz',
@@ -4768,7 +4775,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'fanart', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'seerr_compat', 'mcp', 'server_activity']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'flaresolverr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'fanart', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'seerr_compat', 'mcp', 'server_activity']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -9979,6 +9986,10 @@ def library_completion_stream():
         }
     )
 
+# one artist's tracks the ownership check reads (rows come back a-z by title)
+_CHECK_TRACKS_ARTIST_CAP = 5000
+
+
 @app.route('/api/library/check-tracks', methods=['POST'])
 @requires("music.access")
 def library_check_tracks():
@@ -9996,8 +10007,12 @@ def library_check_tracks():
         db = MusicDatabase()
         active_server = config_manager.get_active_media_server()
 
-        # Single query: get ALL tracks by this artist from the DB
-        db_tracks = db.search_tracks(artist=artist_name, limit=500, server_source=active_server)
+        # Single query: get ALL tracks by this artist from the DB. the cap was
+        # 500, and the rows come back a-z by title, so a big catalogue (every
+        # edition of every album) lost its late-alphabet titles and called them
+        # not owned. the scan below is dict lookups for the exact titles now
+        db_tracks = db.search_tracks(artist=artist_name, limit=_CHECK_TRACKS_ARTIST_CAP,
+                                     server_source=active_server)
 
         # Ownership is per-artist. When the requested artist isn't in the
         # library by name, search_tracks() degrades to a whole-table word-OR
@@ -10055,16 +10070,17 @@ def library_check_tracks():
         target_album = data.get('album_name', '')
         target_album_norm = _normalize(target_album) if target_album else ''
 
+        from core.text.title_match import TitleCandidatePool
+        _pools = {}
+
         def _match_title(search_norm, search_clean, candidates, threshold=0.7):
-            """Find best matching track from a list of (norm, clean, db_track) candidates."""
-            from core.text.title_match import choose_best_title_candidate
-            return choose_best_title_candidate(
-                search_norm,
-                search_clean,
-                candidates,
-                lambda left, right: SequenceMatcher(None, left, right).ratio(),
-                threshold=threshold,
-            )
+            """Find best matching track from a list of (norm, clean, db_track) candidates.
+            one pool per list: the same pick as choose_best_title_candidate,
+            with exact titles as lookups instead of a fuzzy pass per title"""
+            pool = _pools.get(id(candidates))
+            if pool is None:
+                pool = _pools[id(candidates)] = TitleCandidatePool(candidates)
+            return pool.best(search_norm, search_clean, threshold=threshold)
 
         # A 0.7 title ratio is only safe inside one album's track list. The
         # #808 fallback (and the album-less path) searches the artist's whole
@@ -20195,6 +20211,11 @@ def _invalidate_sync_fingerprint(playlist_id):
 def get_spotify_playlists():
     """Fetches all user playlists from Spotify and enriches them with local sync status."""
     client = get_spotify_client_for_profile()
+    # a member who hasn't connected their own Spotify is not shown the server's (#2301)
+    from core.playlists.account_isolation import refusal_for_request
+    _blocked = refusal_for_request("spotify", own_connected=client is not get_spotify_client())
+    if _blocked:
+        return jsonify(_blocked), 401
     if not client or not client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
     try:
@@ -23946,20 +23967,42 @@ def _chat_auto_prove_loop():
         except Exception:
             logger.debug("chat auto-prove loop error", exc_info=True)
 
+def _watched_batch_rooms():
+    """The ``batch:<id>`` rooms with at least one client in them, or None when
+    the socket server's rooms cannot be read (the caller then builds every
+    batch, as before). python-socketio drops a room when its last member
+    leaves or disconnects."""
+    try:
+        rooms = socketio.server.manager.rooms.get('/', {})
+        return {room for room, members in list(rooms.items())
+                if isinstance(room, str) and room.startswith('batch:') and members}
+    except Exception:  # noqa: BLE001 - unknown manager: keep the old behaviour
+        return None
+
+
 def _emit_download_status_loop():
     """Background thread that pushes download batch status every 2 seconds to subscribed rooms.
     Skipped entirely while no client is connected — the transfer fetch below is a real
     slskd API call (TTL-cached), so at idle this loop polled slskd every ~2s for nobody.
     Download progression doesn't depend on it (the workers poll transfers themselves);
-    this cache is populated on demand by its other callers."""
+    this cache is populated on demand by its other callers.
+
+    Only batches someone has joined the room of are built: the status of every
+    batch in memory was built (under tasks_lock) every 2 s and sent to rooms
+    nobody was in; this loop was measured at 29% of a core on a live install."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         if not _has_connected_clients():
+            continue
+        watched = _watched_batch_rooms()
+        if watched is not None and not watched:
             continue
         try:
             live_transfers_lookup = get_cached_transfer_data()
             with tasks_lock:
                 for batch_id, batch in download_batches.items():
+                    if watched is not None and f'batch:{batch_id}' not in watched:
+                        continue
                     try:
                         status_data = _build_batch_status_data(
                             batch_id, batch, live_transfers_lookup
@@ -23983,7 +24026,8 @@ _activity_sids_lock = threading.Lock()
 def _emit_server_activity_loop():
     """push live server activity to open drawers every 3 s, and keep sampling
     every 10 s while nobody looks so the play log records every play. does
-    nothing at all without a plex or jellyfin server."""
+    nothing at all without a plex or jellyfin server or anyone playing on
+    soulsync's own player."""
     from core.server_activity import run_sampler_forever
 
     def _has_subscribers():
@@ -24720,6 +24764,22 @@ _configure_stats_api(get_database=get_database, config_manager=config_manager,
                      lastfm_import_workers_getter=lambda: lastfm_import_workers)
 app.register_blueprint(_create_stats_blueprint())
 
+# Song identification (the Search bar's listen button): ffmpeg + shazamio
+# fingerprint a short clip against Shazam, then the ordinary search resolves
+# the answer to a downloadable row. The blueprint takes only the deps it names.
+from api.listen_routes import configure as _configure_listen_api, create_blueprint as _create_listen_blueprint
+_configure_listen_api(get_database=get_database,
+                      build_search_deps=_build_search_deps,
+                      library_check=_search_library_check,
+                      media_server_engine=lambda: media_server_engine,
+                      config_manager=config_manager)
+app.register_blueprint(_create_listen_blueprint())
+
+# AcoustID account linking for the settings card (#2318)
+from api.acoustid_routes import configure as _configure_acoustid_api, create_blueprint as _create_acoustid_blueprint
+_configure_acoustid_api(config_manager_=config_manager)
+app.register_blueprint(_create_acoustid_blueprint())
+
 # Media server descriptors for the UI (settings page, wizard, quick-switch).
 from api.media_servers import configure as _configure_media_servers_api, create_blueprint as _create_media_servers_blueprint
 _configure_media_servers_api(config_manager_=config_manager, engine_getter=lambda: media_server_engine)
@@ -24950,6 +25010,15 @@ from api.player_stream import create_blueprint as _bp_player_stream
 app.register_blueprint(_bp_player_stream())
 from api.player_tracks import create_blueprint as _bp_player_tracks
 app.register_blueprint(_bp_player_tracks())
+# ...and its home videos (core/video/home_videos.py)
+from api.player_home import create_blueprint as _bp_player_home
+app.register_blueprint(_bp_player_home())
+# ...and its info sheet: what an item is and what file it is
+from api.player_info import create_blueprint as _bp_player_info
+app.register_blueprint(_bp_player_info())
+# ...and its downloads: devices, what's on them, copies made for them
+from api.player_offline import create_blueprint as _bp_player_offline
+app.register_blueprint(_bp_player_offline())
 # MetaSync's SIN charts: offered as playlists, opened on demand
 from api.metasync_charts import configure as _cfg_msc, create_blueprint as _bp_msc
 _cfg_msc(get_database=get_database)
@@ -25122,6 +25191,10 @@ app.register_blueprint(_bp_perm())
 try:
     from core.profile_notify import register_emitter as _reg_profile_notify
     _reg_profile_notify(lambda event, payload, room: socketio.emit(event, payload, room=room))
+    # a request ready or refused is a player notification too
+    from core.player.notifications import on_profile_note as _player_note
+    from core.profile_notify import register_listener as _reg_profile_listener
+    _reg_profile_listener(_player_note)
 except Exception:
     logger.exception("Could not wire profile notifications")
 
@@ -25304,6 +25377,16 @@ try:
     _ensure_video_import_folder(_get_video_db_for_import)
 except Exception:
     logger.warning("could not start the video import folder worker", exc_info=True)
+
+# the video folders, watched (core/video/folder_watch.py): with soulsync's own
+# folder scan as the library, a file dropped in shows up within a minute. it
+# watches nothing while plex or jellyfin is the video source.
+try:
+    from core.video.folder_watch import ensure_started as _ensure_video_folder_watch
+    from api.video import get_video_db as _get_video_db_for_watch
+    _ensure_video_folder_watch(_get_video_db_for_watch)
+except Exception:
+    logger.warning("could not start the video folder watch", exc_info=True)
 
 # Library Manager v2 — the UI-facing API mounted on /api/library/v2/*.
 # NOT opt-in: the cutover happened, lib2_* is the maintained catalogue, and
@@ -26434,6 +26517,14 @@ def start_runtime_services():
         except Exception as _ckpt_err:
             logger.debug(f"could not start the wal checkpoint thread: {_ckpt_err}")
 
+        # SoulSync Connect: obtain/renew wildcard TLS cert, serve HTTPS for
+        # paired mobile/TV apps, and open the blind rendezvous WebSocket.
+        try:
+            from core.connect import rendezvous as _connect_rendezvous
+            _connect_rendezvous.start_runtime(app, get_database, config_manager)
+        except Exception as _connect_err:
+            logger.debug(f"could not start connect runtime: {_connect_err}")
+
         # One-time repair: purge artist album-list cache entries poisoned by
         # partial watchlist probes (limit=5/max_pages=1 results stored in the
         # full-discography slot — artist pages showed only the newest handful
@@ -26549,6 +26640,15 @@ def start_runtime_services():
         except Exception as _recover_err:
             # Recovery must not crash startup — the files are still on disk.
             logger.warning("[Startup] Atomic staging reconciliation failed: %s", _recover_err)
+
+        # lidarr_download.import_through_lidarr: hand Lidarr the downloads a
+        # previous session left waiting for it (a batch that never finished).
+        # In the background: it waits on Lidarr's imports.
+        try:
+            from core.downloads.lidarr_handoff import start_startup_sweep
+            start_startup_sweep()
+        except Exception as _lidarr_sweep_err:
+            logger.warning("[Startup] Lidarr imports sweep failed to start: %s", _lidarr_sweep_err)
 
         # Establish the barrier before any runtime service that can mutate the
         # music catalogue. It treats an unclaimed-but-required upgrade as

@@ -58,6 +58,7 @@ def light_file(row: dict) -> Dict[str, Any]:
         "audio_codec": row.get("audio_codec"),
         "audio_channels": row.get("audio_channels"),
         "dynamic_range": row.get("dynamic_range"),
+        "edition": row.get("edition") or None,
         "atmos": bool(row.get("atmos")),
         # None = not read yet (the media info job gets to it), [] = no tags
         "audio_languages": _langs_or_none(row.get("audio_languages")),
@@ -196,6 +197,12 @@ def _recycle_on(db) -> bool:
         return True
 
 
+def _title_extras(db, kind: str, item_id: int) -> list:
+    """the title's trailers and featurettes, read off its folder (core/video/extras.py)"""
+    from core.video import extras
+    return extras.public(extras.title_extras(db, kind, item_id))
+
+
 def movie_library(db, movie_id: int, *, disk: Optional[_Disk] = None,
                   watcher=None) -> Optional[Dict[str, Any]]:
     """the whole tab for one movie (every file gets the disk checks).
@@ -225,6 +232,7 @@ def movie_library(db, movie_id: int, *, disk: Optional[_Disk] = None,
         "quality": _quality_block(db, detail.get("quality_profile_id"), best),
         "copies": _copies(files),
         "files": files,
+        "extras": _title_extras(db, "movie", movie_id),
         "locked": db.is_hands_off("movie", movie_id),
         "recycle": _recycle_on(db),
     }
@@ -403,6 +411,7 @@ def show_library(db, show_id: int, *, season: Optional[int] = None,
     return {
         "kind": "show", "id": show_id, "title": ident.get("title"), "year": ident.get("year"),
         "identity": _identity(db, "show", show_id),
+        "extras": _title_extras(db, "show", show_id),
         "summary": {
             "owned": sum(s["owned"] for s in real_seasons),
             "total": sum(s["total"] for s in real_seasons),

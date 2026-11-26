@@ -453,7 +453,10 @@ class AmazonWorker:
                 backfill=backfill or None,
             )
             if entity_type == 'album':
-                set_expected_track_count(conn, entity_id, total_tracks)
+                set_expected_track_count(
+                    conn, entity_id, total_tracks,
+                    source='amazon', provider_id=provider_id,
+                )
             record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
                            service='amazon', status='matched')
             conn.commit()

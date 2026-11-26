@@ -256,6 +256,41 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
     )
 
 
+def _try_source_video(task_id, batch_id, track, deps):
+    """a song from a YouTube playlist that no catalogue knows: its own video
+    first (#2306). True when a download started; False to search as usual
+    (not a stub, no video known, YouTube not set up, or the video failed)."""
+    from core.downloads import source_video
+    with tasks_lock:
+        task = download_tasks.get(task_id) or {}
+        track_info = task.get('track_info')
+        tried = bool(task.get('_source_video_tried'))
+        if task:
+            task['_source_video_tried'] = True
+    if tried or not source_video.stub_id_of(track_info):
+        return False
+    client = source_video.youtube_client(deps)
+    if client is None:
+        return False
+    db = None
+    try:
+        from database.music_database import get_database
+        db = get_database()
+    except Exception:  # noqa: BLE001
+        db = None
+    video_id = source_video.video_id_for(track_info, db)
+    if not video_id:
+        return False
+    logger.info(f"[Modal Worker] '{getattr(track, 'name', '')}' is a YouTube playlist's own song: "
+                f"taking its video {video_id} before searching (task {task_id})")
+    try:
+        return bool(deps.attempt_download_with_candidates(
+            task_id, [source_video.candidate_for(video_id, track_info)], track, batch_id))
+    except Exception as e:  # noqa: BLE001 - the usual search still runs
+        logger.info(f"[Modal Worker] the playlist's own video failed for task {task_id}: {e}")
+        return False
+
+
 def _private_album_bundle_staging_miss_reason(batch_id: Optional[str], deps: Any) -> Optional[str]:
     """Return a user-facing miss reason when per-track search should stop.
 
@@ -763,6 +798,13 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                 _seed_from_preflight_pool(task_id, batch_id, track)
             except Exception as _seed_err:  # noqa: BLE001 - a missed seed just means a fresh search
                 logger.debug("preflight pool seed failed for %s: %s", task_id, _seed_err)
+        if not cached_first and _try_source_video(task_id, batch_id, track, deps):
+            with tasks_lock:
+                used_filename = download_tasks.get(task_id, {}).get('filename')
+                used_username = download_tasks.get(task_id, {}).get('username')
+            if used_filename and used_username:
+                deps.store_batch_source(batch_id, used_username, used_filename)
+            return
         if cached_first and _try_cached_candidates(task_id, batch_id, track, deps):
             if getattr(deps, 'evaluate_candidates', None) is not None:
                 from core.downloads import decision_log

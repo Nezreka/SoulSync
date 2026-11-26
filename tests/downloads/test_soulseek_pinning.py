@@ -547,23 +547,20 @@ def test_album_bundle_falls_back_when_no_album_folder(configured_client, tmp_pat
     dl.assert_not_awaited()
 
 
-def test_download_extracts_id_from_list_response(configured_client):
-    """Pinning: slskd sometimes returns a list of file objects.
-    The first item's id is the download_id."""
+def test_download_rejects_ambiguous_legacy_list_response(configured_client):
+    """One requested file cannot be identified from two ID-only entries."""
     with patch.object(configured_client, '_make_request',
                       AsyncMock(return_value=[{'id': 'list-id'}, {'id': 'second'}])):
         result = _run_async(configured_client.download('user', 'song.flac', 1024))
-    assert result == 'list-id'
+    assert result is None
 
 
-def test_download_falls_back_to_filename_when_no_id_in_response(configured_client):
-    """Pinning: defensive — older slskd builds returned 201 Created
-    with no id field. The client uses the filename as the download
-    identifier in that case so downstream tracking still works."""
+def test_download_rejects_response_without_transfer_id(configured_client):
+    """A filename is not an acknowledgement or a usable transfer ID."""
     with patch.object(configured_client, '_make_request',
                       AsyncMock(return_value={'status': 'queued'})):
         result = _run_async(configured_client.download('user', 'song.flac', 1024))
-    assert result == 'song.flac'
+    assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -1487,3 +1484,17 @@ def test_chat_loops_skip_slskd_while_it_is_unreachable():
     for name in ("_emit_chat_push_loop", "_chat_auto_prove_loop"):
         loop = ws.split(f"def {name}")[1].split("\ndef ")[0]
         assert "unreachable_backoff_active()" in loop, name
+
+
+def test_an_empty_accepted_reply_from_older_slskd_is_a_download(configured_client):
+    """slskd 0.23 and older answer a successful enqueue with a bare 201 and
+    no body, which reads as {}. that is accepted, with the filename standing
+    in for the id, or every soulseek download fails on those versions"""
+    with patch.object(configured_client, '_make_request', AsyncMock(return_value={})):
+        result = _run_async(configured_client.download('user', 'song.flac', 1024))
+    assert result == 'song.flac'
+
+
+def test_a_failed_request_is_still_no_download(configured_client):
+    with patch.object(configured_client, '_make_request', AsyncMock(return_value=None)):
+        assert _run_async(configured_client.download('user', 'song.flac', 1024)) is None

@@ -11,6 +11,7 @@ import type {
   PlayMethod,
   Player,
   Pulse,
+  ServerKind,
   Session,
   StatsPayload,
   Transcoder,
@@ -227,6 +228,17 @@ export function avatarTone(name: string | null | undefined): string {
   return `linear-gradient(135deg, ${a}, ${b})`;
 }
 
+const SERVER_WORDS: Record<ServerKind, string> = {
+  plex: 'Plex',
+  jellyfin: 'Jellyfin',
+  soulsync: 'SoulSync',
+};
+
+/** Plex, Jellyfin or SoulSync (its own player) */
+export function serverWord(server: ServerKind | string | null | undefined): string {
+  return SERVER_WORDS[server as ServerKind] ?? 'Server';
+}
+
 export const METHOD_LABEL: Record<PlayMethod, string> = {
   direct_play: 'Direct Play',
   direct_stream: 'Direct Stream',
@@ -347,7 +359,7 @@ export function splitReason(text: string): [string, string] {
 export function whoLine(s: Session, multiServer = false): string[] {
   const bits = [deviceLabel(s.player), whereLabel(s.connection.remote, s.connection.location)];
   // with both servers set, which one this stream is on
-  if (multiServer) bits.push(s.server === 'plex' ? 'Plex' : 'Jellyfin');
+  if (multiServer) bits.push(serverWord(s.server));
   return bits.filter(Boolean);
 }
 
@@ -455,11 +467,13 @@ export function heroSentence(stats: StatsPayload): Segment[] {
   const out: Segment[] = [];
   const push = (text: string, strong = false) => out.push({ text, strong });
   const servers =
-    h.servers.length > 1
-      ? ' across both servers'
-      : h.servers.length === 1
-        ? ` on ${h.servers[0] === 'plex' ? 'Plex' : 'Jellyfin'}`
-        : '';
+    h.servers.length > 2
+      ? ' across every server'
+      : h.servers.length > 1
+        ? ' across both servers'
+        : h.servers.length === 1
+          ? ` on ${serverWord(h.servers[0])}`
+          : '';
   push(`In the last ${range} `);
   push(count(h.people, 'person', 'people'), true);
   push(' played ');

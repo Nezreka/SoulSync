@@ -32,6 +32,8 @@ export interface SubtitleTrack {
 export interface Tracks {
   audio: AudioTrack[];
   subtitles: SubtitleTrack[];
+  /** the file's own chapter marks (a video with fewer than two has none) */
+  chapters?: { start: number; end?: number | null; title: string }[];
 }
 
 /** 'off', or a language code ('en', 'eng'); null: never picked */

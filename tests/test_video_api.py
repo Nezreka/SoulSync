@@ -534,12 +534,12 @@ def test_libraries_endpoint_lists_and_saves(tmp_path, monkeypatch):
         assert [m["title"] for m in data["movies"]] == ["Movies"]
         # one library of each kind and nothing ever picked: they're picked
         # for you, so a fresh install's first scan reads something
-        assert data["selected"] == {"movies": "Movies", "tv": "TV", "tv_more": [], "anime": []}
+        assert data["selected"] == {"movies": "Movies", "movies_more": [], "tv": "TV", "tv_more": [], "anime": [], "home_more": []}
 
         # "— None —" for tv is a choice and stays one on the next load
         assert client.post("/api/video/libraries", json={"movies": "Movies", "tv": ""}).status_code == 200
         data2 = client.get("/api/video/libraries").get_json()
-        assert data2["selected"] == {"movies": "Movies", "tv": "", "tv_more": [], "anime": []}
+        assert data2["selected"] == {"movies": "Movies", "movies_more": [], "tv": "", "tv_more": [], "anime": [], "home_more": []}
     finally:
         videoapi._video_db = None
 
@@ -715,7 +715,7 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             "usenet_remove_completed": "off",
             "redownload_failed": True,
             "monitor_specials": True,
-            "movies_additional_paths": [], "tv_additional_paths": [],
+            "movies_additional_paths": [], "tv_additional_paths": [], "home_paths": [],
             # the optional 4K libraries, off until switched on
             "movies_4k_enabled": False, "movies_4k_path": "",
             "tv_4k_enabled": False, "tv_4k_path": ""}
@@ -734,7 +734,7 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             "usenet_remove_completed": "files",
             "redownload_failed": True,
             "monitor_specials": True,
-            "movies_additional_paths": [], "tv_additional_paths": [],
+            "movies_additional_paths": [], "tv_additional_paths": [], "home_paths": [],
             # the optional 4K libraries, off until switched on
             "movies_4k_enabled": False, "movies_4k_path": "",
             "tv_4k_enabled": False, "tv_4k_path": ""}
@@ -2228,3 +2228,31 @@ def test_detail_pages_say_whether_the_profile_can_mark_watched(tmp_path, monkeyp
     finally:
         import api.video as videoapi
         videoapi._video_db = None
+
+
+def test_a_half_filled_video_plex_still_says_music_s_connection_is_in_use(tmp_path, monkeypatch):
+    """a working plex read "not set up" on the video settings: video had an
+    address saved and no token, so the form showed that half, while the real
+    connection (which ignores a half) used music's plex and worked. the
+    answer now says which connection is in use, so the page can say so."""
+    import core.settings as cs
+
+    class CM:
+        def get_plex_config(self): return {"base_url": "http://plex:32400", "token": "musictoken"}
+        def get_jellyfin_config(self): return {}
+        def get_active_media_server(self): return "plex"
+    monkeypatch.setattr(cs, "config_manager", CM())
+    c = _client_as(tmp_path, is_admin=True)
+    assert c.post("/api/video/server-config",
+                  json={"plex": {"base_url": "http://plex:32400", "token": ""}}).status_code == 200
+    p = c.get("/api/video/server-config").get_json()["plex"]
+    assert p["base_url"] == "http://plex:32400" and p["has_token"] is False   # the form keeps the half
+    assert p["in_use"] == {"ready": True, "source": "music"}                 # but video works through music's
+    assert "musictoken" not in str(p)
+
+
+def test_nothing_anywhere_is_not_in_use(tmp_path, monkeypatch):
+    _no_music_servers(monkeypatch)
+    c = _client_as(tmp_path, is_admin=True)
+    p = c.get("/api/video/server-config").get_json()["plex"]
+    assert p["in_use"]["ready"] is False

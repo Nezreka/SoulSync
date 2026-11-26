@@ -20,6 +20,7 @@ import asyncio
 from unittest.mock import patch
 
 from core.soulseek_client import SoulseekClient
+from core.slskd_transfer import acknowledged_transfer_id
 
 
 def _client():
@@ -215,32 +216,33 @@ def _enqueue_reply(*pairs):
             'failed': []}
 
 
-def test_extract_transfer_id_reads_real_enqueue_shape():
+def test_acknowledged_transfer_id_reads_real_enqueue_shape():
     reply = _enqueue_reply(('11111111-aaaa', 'a\\song.flac'))
-    assert SoulseekClient._extract_transfer_id(reply, 'a\\song.flac') == '11111111-aaaa'
+    assert acknowledged_transfer_id(reply, 'peerA', 'a\\song.flac') == '11111111-aaaa'
 
 
-def test_extract_transfer_id_matches_filename_among_several():
+def test_acknowledged_transfer_id_matches_filename_among_several():
     reply = _enqueue_reply(('id-1', 'a\\one.flac'), ('id-2', 'a\\two.flac'))
-    assert SoulseekClient._extract_transfer_id(reply, 'a\\two.flac') == 'id-2'
+    assert acknowledged_transfer_id(reply, 'peerA', 'a\\two.flac') == 'id-2'
     # no match and more than one entry: do not guess
-    assert SoulseekClient._extract_transfer_id(reply, 'a\\three.flac') is None
+    assert acknowledged_transfer_id(reply, 'peerA', 'a\\three.flac') is None
 
 
-def test_extract_transfer_id_single_entry_with_renamed_file():
+def test_acknowledged_transfer_id_rejects_mismatched_filename():
     reply = _enqueue_reply(('id-1', 'a\\One.flac'))
-    assert SoulseekClient._extract_transfer_id(reply, 'a\\one.flac') == 'id-1'
+    assert acknowledged_transfer_id(reply, 'peerA', 'a\\one.flac') is None
 
 
-def test_extract_transfer_id_empty_or_failed_enqueue():
-    assert SoulseekClient._extract_transfer_id(
-        {'enqueued': [], 'failed': ['a\\song.flac']}, 'a\\song.flac') is None
-    assert SoulseekClient._extract_transfer_id({}, 'x') is None
+def test_acknowledged_transfer_id_empty_or_failed_enqueue():
+    assert acknowledged_transfer_id(
+        {'enqueued': [], 'failed': ['a\\song.flac']}, 'peerA', 'a\\song.flac') is None
+    # an empty reply is older slskd's accepted 201 (no body): the filename stands in
+    assert acknowledged_transfer_id({}, 'peerA', 'x') == 'x'
 
 
-def test_extract_transfer_id_keeps_legacy_shapes():
-    assert SoulseekClient._extract_transfer_id({'id': 'x1'}, 'f') == 'x1'
-    assert SoulseekClient._extract_transfer_id([{'id': 'x2'}], 'f') == 'x2'
+def test_acknowledged_transfer_id_keeps_legacy_shapes():
+    assert acknowledged_transfer_id({'id': 'x1'}, 'peerA', 'f') == 'x1'
+    assert acknowledged_transfer_id([{'id': 'x2'}], 'peerA', 'f') == 'x2'
 
 
 def test_download_with_real_reply_registers_id_and_scoped_clear_works():

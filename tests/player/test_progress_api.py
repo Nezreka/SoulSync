@@ -24,6 +24,8 @@ def db(tmp_path):
 @pytest.fixture
 def client(db, monkeypatch):
     monkeypatch.setattr(player_api, "player_db", lambda: db)
+    # home's library rows read the video side: none here (test_home_libraries.py has them)
+    monkeypatch.setattr(player_api, "_home_libraries", lambda: [])
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(player_api.create_blueprint())
@@ -265,20 +267,24 @@ def test_every_player_route_declares_its_access():
     rules = [r for r in app.url_map.iter_rules() if r.rule.startswith("/api/player/")]
     own = [r for r in rules if "/progress" in r.rule or r.rule.endswith("/continue")
            or "/favorites" in r.rule or r.rule.endswith("/home-layout")
+           or "/page-layout/" in r.rule
            or r.rule.endswith("/watchlist") or r.rule == "/api/player/watched"
            or r.rule.endswith("/settings") or "/presence" in r.rule
            or "/note" in r.rule or "/guide/channels" in r.rule or "/guide/lineup" in r.rule
-           or "/guide/reminders" in r.rule]
-    music = [r for r in rules if r.rule.endswith("/music-channels")]
+           or "/guide/reminders" in r.rule or "/parties" in r.rule
+           or "/downloads" in r.rule or "/admin/users" in r.rule or r.rule.endswith("/player/setup")
+           or "/commercials" in r.rule or "/issues" in r.rule or "/notifications" in r.rule]
+    music = [r for r in rules if r.rule.endswith("/music-channels") or r.rule.endswith("/music/listening")]
     discover = [r for r in rules if "/discover-playlists" in r.rule]
-    playlists = [r for r in rules if r not in discover and ("/playlists" in r.rule or r.rule.endswith("/top"))]
+    playlists = [r for r in rules if r not in discover and ("/playlists" in r.rule or r.rule.endswith("/top") or r.rule.endswith("/request-track"))]
     library = [r for r in rules if r not in own and r not in music and r not in playlists and r not in discover]
-    assert len(own) == 34 and len(library) == 10 and len(music) == 1 and len(playlists) == 3
+    assert len(own) == 69 and len(library) == 13 and len(music) == 2 and len(playlists) == 4
     # soulsync's discovery playlists: the manager's discover gate, the same as its discover page
     assert len(discover) == 3
     for rule in discover:
         assert declared_access(app.view_functions[rule.endpoint]) == ("perm", "music.discover"), rule.rule
-    assert declared_access(app.view_functions[music[0].endpoint]) == ("perm", "music.library")
+    for rule in music:
+        assert declared_access(app.view_functions[rule.endpoint]) == ("perm", "music.library"), rule.rule
     # playlists and an artist's top songs: the music side's own gate
     for rule in playlists:
         assert declared_access(app.view_functions[rule.endpoint]) == ("perm", "music.access"), rule.rule
@@ -388,8 +394,14 @@ def test_the_layout_contract_cleans_what_it_hands_out():
 
 def test_watchlist_store(db, monkeypatch):
     from core.player import watchlist
+    # only THIS thread's clock is scripted: watchlist.time is the time module
+    # itself, and a worker another test left running that asks the time would
+    # use one of the three values up (StopIteration, in whichever test ran next)
+    import threading
+    real_time, me = watchlist.time.time, threading.get_ident()
     times = iter([100.0, 200.0, 300.0])
-    monkeypatch.setattr(watchlist.time, "time", lambda: next(times))
+    monkeypatch.setattr(watchlist.time, "time",
+                        lambda: next(times) if threading.get_ident() == me else real_time())
     watchlist.add(db, 1, "movie", "41")
     watchlist.add(db, 1, "youtube", "dQw4w9WgXcQ",
                   {"title": "A video", "artwork": "https://i.ytimg.com/vi/x/hq.jpg",

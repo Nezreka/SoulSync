@@ -18,6 +18,7 @@ import {
   serverMusicChannel,
   specChannel,
   specFromRule,
+  studioCollectionChannels,
   marathonItems,
   type Channel,
   type PeopleTitles,
@@ -31,20 +32,19 @@ import {
   PX_PER_MINUTE,
   saveRules,
 } from './-lib/guide';
+import { guideScheduleOptions, sharedCommercials } from './-lib/guide-schedule';
 import { albumArtwork } from './-lib/images';
 import { premieresFor } from './-lib/premieres';
 import {
   hashSeed,
   mergeIntoBlocks,
   programsInWindow,
-  startOfLocalDay,
   type GuideItem,
   type GuideProgram,
 } from './-lib/schedule';
 import {
   favoritesQuery,
   guideChannelsQuery,
-  guideWatchedQuery,
   personTitlesQuery,
   guideEdits,
   lineupQuery,
@@ -54,7 +54,10 @@ import {
   saveFavorites,
   songsQuery,
   playlistsQuery,
-  videoCatalogQuery,
+  studioCollectionsQuery,
+  guideCatalogQuery,
+  guideCommercialsQuery,
+  guidePremieresQuery,
 } from './-player.api';
 import { ChannelForm } from './-ui/guide-form';
 import { GuideDetail, GuideGrid, OnNow, type Picked } from './-ui/guide-grid';
@@ -62,6 +65,7 @@ import { GuidePop, GuideStrip } from './-ui/guide-pop';
 import { SearchIcon } from './-ui/icons';
 import { Empty, PageTitle, Tabs, styles as s } from './-ui/kit';
 import { LineupEditor } from './-ui/lineup-editor';
+import { notifyError } from './-ui/notice';
 import { setLineup } from './-ui/playback/tuner';
 import { useSections } from './-ui/sections';
 import { ConfirmSheet } from './-ui/sheet';
@@ -87,7 +91,7 @@ const MUSIC_POOL = 300;
 const BROWSE_HOURS = 2;
 const BROWSE_LIMIT = 24;
 
-function useNow(everyMs = 30_000): number {
+function useNow(everyMs = 10_000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), everyMs);
@@ -133,8 +137,9 @@ function useFavorites() {
       queryClient.setQueryData(favoritesQuery().queryKey, next);
       return { before };
     },
-    onError: (_e, _next, ctx) => {
+    onError: (e, _next, ctx) => {
       if (ctx?.before) queryClient.setQueryData(favoritesQuery().queryKey, ctx.before);
+      notifyError("Couldn't save your favorites")(e);
     },
   });
   const list = favorites.data ?? [];
@@ -154,7 +159,13 @@ function GuidePage() {
   const navigate = useNavigate({ from: '/player/guide' });
   const now = useNow();
   const [offset, setOffset] = useState(0);
-  const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.video });
+  // the day's frozen pool: the same one every device schedules from
+  const catalog = useQuery({ ...guideCatalogQuery(), enabled: sections.video });
+  const studioCols = useQuery({
+    ...studioCollectionsQuery(),
+    enabled: sections.video,
+    retry: false,
+  });
   const playlists = useQuery({ ...playlistsQuery(), enabled: sections.music });
   const musicChannels = useQuery({ ...musicChannelsQuery(), enabled: sections.music });
   const firstPlaylists = useMemo(
@@ -169,6 +180,8 @@ function GuidePage() {
   const favorites = useFavorites();
   const made = useQuery(guideChannelsQuery());
   const lineupQ = useQuery(lineupQuery());
+  const commConfigQ = useQuery(guideCommercialsQuery());
+  const premieresQ = useQuery({ ...guidePremieresQuery(), enabled: sections.video });
   const queryClient = useQueryClient();
   const [making, setMaking] = useState<SavedChannel | 'new' | null>(null);
   const [editingLineup, setEditingLineup] = useState(false);
@@ -186,10 +199,20 @@ function GuidePage() {
     const local = loadRules(profileId);
     moved.current = true;
     if (!local.length) return;
+    // only the ones the server took leave this browser: a failure (server
+    // down, a rule it refuses) keeps them here for the next visit to try
     void Promise.all(
-      local.map((r) => guideEdits.add('mine', specFromRule(r)).catch(() => null)),
-    ).then(() => {
-      saveRules(profileId, []);
+      local.map((r) =>
+        guideEdits.add('mine', specFromRule(r)).then(
+          () => true,
+          () => false,
+        ),
+      ),
+    ).then((done) => {
+      saveRules(
+        profileId,
+        local.filter((_, i) => !done[i]),
+      );
       void refreshMade();
     });
   }, [made.data, profileId]);
@@ -276,6 +299,9 @@ function GuidePage() {
   );
   const allChannels = useMemo(() => {
     const out: Channel[] = [...videoChannels];
+    if (cat && studioCols.data?.length) {
+      out.push(...studioCollectionChannels(studioCols.data, cat));
+    }
     if (musicChannel) out.splice(Math.min(3, out.length), 0, musicChannel);
     firstPlaylists.forEach((p, i) => {
       // only songs this profile can play, by their library track (a row id plays nothing)
@@ -307,6 +333,7 @@ function GuidePage() {
     return out;
   }, [
     videoChannels,
+    studioCols.data,
     musicChannel,
     serverMusic,
     playlistKey,
@@ -323,37 +350,27 @@ function GuidePage() {
     () => applyLineup(allChannels, lineupQ.data ?? []),
     [allChannels, lineupQ.data],
   );
-  // what this profile has seen: channels air the unseen first, a marathon starts at your next episode
-  const watched = useQuery({ ...guideWatchedQuery(), enabled: sections.video });
-  const seen = useMemo(() => {
-    const out = new Set<string>();
-    for (const id of watched.data?.movies ?? []) out.add(`movie:${id}`);
-    for (const id of watched.data?.episodes ?? []) out.add(`episode:${id}`);
-    return out;
-  }, [watched.data]);
-  const seenKey = String(watched.dataUpdatedAt);
+  // no "air the unseen first" here: a channel is one shared timeline, the same
+  // on every device and every profile, so what one profile has seen can't shape it
+  const commercials = useMemo(() => sharedCommercials(commConfigQ.data), [commConfigQ.data]);
+
   const channels = useMemo(() => {
     const visible = lined.filter((c) => !c.hidden);
-    // new episodes and films premiere on their home channel, in the evening
-    const premieres = premieresFor(cat, visible, today);
+    // what's new airs in the slot the server gave it, on the channel the
+    // server named: the same on every device (-lib/premieres.ts). the home is
+    // picked among every channel, hidden ones too: a profile that hid HBO
+    // must not move HBO's premiere onto a channel everyone else also watches
+    const premieres = premieresFor(premieresQ.data, lined);
     return numberChannels(visible).map((c) => {
       if (c.music) return c;
-      const mine = premieres.get(c.id);
       return {
         ...c,
-        // shows in blocks of two, films in the evening, the unseen first
-        schedule: {
-          seen,
-          seenKey,
-          daypart: true,
-          blocks: 2,
-          today: startOfLocalDay(today),
-          premieres: mine,
-          premiereKey: mine?.map((p) => `${p.item.key}@${p.at}`).join(','),
-        },
+        // Shared broadcast schedule across all devices (Desktop, Android, TV):
+        // deterministic from (channelId, day, pool, sharedCommercials)
+        schedule: guideScheduleOptions(today, commercials, premieres.get(c.id)),
       };
     });
-  }, [lined, seen, seenKey, today, cat]);
+  }, [lined, today, commercials, premieresQ.data]);
   const numbers = useMemo(() => new Map(channels.map((c) => [c.id, c.number])), [channels]);
 
   // channel up / down follow the guide's numbers, from anywhere in the player
@@ -508,7 +525,7 @@ function GuidePage() {
           {(
             [
               ['all', 'All'],
-              ['favorites', `Favorites${favorites.list.length ? ` ${favorites.list.length}` : ''}`],
+              ['favorites', 'Favorites'],
               ['video', 'Movies & TV'],
               ['music', 'Music'],
               ['kids', 'Kids'],
@@ -598,11 +615,17 @@ function GuidePage() {
           danger
           onClose={() => setRemoving(null)}
           onConfirm={() => {
-            void guideEdits.remove(removing.id).then(() => {
-              setRemoving(null);
-              setPicked(null);
-              void refreshMade();
-            });
+            void guideEdits
+              .remove(removing.id)
+              .then(() => {
+                setRemoving(null);
+                setPicked(null);
+                void refreshMade();
+              })
+              .catch((e: unknown) => {
+                setRemoving(null);
+                notifyError("Couldn't remove that channel")(e);
+              });
           }}
         >
           {removing.scope === 'server'

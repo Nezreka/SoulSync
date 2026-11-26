@@ -25,7 +25,7 @@ import re
 from functools import lru_cache
 import unicodedata
 from collections.abc import Callable, Iterable
-from typing import TypeVar
+from typing import Generic, TypeVar
 
 T = TypeVar("T")
 
@@ -643,7 +643,66 @@ def choose_best_title_candidate(
     return best_payload
 
 
+def bounded_ratio(threshold: float, matchers: dict | None = None) -> Callable[[str, str], float]:
+    """SequenceMatcher.ratio() that skips the full compare when the cheap
+    upper bounds already fall under ``threshold`` (it answers 0.0 then).
+    every caller of the similarity only asks ">= threshold", so the answer
+    is the same and a miss costs a length check instead of an alignment.
+    ``matchers`` keeps one matcher per right-hand string between calls (the
+    candidate side, indexed once instead of once per search title)."""
+    from difflib import SequenceMatcher
+
+    if matchers is None:
+        matchers = {}
+
+    def ratio(left: str, right: str) -> float:
+        total = len(left) + len(right)
+        # real_quick_ratio() without building the matcher (that build indexes
+        # every character of ``right`` and is most of the cost)
+        if not total or 2.0 * min(len(left), len(right)) / total < threshold:
+            return 1.0 if not total else 0.0
+        sm = matchers.get(right)
+        if sm is None:
+            sm = matchers[right] = SequenceMatcher(None, right, right)
+        sm.set_seq1(left)
+        if sm.quick_ratio() < threshold:
+            return 0.0
+        return sm.ratio()
+
+    return ratio
+
+
+class TitleCandidatePool(Generic[T]):
+    """choose_best_title_candidate over one candidate list, asked many times
+    (a page of titles against one artist's catalogue). exact and cleaned
+    titles are dict lookups, picked the way the full scan picks them; only a
+    title with neither falls back to the fuzzy scan."""
+
+    def __init__(self, candidates: Iterable[tuple[str, str, T]]):
+        self.candidates = list(candidates)
+        self._norm: dict = {}
+        self._clean: dict = {}
+        self._matchers: dict = {}
+        for entry in self.candidates:
+            self._norm.setdefault(entry[0], entry)
+            self._clean.setdefault(entry[1], []).append(entry)
+
+    def best(self, search_norm: str, search_clean: str, *, threshold: float = 0.7) -> T | None:
+        hit = self._norm.get(search_norm)
+        if hit is not None:
+            return hit[2]
+        same = self._clean.get(search_clean)
+        if same:
+            # the scan's rank: closest length to the search title, first on a tie
+            return min(same, key=lambda e: abs(len(search_norm) - len(e[0])))[2]
+        return choose_best_title_candidate(
+            search_norm, search_clean, self.candidates, bounded_ratio(threshold, self._matchers),
+            threshold=threshold)
+
+
 __all__ = [
+    "bounded_ratio",
+    "TitleCandidatePool",
     "titles_plausibly_same",
     "is_trailing_version_qualifier",
     "strip_redundant_context_qualifiers",

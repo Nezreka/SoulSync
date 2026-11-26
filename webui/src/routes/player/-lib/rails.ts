@@ -50,6 +50,8 @@ export interface RailCard {
   artSizes?: string;
   /** a small label over the artwork's corner: a duration, an episode count */
   badge?: string;
+  /** a small tag on the art's top corner: "4K" when another copy is 4K */
+  chip?: string;
   /** you have it: a small check on the art, the words in its tooltip */
   have?: string;
   /** not yours: the card is dimmed, the words in its tooltip */
@@ -93,11 +95,15 @@ export function fraction(
 
 export function continueCard(row: ProgressRow): RailCard {
   const meta = row.meta ?? {};
+  const art =
+    row.item_type === 'youtube'
+      ? youtubeThumb(meta.artwork ?? meta.backdrop, 'card', row.item_id)
+      : remoteImage(meta.artwork ?? meta.backdrop);
   return {
     key: `${row.item_type}:${row.item_id}`,
     title: meta.title || 'Untitled',
     subtitle: meta.subtitle,
-    art: remoteImage(meta.artwork ?? meta.backdrop),
+    art,
     href: meta.href,
     shape: SHAPE_BY_TYPE[row.item_type] ?? 'square',
     progress: fraction(row.position_seconds, row.duration_seconds),
@@ -247,6 +253,7 @@ export function movieCard(m: CatalogMovie): RailCard {
     ...(m.has_poster ? posterArt('movie', m.id) : { art: null }),
     href: `/player/movies/${m.id}`,
     shape: 'poster',
+    have: 'In your library',
     badge: m.rating ? `★ ${m.rating.toFixed(1)}` : undefined,
     preview: { kind: 'movie', id: m.id },
   };
@@ -260,6 +267,7 @@ export function showCard(x: CatalogShow): RailCard {
     ...(x.has_poster ? posterArt('show', x.id) : { art: null }),
     href: `/player/tv/${x.id}`,
     shape: 'poster',
+    have: 'In your library',
     badge: `${x.episode_count} ep`,
     preview: { kind: 'show', id: x.id },
   };

@@ -221,9 +221,9 @@ export function useLibraryCard() {
     const confirmed = await window.showConfirmDialog?.({
       title: 'Deep Scan Library',
       message:
-        'A deep scan re-checks every track in your media server library.\n\n' +
-        '• Adds any new tracks that were missed\n' +
-        '• Removes tracks no longer on your server\n' +
+        'A deep scan re-checks every track in your library.\n\n' +
+        '• Catches what the regular scans missed\n' +
+        '• Removes tracks that are no longer there\n' +
         '• Preserves all existing metadata and enrichment data\n\n' +
         'This may take a while for large libraries. Continue?',
     });

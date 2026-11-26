@@ -1201,6 +1201,26 @@ CREATE TABLE IF NOT EXISTS video_watch_state (
     PRIMARY KEY (profile_id, kind, item_id)
 );
 
+-- ── the same title on a second media server (core/video/server_links.py) ──
+-- the library's rows belong to the video server. with plex AND jellyfin
+-- connected, the other server's item for each movie, show and episode is
+-- kept here: its id there, and the watch state both sides had when they were
+-- last compared, so a change on either one can be told from no change and
+-- carried to the other. additive: nothing reads it unless linking is on.
+CREATE TABLE IF NOT EXISTS video_server_links (
+    kind TEXT NOT NULL,               -- movie | show | episode
+    item_id INTEGER NOT NULL,         -- movies.id | shows.id | episodes.id
+    server_source TEXT NOT NULL,      -- the OTHER server: plex | jellyfin
+    server_id TEXT NOT NULL,          -- the item's id there
+    their_play_count INTEGER,         -- that server's watch state at the last compare
+    our_play_count INTEGER,           -- the library row's, at the last compare
+    last_viewed_at TEXT,
+    seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, item_id, server_source)
+);
+CREATE INDEX IF NOT EXISTS idx_video_server_links_server
+    ON video_server_links(server_source, kind, server_id);
+
 -- ── file changes (the library manager's history and undo) ──
 -- one row per file a person renamed, moved, deleted or filed under another
 -- episode. enough is kept to put it back: where it was, where the recycle
@@ -1266,3 +1286,50 @@ CREATE TABLE IF NOT EXISTS video_shelf_life_keep (
     set_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (kind, tmdb_id)
 );
+
+-- ── home videos (v77) ──
+-- clips from a camera or a phone: a server's "home videos" / "other videos"
+-- library or a folder on disk. never looked up, matched or renamed. the
+-- user_* columns are the person's own edits and a rescan never touches them;
+-- a file gone from disk is marked missing_since, never deleted on the first
+-- miss. sort_at is the date that orders everything: the user's filmed date,
+-- else the one read from the clip, else when it was added.
+CREATE TABLE IF NOT EXISTS home_videos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,              -- disk | plex | jellyfin
+    source_key TEXT NOT NULL,          -- disk: the file's path; a server: its item id
+    root TEXT NOT NULL,                -- the folder or server library it is in
+    folder TEXT NOT NULL DEFAULT '',   -- its folder under the root: the album
+    album_key TEXT NOT NULL DEFAULT '',
+    path TEXT,                         -- the file (as the server sees it, for a server's)
+    stream_key TEXT,                   -- plex: the part key to relay
+    size_bytes INTEGER,
+    mtime REAL,
+    title TEXT,
+    user_title TEXT,
+    camera_at TEXT,                    -- the clip's own creation time (ffprobe)
+    server_at TEXT,                    -- the date the media server gave it
+    filmed_at TEXT,                    -- local wall time, YYYY-MM-DDTHH:MM:SS
+    filmed_source TEXT,                -- camera | name | server | file | added
+    user_filmed_at TEXT,
+    sort_at TEXT,
+    duration_s REAL,
+    width INTEGER,
+    height INTEGER,
+    video_codec TEXT,
+    audio_codec TEXT,
+    work_state INTEGER NOT NULL DEFAULT 1,  -- 1 needs a look with ffprobe + a picture, 2 a picture, 0 done
+    work_tries INTEGER NOT NULL DEFAULT 0,
+    probed_at TEXT,
+    thumb_path TEXT,
+    thumb_at_s REAL,
+    user_thumb_at_s REAL,
+    notes TEXT,
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    seen_at TEXT,
+    missing_since TEXT,
+    UNIQUE (source, source_key)
+);
+CREATE INDEX IF NOT EXISTS idx_home_videos_root_sort ON home_videos(root, sort_at);
+CREATE INDEX IF NOT EXISTS idx_home_videos_album ON home_videos(album_key, sort_at);
+CREATE INDEX IF NOT EXISTS idx_home_videos_work ON home_videos(work_state) WHERE work_state > 0;

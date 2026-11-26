@@ -156,8 +156,7 @@ def settle_absent_rows(database, rows: List[Any], *,
         from core.library2.paths import missing_path_root_is_healthy
         root_healthy = missing_path_root_is_healthy
     judged = [row for row in rows
-              if (row["file_state"] or "active") in ("active", "missing_suspected")
-              and root_healthy(row["path"])]
+              if (row["file_state"] or "active") in ("active", "missing_suspected")]
     if not judged:
         return {}
     done: Dict[int, str] = {}
@@ -166,6 +165,18 @@ def settle_absent_rows(database, rows: List[Any], *,
         for row in judged:
             twin = twins.get(int(row["id"]))
             if not twin:
+                continue
+            # a record whose own folder can't be judged (its storage is away,
+            # or the mount it names no longer exists) is settled only against
+            # a twin on the SAME track: the song still has its file, so all
+            # that is given up is a spare record, and a scan brings it back if
+            # that storage returns. across two tracks an unjudged folder could
+            # be hiding a real second copy, so those wait for it.
+            #
+            # #2289: without this a library that had been moved between
+            # mounts kept every record of the old mounts for good. the old
+            # mount is never "healthy" again, so nothing was ever settled.
+            if not root_healthy(row["path"]) and int(twin["track_id"]) != int(row["track_id"] or 0):
                 continue
             try:
                 outcome = settle(conn, row, twin)

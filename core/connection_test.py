@@ -306,7 +306,10 @@ def run_service_test(service, test_config):
             except Exception as e:
                 return False, f"ListenBrainz connection error: {str(e)}"
         elif service == "acoustid":
-            api_key = test_config.get('api_key', '')
+            # #2318: soulsync's own application key when there is one, else
+            # the one this install registered (the setting under test)
+            from core import acoustid_account
+            api_key = acoustid_account.builtin_app_key() or (test_config.get('api_key', '') or '').strip()
 
             if not api_key:
                 return False, "Missing AcoustID API key."
@@ -319,7 +322,7 @@ def run_service_test(service, test_config):
 
                 client = AcoustIDClient()
 
-                # Override the cached API key with the test config key
+                # Override the cached API key with the key under test
                 client._api_key = api_key
 
                 # Check chromaprint/fpcalc availability

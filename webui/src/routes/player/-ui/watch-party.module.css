@@ -1,0 +1,1113 @@
+/* Best-in-class Watching Now & Watch Parties (Theater Waiting Room) */
+
+.pageHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 1);
+  margin-bottom: calc(var(--u) * 1.4);
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.6);
+}
+
+.startPartyBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 0.42);
+  height: calc(var(--u) * 2.35);
+  padding: 0 calc(var(--u) * 1.15);
+  border: 1px solid var(--white-a20);
+  border-radius: var(--radius-pill);
+  background: var(--pl-text);
+  color: var(--pl-bg);
+  font-size: calc(var(--u) * 0.84);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(var(--black-rgb), 0.35);
+  transition:
+    transform var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease,
+    opacity var(--dur-fast) ease;
+}
+
+.startPartyBtn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.startPartyBtn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(var(--black-rgb), 0.45);
+}
+
+.startPartyBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Cinema Live Screen Cards (Watching Now) ── */
+
+.cinemaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--u) * 24)), 1fr));
+  gap: calc(var(--u) * 1.25);
+}
+
+.cinemaCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: calc(var(--u) * 15.5);
+  overflow: hidden;
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-xl);
+  background: var(--pl-0d121d);
+  transition:
+    transform var(--dur-moderate) var(--pl-ease),
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-moderate) var(--pl-ease);
+}
+
+.cinemaCard:hover {
+  border-color: rgba(var(--accent-rgb), 0.48);
+  transform: translateY(-3px);
+  box-shadow: 0 18px 40px rgba(var(--black-rgb), 0.48);
+}
+
+.cinemaBg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.58;
+  transition: transform 0.6s var(--pl-ease);
+}
+
+.cinemaCard:hover .cinemaBg {
+  transform: scale(1.03);
+}
+
+.cinemaScrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(var(--pl-070a10-rgb), 0.96) 0%,
+    rgba(var(--pl-070a10-rgb), 0.72) 48%,
+    rgba(var(--pl-070a10-rgb), 0.25) 100%
+  );
+}
+
+.cinemaTop {
+  position: absolute;
+  top: calc(var(--u) * 0.85);
+  right: calc(var(--u) * 0.85);
+  left: calc(var(--u) * 0.85);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 0.5);
+}
+
+.livePill {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.4);
+  padding: calc(var(--u) * 0.28) calc(var(--u) * 0.7);
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--pl-070a10-rgb), 0.72);
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  backdrop-filter: blur(12px);
+}
+
+.liveDot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-circle);
+  background: var(--pl-text-3);
+}
+
+.liveDotActive {
+  background: var(--pl-34d399);
+  box-shadow: 0 0 0 3px rgba(var(--pl-34d399-rgb), 0.28);
+  animation: pulseGlow 1.8s ease-in-out infinite;
+}
+
+.liveDotLobby {
+  background: var(--accent-light);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.32);
+  animation: pulseGlow 1.8s ease-in-out infinite;
+}
+
+@keyframes pulseGlow {
+  50% {
+    opacity: 0.65;
+    transform: scale(0.9);
+  }
+}
+
+.whoChip {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.4);
+  padding: calc(var(--u) * 0.18) calc(var(--u) * 0.65) calc(var(--u) * 0.18) calc(var(--u) * 0.22);
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--pl-070a10-rgb), 0.68);
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 0.76);
+  font-weight: 700;
+  backdrop-filter: blur(12px);
+}
+
+.cinemaBody {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.35);
+  padding: calc(var(--u) * 1.15);
+}
+
+.cinemaTitle {
+  margin: 0;
+  color: var(--text-1);
+  font-size: calc(var(--u) * 1.25);
+  font-weight: 850;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cinemaSub {
+  margin: 0;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.84);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.musicTicker {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.35);
+  margin-top: calc(var(--u) * 0.15);
+  color: var(--accent-light);
+  font-size: calc(var(--u) * 0.78);
+  font-weight: 650;
+}
+
+.progressWrap {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.6);
+  margin-top: calc(var(--u) * 0.35);
+}
+
+.progressTrack {
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--white-a16);
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--accent), var(--accent-light));
+}
+
+.progressTime {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.cardActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--u) * 0.5);
+  margin-top: calc(var(--u) * 0.55);
+}
+
+.glassBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.4);
+  height: calc(var(--u) * 2.25);
+  padding: 0 calc(var(--u) * 0.95);
+  border: 1px solid var(--white-a16);
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+  color: var(--text-1);
+  font-size: calc(var(--u) * 0.8);
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  transition: background var(--dur-fast) ease;
+}
+
+.glassBtn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.glassBtn:hover {
+  background: var(--white-a16);
+}
+
+.glassBtnPrimary {
+  border-color: transparent;
+  background: var(--text-1);
+  color: var(--pl-070a10);
+}
+
+.glassBtnPrimary:hover {
+  background: var(--pl-e9eef8);
+}
+
+/* ── Shared Titles Grid ("Watching the Same Thing") ── */
+
+
+.sharedCard {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.9);
+  padding: calc(var(--u) * 0.75);
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-card);
+  background: var(--white-a04);
+  transition:
+    border-color var(--dur-fast) ease,
+    background var(--dur-fast) ease;
+}
+
+.sharedCard:hover {
+  border-color: var(--white-a18);
+  background: var(--white-a06);
+}
+
+.sharedPoster {
+  flex: none;
+  width: calc(var(--u) * 4.2);
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--white-a08);
+}
+
+.sharedPoster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sharedInfo {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.35);
+  min-width: 0;
+}
+
+.sharedTitle {
+  color: var(--text-1);
+  font-size: calc(var(--u) * 0.96);
+  font-weight: 800;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sharedTitle:hover {
+  text-decoration: underline;
+}
+
+.sharedMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 0.35) calc(var(--u) * 0.7);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.76);
+}
+
+/* ── Theater Waiting Room & Create Party Modal ── */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sticky);
+  display: grid;
+  place-items: center;
+  padding: calc(var(--u) * 1.2);
+  background: rgba(var(--pl-05080e-rgb), 0.82);
+  backdrop-filter: blur(16px);
+}
+
+.modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 880px);
+  max-height: min(90vh, 780px);
+  overflow: hidden;
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-sheet);
+  background: var(--pl-0b0f19);
+  box-shadow: 0 28px 80px rgba(var(--black-rgb), 0.72);
+}
+
+.modalHero {
+  position: relative;
+  padding: calc(var(--u) * 1.4) calc(var(--u) * 1.5);
+  border-bottom: 1px solid var(--white-a10);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.18),
+    rgba(var(--pl-0b0f19-rgb), 0.95)
+  );
+}
+
+.modalHeroBg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.24;
+  pointer-events: none;
+}
+
+.modalHeroInner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: calc(var(--u) * 1);
+}
+
+.modalTitle {
+  margin: 0;
+  color: var(--text-1);
+  font-size: calc(var(--u) * 1.35);
+  font-weight: 850;
+}
+
+.modalSub {
+  margin: calc(var(--u) * 0.25) 0 0;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.85);
+}
+
+.roomGrid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+@media (max-width: 760px) {
+  .roomGrid {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+}
+
+.roomMain {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 1);
+  padding: calc(var(--u) * 1.3);
+  overflow-y: auto;
+  border-right: 1px solid var(--white-a08);
+}
+
+.lobbyMusicBox {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  padding: calc(var(--u) * 0.75) calc(var(--u) * 0.9);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  border-radius: var(--radius-lg);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.lobbyMusicArt {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  background: var(--white-a10);
+}
+
+.memberList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.45);
+}
+
+.memberRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(var(--u) * 0.45) calc(var(--u) * 0.65);
+  border-radius: var(--radius-md);
+  background: var(--white-a04);
+}
+
+.readyBadge {
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--pl-34d399-rgb), 0.16);
+  color: var(--pl-34d399);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.waitingBadge {
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+  color: var(--pl-text-3);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.chatPane {
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+  overflow: hidden;
+  padding: calc(var(--u) * 1);
+  gap: calc(var(--u) * 0.65);
+}
+
+.chatLog {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.45);
+}
+
+.chatMsg {
+  font-size: calc(var(--u) * 0.82);
+  line-height: 1.35;
+  color: var(--pl-text-2);
+}
+
+.chatMsg strong {
+  color: var(--text-1);
+  margin-right: 6px;
+}
+
+.chatSys {
+  font-size: calc(var(--u) * 0.74);
+  color: var(--pl-text-3);
+  font-style: italic;
+}
+
+.emojiRow {
+  display: flex;
+  gap: 6px;
+}
+
+.emojiBtn {
+  flex: 1;
+  height: 32px;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-md);
+  background: var(--white-a04);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.emojiBtn:hover {
+  background: var(--white-a12);
+}
+
+.chatForm {
+  display: flex;
+  gap: 6px;
+}
+
+.input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--white-a16);
+  border-radius: var(--radius-lg);
+  background: var(--white-a05);
+  color: var(--text-1);
+  font-size: 13.5px;
+  outline: none;
+  transition:
+    border-color var(--dur-fast) ease,
+    background var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
+}
+
+.input:focus {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  background: var(--white-a08);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
+}
+
+.pickerList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 12px;
+  max-height: 292px;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+
+.pickerItem {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text-1);
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--dur-fast) ease;
+}
+
+.pickerItem:hover {
+  transform: translateY(-2px);
+}
+
+.pickerPosterWrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1.5px solid var(--white-a12);
+  background: linear-gradient(145deg, var(--pl-1b2236), var(--pl-0f1320));
+  box-shadow: 0 8px 20px var(--black-a45);
+  transition:
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
+}
+
+.pickerItemActive .pickerPosterWrap {
+  border-color: var(--accent-light);
+  box-shadow:
+    0 0 0 2px rgba(var(--accent-rgb), 0.4),
+    0 12px 26px var(--black-a60);
+}
+
+.pickerThumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pickerFallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  font-weight: 900;
+  color: var(--white-a35);
+}
+
+.pickerBadge {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--pl-080a12-rgb), 0.78);
+  border: 1px solid var(--white-a16);
+  backdrop-filter: blur(8px);
+  color: var(--pl-e2e8f0);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.pickerCheck {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--pl-bg);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 4px 12px var(--black-a50);
+}
+
+.pickerMeta {
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.pickerTitle {
+  font-size: 12.5px;
+  font-weight: 750;
+  color: var(--pl-f8fafc);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pickerSub {
+  font-size: 11px;
+  color: var(--pl-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pillToggleRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pillToggle {
+  padding: 6px 12px;
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-pill);
+  background: var(--white-a04);
+  color: var(--pl-text-2);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pillToggleOn {
+  border-color: var(--accent-light);
+  background: rgba(var(--accent-rgb), 0.2);
+  color: var(--text-1);
+}
+
+/* ── Cinema Proscenium Stage & Pleated Velvet Curtain Unfurl ── */
+
+/* ── Theater Seating Row ── */
+
+.seatRow {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-card);
+  background: linear-gradient(180deg, var(--white-a03) 0%, rgba(var(--pl-800c1a-rgb), 0.1) 100%);
+  border: 1px solid var(--white-a07);
+}
+
+.seat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 64px;
+  padding: 8px 10px 6px;
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-sm);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a08);
+  border-bottom: 3px solid rgba(var(--pl-a61226-rgb), 0.65);
+}
+
+.seatReady {
+  border-color: rgba(var(--success-strong-rgb), 0.45);
+  border-bottom-color: var(--success-strong);
+  background: rgba(var(--success-strong-rgb), 0.08);
+}
+
+.seatName {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--white-a90);
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seatTag {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pl-86efac);
+}
+
+/* ── Floating Cinema Emoji Reactions & Lobby Showcase ── */
+
+@keyframes floatReaction {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.65);
+  }
+  16% {
+    opacity: 1;
+    transform: translate3d(var(--sway-px, 8px), -18px, 0) scale(1.12);
+  }
+  60% {
+    opacity: 0.95;
+    transform: translate3d(calc(var(--sway-px, 8px) * -0.7), -150px, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--sway-px, 8px), -290px, 0) scale(0.9);
+  }
+}
+
+.roomSideLaneLeft,
+.roomSideLaneRight {
+  position: absolute;
+  top: 56px;
+  bottom: 56px;
+  width: 110px;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: var(--z-sticky);
+}
+
+.roomSideLaneLeft {
+  left: 6px;
+}
+
+.roomSideLaneRight {
+  right: 6px;
+}
+
+.roomFloatingBubble {
+  position: absolute;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  animation: floatReaction 2.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.roomFloatingEmoji {
+  font-size: 28px;
+  line-height: 1;
+  filter: drop-shadow(0 6px 14px rgba(var(--black-rgb), 0.72));
+}
+
+.roomFloatingSender {
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--pl-080b12-rgb), 0.78);
+  border: 1px solid var(--white-a16);
+  color: rgba(var(--white-rgb), 0.92);
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.lobbyShowcase {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 20px;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  background: linear-gradient(145deg, var(--pl-13192a) 0%, var(--pl-090c14) 100%);
+  border: 1px solid var(--white-a12);
+  box-shadow: 0 18px 44px var(--black-a55);
+}
+
+.lobbyShowcaseBg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.32;
+  filter: blur(4px) saturate(1.15);
+  transform: scale(1.05);
+  pointer-events: none;
+}
+
+.lobbyShowcaseScrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(var(--pl-080b13-rgb), 0.92) 0%,
+    rgba(var(--pl-080b13-rgb), 0.76) 55%,
+    rgba(var(--pl-080b13-rgb), 0.88) 100%
+  );
+  pointer-events: none;
+}
+
+.lobbyPosterCard {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  width: 86px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1.5px solid var(--white-a20);
+  background: var(--pl-171e31);
+  box-shadow: 0 10px 26px var(--black-a65);
+}
+
+.lobbyPosterCard img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.lobbyShowcaseInfo {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.majorityPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: rgba(var(--pl-34d399-rgb), 0.16);
+  border: 1px solid rgba(var(--pl-34d399-rgb), 0.42);
+  color: var(--pl-6ee7b7);
+}
+
+.waitingMajorityPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  background: var(--white-a07);
+  border: 1px solid var(--white-a14);
+  color: var(--pl-text-2);
+}
+
+.peeBreakBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-card);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--warning-strong-rgb), 0.18),
+    rgba(var(--pl-78350f-rgb), 0.28)
+  );
+  border: 1px solid rgba(var(--warning-rgb), 0.45);
+  color: var(--pl-fde68a);
+}
+
+.emojiBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Cinema Lounge Hero Spotlight & Redesigned Watching Now ── */
+
+.theaterHero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: calc(var(--u) * 20.5);
+  padding: calc(var(--u) * 1.8) calc(var(--u) * 2);
+  margin-bottom: calc(var(--u) * 1.4);
+  overflow: hidden;
+  border: 1px solid rgba(var(--accent-rgb), 0.32);
+  border-radius: var(--radius-xl);
+  background: var(--pl-0d121d);
+  box-shadow: 0 24px 60px rgba(var(--black-rgb), 0.52);
+}
+
+.theaterHeroBg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.52;
+  transition: transform 0.7s var(--pl-ease);
+}
+
+.theaterHero:hover .theaterHeroBg {
+  transform: scale(1.025);
+}
+
+.theaterHeroScrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(var(--pl-070a10-rgb), 0.96) 0%,
+    rgba(var(--pl-070a10-rgb), 0.78) 54%,
+    rgba(var(--pl-070a10-rgb), 0.28) 100%
+  );
+}
+
+.theaterHeroContent {
+  position: relative;
+  z-index: 2;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.65);
+}
+
+.theaterHeroEyebrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 0.55);
+}
+
+.theaterHeroTitle {
+  margin: 0;
+  color: var(--pl-text);
+  font-size: clamp(1.5rem, 2.8vw, 2.3rem);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+}
+
+.theaterHeroSub {
+  margin: 0;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.92);
+  line-height: 1.45;
+}
+
+.loungeBanner {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 1.2);
+  padding: calc(var(--u) * 1.6) calc(var(--u) * 1.9);
+  margin-bottom: calc(var(--u) * 1.4);
+  overflow: hidden;
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.14) 0%,
+    rgba(var(--pl-0d121d-rgb), 0.95) 55%,
+    rgba(var(--pl-070a10-rgb), 0.98) 100%
+  );
+}
+
+.loungeBannerText {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.35);
+  max-width: 560px;
+}
+
+.loungeBannerKicker {
+  color: var(--accent-light);
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.loungeBannerTitle {
+  margin: 0;
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 1.35);
+  font-weight: 850;
+  letter-spacing: -0.01em;
+}
+
+.loungeBannerSub {
+  margin: 0;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.88);
+  line-height: 1.45;
+}
+
+.sharedStrip {
+  display: flex;
+  gap: calc(var(--u) * 1);
+  overflow-x: auto;
+  padding-bottom: calc(var(--u) * 0.4);
+  scrollbar-width: thin;
+}
+
+.sharedStrip > * {
+  flex: 0 0 min(330px, 82vw);
+}
+
+/* ── Premier Screening Room Controls ── */
+
+.premierBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--u) * 0.5);
+}
+
+.premierReadyActive {
+  border-color: rgba(var(--pl-34d399-rgb), 0.55);
+  background: rgba(var(--pl-34d399-rgb), 0.16);
+  color: var(--pl-6ee7b7);
+}
+
+

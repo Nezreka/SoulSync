@@ -70,7 +70,7 @@ def _episode_fields(row: Dict[str, Any]) -> Dict[str, Any]:
             "subtitle_languages": row.get("subtitle_languages"),
             # an episode's ids are its show's, the same as at import
             "tmdbid": row.get("show_tmdb_id"), "imdbid": row.get("show_imdb_id"),
-            "tvdbid": row.get("show_tvdb_id")}
+            "tvdbid": row.get("show_tvdb_id"), "absolute": row.get("absolute_number")}
 
 
 def _base_dir_of(path: str, base_dirs: List[str]) -> Optional[str]:
@@ -114,9 +114,9 @@ def _inverse_reroot(new_local: str, old_local: str, stored: str) -> str:
 def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, Any]:
     """Every file whose on-disk name differs from the current template.
     {status, entries: [{key, kind, title, current, proposed, reason?}],
-    unresolved: int, held: int} (held: would be renamed, but an id their
-    name uses isn't stored, so they're left alone; the naming check lists
-    those titles).
+    unresolved: int, held: int} (held: would be renamed, but an id or an
+    anime episode's absolute number their name uses isn't stored, so they're
+    left alone; the naming check lists the titles missing an id).
 
     ``progress(done, total)`` is called as files are scanned so a background
     caller can report a live count. Pure read — never mutates."""
@@ -137,7 +137,7 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
     name_bases = [d for d in base_dirs if d not in mapped]
     entries: List[Dict[str, Any]] = []
     unresolved = 0
-    held = 0   # files left alone because an id their name uses isn't stored
+    held = 0   # files left alone because an id or absolute number their name uses isn't stored
 
     # Per-directory resolution cache. Files in one server folder (a show's
     # episodes, movies sharing a root) re-root to the same local folder, so once
@@ -166,9 +166,11 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
     total = len(movies) + len(episodes)
     done = 0
 
-    def _consider(kind: str, key: str, title: str, stored: str, size, fields: Dict[str, Any]):
+    def _consider(kind: str, key: str, title: str, stored: str, size, fields: Dict[str, Any],
+                  series_type: Any = None):
         nonlocal unresolved, held
-        if organization.languages_unknown(kind, fields, settings):
+        named = organization.for_series_type(settings, series_type)
+        if organization.languages_unknown(kind, fields, named):
             return   # not probed yet: renaming now could strip a right '[JA]'
         local = _resolve(stored, size)
         if not local or not os.path.exists(local):
@@ -181,11 +183,14 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
             base = os.path.dirname(local)
         ext = os.path.splitext(local)[1]
         fields = dict(fields, quality=file_quality(fields.get("quality"), local))
-        proposed = organization.render_path(kind, base, fields, settings, ext)["path"]
+        proposed = organization.render_path(kind, base, fields, named, ext)["path"]
         if os.path.normpath(proposed) != os.path.normpath(local):
-            if organization.missing_ids(kind, fields, settings):
+            if organization.missing_ids(kind, fields, named):
                 held += 1
                 return   # no stored id: renaming now would strip the '{imdb-...}' it may carry
+            if organization.absolute_unknown(kind, fields, named):
+                held += 1
+                return   # no absolute number yet: renaming now would leave it out
             entries.append({"key": key, "kind": kind, "title": title,
                             "current": local, "proposed": proposed})
 
@@ -199,7 +204,7 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
         label = "%s S%02dE%02d" % (r.get("show_title") or "?",
                                    r.get("season_number") or 0, r.get("episode_number") or 0)
         _consider("episode", "e:%s" % r["file_id"], label,
-                  r["relative_path"], r.get("size_bytes"), _episode_fields(r))
+                  r["relative_path"], r.get("size_bytes"), _episode_fields(r), r.get("series_type"))
         done += 1
         if progress and done % 25 == 0:
             progress(done, total)

@@ -197,7 +197,10 @@ def sync_collection(db, definition: Dict[str, Any], *, source,
         if url:
             definition = dict(definition, poster_url=url)
 
-    desired = _dedup(res.server_ids)      # rank order for ranked lists (resolver preserves it)
+    # a title soulsync placed that the server hasn't scanned in yet has no
+    # server item to add (core/video/owned_ids.py); it joins on the next sync
+    from core.video.owned_ids import is_owned
+    desired = _dedup([i for i in res.server_ids if not is_owned(i)])   # rank order kept
     desired_set = set(desired)
     sig = members_signature(definition, desired)   # ORDER matters for ranked lists
 

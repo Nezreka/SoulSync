@@ -7,7 +7,7 @@
 
 import type { ReactNode } from 'react';
 
-import { useHasAccess } from '@/platform/shell/my-permissions';
+import { useHasAccess, useMyPermissions } from '@/platform/shell/my-permissions';
 
 import {
   BookIcon,
@@ -31,6 +31,7 @@ export interface SectionAccess {
   video: boolean;
   podcasts: boolean;
   audiobooks: boolean;
+  isAdmin: boolean;
 }
 
 export function useSections(): SectionAccess {
@@ -39,7 +40,8 @@ export function useSections(): SectionAccess {
   const tv = useHasAccess('tv');
   const podcasts = useHasAccess('podcasts');
   const audiobooks = useHasAccess('books');
-  return { music, movies, tv, video: movies || tv, podcasts, audiobooks };
+  const { isAdmin } = useMyPermissions();
+  return { music, movies, tv, video: movies || tv, podcasts, audiobooks, isAdmin };
 }
 
 export type NavGroup = 'main' | 'watch' | 'listen';
@@ -82,6 +84,30 @@ export const NAV: NavEntry[] = [
     icon: <GuideIcon />,
     tab: true,
     visible: (a) => a.video || a.music,
+  },
+  {
+    to: '/player/calendar',
+    label: 'Calendar',
+    group: 'main',
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+      </svg>
+    ),
+    visible: (a) => a.video,
   },
   {
     to: '/player/watchlist',

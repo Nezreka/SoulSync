@@ -1,6 +1,6 @@
 /**
  * The System tab (settings-bic DESIGN.md 3.1, 3.3): General, Security, API,
- * Maintenance, Server Activity, Developer and Logs, one pill each, each with a
+ * Maintenance, Backups, Server Activity, Developer and Logs, one pill each, each with a
  * line saying what it is for. The old tab's ten folded sections and the old
  * Logs tab live here now; `switchSettingsTab('logs')`, `'advanced'`,
  * `'system'` and `'server-activity'` still land on their pill (nav.ts).
@@ -21,6 +21,7 @@ import { LogsTab } from '../logs-tab';
 import { ServerActivitySettingsCard } from '../server-activity-settings';
 import { SecurityView } from '../system-security';
 import { ApiView, DeveloperView, GeneralView, MaintenanceView, useLogLevel } from '../system-tab';
+import { BackupsView } from './backups-view';
 
 const TAB = 'advanced';
 
@@ -45,6 +46,9 @@ export function SystemPage({ store, opened }: SettingsTabProps) {
       </ViewPanel>
       <ViewPanel tab={TAB} view="maintenance" open={view === 'maintenance'}>
         <MaintenanceView store={store} shown={here && view === 'maintenance'} opened={opened} />
+      </ViewPanel>
+      <ViewPanel tab={TAB} view="backups" open={view === 'backups'}>
+        <BackupsView shown={here && view === 'backups'} opened={opened} />
       </ViewPanel>
       <ViewPanel tab={TAB} view="activity" open={view === 'activity'}>
         <ServerActivitySettingsCard

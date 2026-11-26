@@ -239,3 +239,95 @@ def test_flac_clean_tag_write_replaces(tmp_path):
     assert ok is True
     assert FLAC(str(f))["title"] == ["Clean Write"]
     assert not list(tmp_path.glob("real.flac.*sstmp"))
+
+
+def test_flac_atomic_save_uses_known_parser(tmp_path):
+    """A .sstmp filename must not cause FLAC format misidentification."""
+    from mutagen.flac import FLAC
+    from mutagen.mp4 import MP4StreamInfoError
+
+    f = tmp_path / "real.flac"
+    _make_flac_with_frames(f)
+
+    audio = FLAC(str(f))
+    audio["title"] = "Parser Regression Test"
+
+    def misidentify(path):
+        raise MP4StreamInfoError("not a MP4 file")
+
+    symbols = SimpleNamespace(
+        ID3=type("ID3", (), {}),
+        FLAC=FLAC,
+        File=misidentify,
+    )
+
+    assert save_audio_file(audio, symbols) is True
+    assert FLAC(str(f))["title"] == ["Parser Regression Test"]
+    assert not list(tmp_path.glob("*.sstmp"))
+
+
+def test_flac_atomic_save_preserves_id3v1_footer(tmp_path):
+    from mutagen.flac import FLAC
+    import core.metadata.common as common
+
+    f = tmp_path / "real.flac"
+    _make_flac_with_frames(f)
+
+    footer = b"TAG" + b"Test title".ljust(30, b"\x00")
+    footer += b"Test artist".ljust(30, b"\x00")
+    footer += b"Test album".ljust(30, b"\x00")
+    footer += b"2026" + b"\x00" * 30 + b"\xff"
+
+    assert len(footer) == 128
+
+    with f.open("ab") as h:
+        h.write(footer)
+
+    original = tmp_path / "original.flac"
+    shutil.copy2(f, original)
+
+    audio = FLAC(str(f))
+    audio["title"] = "Updated title"
+
+    symbols = SimpleNamespace(
+        ID3=type("ID3", (), {}),
+        FLAC=FLAC,
+        File=FLAC,
+    )
+
+    assert save_audio_file(audio, symbols) is True
+    assert FLAC(str(f))["title"] == ["Updated title"]
+    assert f.read_bytes().endswith(footer)
+    assert common._flac_audio_identical(
+        str(original), str(f)
+    ) is True
+
+
+def test_flac_atomic_save_preserves_ambiguous_tag_bytes(tmp_path):
+    from mutagen.flac import FLAC
+    import core.metadata.common as common
+
+    f = tmp_path / "real.flac"
+
+    # Simulate audio bytes containing a coincidental TAG signature.
+    frames = bytes(range(256)) * 32
+    frames += b"TAG" + bytes(range(125))
+
+    _make_flac_with_frames(f, frames)
+
+    original = tmp_path / "original.flac"
+    shutil.copy2(f, original)
+
+    audio = FLAC(str(f))
+    audio["title"] = "Updated title"
+
+    symbols = SimpleNamespace(
+        ID3=type("ID3", (), {}),
+        FLAC=FLAC,
+        File=FLAC,
+    )
+
+    assert save_audio_file(audio, symbols) is True
+    assert common._flac_audio_identical(
+        str(original), str(f)
+    ) is True

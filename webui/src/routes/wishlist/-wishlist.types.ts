@@ -88,6 +88,11 @@ export interface WishlistCycleResponse {
 export interface ParsedWishlistTrack {
   track: string;
   artist: string;
+  /**
+   * whose release an album row is on, when the source names someone other
+   * than the track's lead. a guest-led album files under it (#2300).
+   */
+  albumArtist?: string;
   album: string;
   /** Primary cover — the local Library-v2 artwork endpoint when we have one. */
   image: string;

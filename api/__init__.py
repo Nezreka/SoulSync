@@ -59,6 +59,7 @@ def create_api_blueprint():
 
     # ---- import & register sub-module routes ----
     from .library import register_routes as reg_library
+    from .library_check import register_routes as reg_library_check
     from .system import register_routes as reg_system
     from .search import register_routes as reg_search
     from .wishlist import register_routes as reg_wishlist
@@ -82,6 +83,7 @@ def create_api_blueprint():
     limiter.limit(_rate_value, key_func=_rate_bucket)(bp)
 
     reg_library(bp)
+    reg_library_check(bp)
     reg_system(bp)
     reg_search(bp)
     reg_wishlist(bp)

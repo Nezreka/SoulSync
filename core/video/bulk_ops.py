@@ -276,26 +276,30 @@ def move_plan(db, kind: str, item_id: int, library_id: int, folder=None) -> dict
                             "reason": "out of reach from here, on a drive only your media server sees"})
             continue
         fields = file_ops.naming_fields(row)
-        if organization.languages_unknown(row.get("scope"), fields, settings):
+        named = organization.for_series_type(settings, row.get("series_type"))
+        if organization.languages_unknown(row.get("scope"), fields, named):
             skipped.append({"file_id": row["file_id"], "filename": name,
                             "reason": "not read yet, so its name isn't known"})
             continue
         fields["quality"] = file_ops.file_quality(fields.get("quality"), real)
-        want = organization.render_path(row.get("scope"), root, fields, settings,
+        want = organization.render_path(row.get("scope"), root, fields, named,
                                         os.path.splitext(real)[1])["path"]
         if file_ops.same_path(real, want):
             continue
-        if organization.missing_ids(row.get("scope"), fields, settings):
-            # the template would drop an id this title has none stored for:
-            # the file moves under its own name, keeping the '{imdb-tt...}'
-            # it may carry, rather than stay behind or lose it
+        no_id = bool(organization.missing_ids(row.get("scope"), fields, named))
+        if no_id or organization.absolute_unknown(row.get("scope"), fields, named):
+            # the template would drop an id this title has none stored for, or
+            # an episode's absolute number not known yet: the file moves under
+            # its own name, keeping the '{imdb-tt...}' or number it may carry,
+            # rather than stay behind or lose it
             scope = row.get("scope")
             if scope not in own_roots:
                 own_roots[scope] = library_roots(db, scope)
             here = containing_root(real, own_roots[scope])
             if not here:
                 skipped.append({"file_id": row["file_id"], "filename": name,
-                                "reason": "an id its name uses isn't known yet"})
+                                "reason": "an id its name uses isn't known yet" if no_id
+                                else "its absolute number isn't known yet, so its name isn't either"})
                 continue
             want = os.path.join(root, os.path.relpath(real, here))
             if file_ops.same_path(real, want):

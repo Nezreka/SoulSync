@@ -28,7 +28,8 @@ SCOPE_PLAYBACK = "playback"
 # "Use music apps" permission. new kinds are added on purpose, with their
 # own permission rule (core/connect/pick.py)
 KIND_MUSIC = "music"
-KINDS = (KIND_MUSIC,)
+KIND_PLAYER = "player"
+KINDS = (KIND_MUSIC, KIND_PLAYER)
 # last_seen is written at most this often per device
 TOUCH_EVERY = 60.0
 
@@ -146,6 +147,17 @@ def pick_profile(db, device_id: int, profile_id: int, *, now: Optional[float] = 
             "UPDATE device_tokens SET profile_id = ?, pick_deadline = NULL "
             "WHERE id = ? AND profile_id IS NULL AND revoked_at IS NULL AND pick_deadline > ?",
             (int(profile_id), int(device_id), now))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def switch_profile(db, device_id: int, profile_id: int) -> bool:
+    """Switch a live (already-paired, non-revoked) device to another household profile."""
+    with _conn(db) as conn:
+        cur = conn.execute(
+            "UPDATE device_tokens SET profile_id = ?, pick_deadline = NULL "
+            "WHERE id = ? AND profile_id IS NOT NULL AND revoked_at IS NULL",
+            (int(profile_id), int(device_id)))
         conn.commit()
         return cur.rowcount > 0
 

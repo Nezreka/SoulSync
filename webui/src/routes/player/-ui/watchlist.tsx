@@ -20,8 +20,9 @@ import {
   type WatchlistItem,
   type WatchlistKind,
 } from '../-player.api';
-import { CheckIcon, PlusIcon } from './icons';
+import { BookmarkIcon } from './icons';
 import { styles as s } from './kit';
+import { notifyError } from './notice';
 
 const keyOf = (kind: string, id: string | number) => `${kind}:${id}`;
 
@@ -53,7 +54,10 @@ export function useWatchlist() {
       );
       return { before };
     },
-    onError: (_e, _v, ctx) => queryClient.setQueryData(['player', 'watchlist'], ctx?.before),
+    onError: (e, _v, ctx) => {
+      queryClient.setQueryData(['player', 'watchlist'], ctx?.before);
+      notifyError("Couldn't update your watchlist")(e);
+    },
     onSettled: () => void queryClient.invalidateQueries({ queryKey: ['player', 'watchlist'] }),
   });
   return {
@@ -94,7 +98,7 @@ export function WatchlistButton({
       }}
       data-nav
     >
-      {on ? <CheckIcon /> : <PlusIcon />}
+      <BookmarkIcon filled={on} />
       {compact ? null : on ? 'On your watchlist' : 'Watchlist'}
     </button>
   );

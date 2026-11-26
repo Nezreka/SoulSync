@@ -12,6 +12,8 @@ SoulSync must not immediately mark the task as failed. Instead it must:
 
 from __future__ import annotations
 
+from core.downloads.monitor import MAX_PEER_RETRIES  # the cap is peers tried, and it moved from 3
+
 import time
 from types import SimpleNamespace
 import pytest
@@ -69,7 +71,7 @@ def test_errored_download_triggers_hybrid_fallback_to_next_source(mon, monkeypat
     monkeypatch.setattr(dm, 'download_orchestrator', fake_orch)
 
     now = time.time()
-    task = _task(error_retry_count=3, last_error_retry_time=now - 100)
+    task = _task(error_retry_count=MAX_PEER_RETRIES, last_error_retry_time=now - 100)
     ops = _run(mon, task, _live('Completed, Errored'), now)
 
     # Must NOT fail outright — should transition to searching for next source
@@ -94,7 +96,7 @@ def test_queued_timeout_triggers_hybrid_fallback_to_next_source(mon, monkeypatch
     monkeypatch.setattr(dm, 'download_orchestrator', fake_orch)
 
     now = time.time()
-    task = _task(stuck_retry_count=3, queued_start_time=now - 200)
+    task = _task(stuck_retry_count=MAX_PEER_RETRIES, queued_start_time=now - 200)
     ops = _run(mon, task, _live('Queued, Locally'), now)
 
     assert task['status'] == 'searching'
@@ -112,7 +114,7 @@ def test_zero_progress_triggers_hybrid_fallback_to_next_source(mon, monkeypatch)
     monkeypatch.setattr(dm, 'download_orchestrator', fake_orch)
 
     now = time.time()
-    task = _task(stuck_retry_count=3, downloading_start_time=now - 200)
+    task = _task(stuck_retry_count=MAX_PEER_RETRIES, downloading_start_time=now - 200)
     ops = _run(mon, task, _live('InProgress', progress=0), now)
 
     assert task['status'] == 'searching'
@@ -129,7 +131,7 @@ def test_not_in_live_transfers_triggers_hybrid_fallback_to_next_source(mon, monk
     monkeypatch.setattr(dm, 'download_orchestrator', fake_orch)
 
     now = time.time()
-    task = _task(stuck_retry_count=3, status_change_time=now - 200)
+    task = _task(stuck_retry_count=MAX_PEER_RETRIES, status_change_time=now - 200)
     ops = _run(mon, task, {}, now)
 
     assert task['status'] == 'searching'
@@ -148,7 +150,7 @@ def test_hybrid_fallback_gives_up_when_all_sources_exhausted(mon, monkeypatch):
     now = time.time()
     # youtube is already exhausted, soulseek is now exhausting
     task = _task(
-        error_retry_count=3,
+        error_retry_count=MAX_PEER_RETRIES,
         last_error_retry_time=now - 100,
         exhausted_download_sources={'youtube'},
     )

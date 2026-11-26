@@ -35,7 +35,8 @@ def naming_fields(row: dict) -> dict:
             "codec": row.get("video_codec"), "tmdbid": row.get("tmdb_id"),
             "imdbid": row.get("imdb_id"), "tvdbid": row.get("tvdb_id"),
             "audio_languages": row.get("audio_languages"),
-            "subtitle_languages": row.get("subtitle_languages")}
+            "subtitle_languages": row.get("subtitle_languages"),
+            "absolute": row.get("absolute_number")}
 
 
 def same_path(a: str, b: str) -> bool:
@@ -46,15 +47,17 @@ def name_check(row: dict, real: str, roots: List[str], settings: dict) -> Dict[s
     """{path, why, missing}: where the current naming templates put this file,
     on the library root it already sits under. path is None when that isn't
     known, and why says which: 'outside' (under no configured root),
-    'languages' (not probed yet) or 'ids' (an id the name uses isn't stored,
+    'languages' (not probed yet), 'ids' (an id the name uses isn't stored,
     and the name without it differs from the file's own, which may carry the
-    id). a file already named the way the template renders without the id
-    conforms, so nothing is held back for it."""
+    id) or 'absolute' (the same for an anime episode's $absolute number). a
+    file already named the way the template renders without the id or the
+    number conforms, so nothing is held back for it."""
     from core.video import organization
     from core.video.library_roots import containing_root
     root = containing_root(real, roots or [])
     if not root:
         return {"path": None, "why": "outside", "missing": []}
+    settings = organization.for_series_type(settings, row.get("series_type"))
     fields = naming_fields(row)
     if organization.languages_unknown(row.get("scope"), fields, settings):
         return {"path": None, "why": "languages", "missing": []}
@@ -65,6 +68,9 @@ def name_check(row: dict, real: str, roots: List[str], settings: dict) -> Dict[s
     if missing and not same_path(real, want):
         # renaming now would strip the '{imdb-tt...}' its name may carry
         return {"path": None, "why": "ids", "missing": missing}
+    if organization.absolute_unknown(row.get("scope"), fields, settings) and not same_path(real, want):
+        # renaming now would leave out a number it will have once its show's episode list fills in
+        return {"path": None, "why": "absolute", "missing": []}
     return {"path": want, "why": None, "missing": []}
 
 
@@ -78,6 +84,8 @@ def expected_path(row: dict, real: str, roots: List[str], settings: dict) -> Opt
 NAME_UNKNOWN = {
     "outside": "This file sits outside your library folders, so it has no template path.",
     "languages": "This file's languages haven't been read yet, so its template name isn't known.",
+    "absolute": "This episode's absolute number isn't known yet (its show's episode list doesn't hold it), "
+                "so its template name isn't known.",
     "ids": "Your naming template uses an id this title has none stored for, so the file keeps "
            "its name rather than lose the id it may carry. Set it in Manage, under Matches.",
 }

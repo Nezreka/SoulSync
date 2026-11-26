@@ -709,7 +709,8 @@ button.footEnd:hover {
   padding: 16px;
   border: 1px solid var(--white-a06);
   border-radius: var(--radius-card);
-  background: radial-gradient(120% 160% at 100% 0%, rgba(var(--accent-rgb), 0.12), transparent 60%),
+  background:
+    radial-gradient(120% 160% at 100% 0%, rgba(var(--accent-rgb), 0.12), transparent 60%),
     var(--white-a03);
 }
 

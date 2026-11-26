@@ -60,7 +60,7 @@ A short sentence at the top says how many people there are, how many have change
 
 Each row shows the person's template (with how many changes they have), then Music, Movies, TV and Books: a dot for whether they get it right away, ask first or can't, with the quality and rating under it. The Requests column shows each limited kind and how many asks they've used this window ("Movies 1/5 · TV 3"). Click a row to open their editor (see [Editing one person](#docs/prof-editor)).
 
-**Invite** and **Add person** sit above the list (see [Adding people](#docs/prof-manage)).
+**Import from Plex**, **Invite** and **Add person** sit above the list (see [Adding people](#docs/prof-manage)).
 `
         },
         {
@@ -274,7 +274,7 @@ A Jellyfin user with no profile is refused on new installs. Installs that had Se
         {
             id: 'prof-manage',
             title: 'Adding People',
-            lede: 'Add someone, send an invite, or let them sign in with Plex or OIDC.',
+            lede: 'Add someone, import your Plex users, send an invite, or let them sign in with Plex or OIDC.',
             body: `
 ## Add person
 
@@ -287,6 +287,12 @@ A Jellyfin user with no profile is refused on new installs. Installs that had Se
 Accepting the link spends it and makes the profile on the invite's template. The person picks a name, an optional PIN, and a login password when login mode is on.
 
 While sign-in is **OIDC only** there's no password: the invite page sends the person to your provider, and the account they sign in with there is linked to the new profile. The link is only spent when they come back signed in. An account that already has a profile here is turned away, and the provider's required group still applies.
+
+## Import from Plex
+
+**Import from Plex** lists everyone your Plex server is shared with: your Plex friends and home users who can see this server, with their Plex picture and name. Someone who already has a profile linked to their Plex account shows **In SoulSync as** that profile and can't be imported twice. When a profile only looks like them (the same name, or their Plex home user link), pick **Link to** that profile or **New profile**.
+
+Tick people one by one or **Pick everyone new**, choose the template **New profiles follow** (the one in **New people start as** unless you change it) and press **Import**. Each new profile gets their Plex name and picture and is linked to their Plex account, so **Sign in with Plex** lands on it any time, even with new Plex sign-ups turned off. Seerr clients see them as Plex users right away, before they ever sign in. Managed home users have no Plex login of their own, so they get in with a password or the profile picker instead. Sign in with Plex has to be on under **System > Security** for anyone to use it.
 
 ## Sign in with Plex or OIDC
 

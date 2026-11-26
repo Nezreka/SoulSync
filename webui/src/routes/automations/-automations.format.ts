@@ -536,7 +536,7 @@ const ACTION_LABELS: Record<string, string> = {
   full_cleanup: 'Full Cleanup',
   playlist_pipeline: 'Playlist Pipeline',
   video_scan_library: 'Scan Video Library',
-  video_scan_server: 'Scan Video Server',
+  video_scan_server: 'Index New Video Files',
   video_update_database: 'Update Video Database',
   video_update_database_hourly: 'Update Video Database (Hourly)',
   video_add_airing_episodes: 'Wishlist Airing Episodes',

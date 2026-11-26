@@ -261,6 +261,46 @@ const bulkDone = (batch: string | null = 'b1') => ({
 });
 
 describe('movie tab', () => {
+  it('lists the extras and plays one in place by its key', async () => {
+    routes['/library'] = () =>
+      movie({
+        extras: [
+          {
+            key: 'k1',
+            kind: 'Trailer',
+            name: 'Teaser',
+            filename: 'Teaser.mp4',
+            size_bytes: 1048576,
+          },
+          { key: 'k2', kind: 'Featurette', name: 'Making of', filename: 'm.mkv', size_bytes: null },
+        ],
+      });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Teaser')).toBeTruthy();
+    expect(screen.getByText('Featurette')).toBeTruthy();
+    expect(document.querySelector('video')).toBeNull();
+    fireEvent.click(within(document.querySelector('[data-extra="k1"]')!).getByText('Play'));
+    expect(document.querySelector('video')!.getAttribute('src')).toBe(
+      '/api/video/detail/movie/7/extras/k1',
+    );
+    fireEvent.click(within(document.querySelector('[data-extra="k1"]')!).getByText('Close'));
+    expect(document.querySelector('video')).toBeNull();
+  });
+
+  it('no extras, no section', async () => {
+    routes['/library'] = () => movie();
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Best copy')).toBeTruthy();
+    expect(document.querySelector('[data-extras]')).toBeNull();
+  });
+
+  it("shows a version's edition", async () => {
+    routes['/library'] = () => movie({ files: [file({ edition: "Director's Cut" })] });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText("Director's Cut")).toBeTruthy();
+    expect(document.querySelectorAll('[data-edition]')).toHaveLength(1);
+  });
+
   it('lists every file with what the disk says, and the one only the server can see', async () => {
     routes['/library'] = () => movie();
     render(<LibraryTab kind="movie" id={7} />);
@@ -796,6 +836,43 @@ describe('needs attention', () => {
     }));
     return d;
   }
+
+  it('a monitored special without a file is missing; an unmonitored one is not said (#2284)', async () => {
+    const special = (monitored: boolean) => {
+      const d = show();
+      d.seasons.push({
+        ...d.seasons[1],
+        season_number: 0,
+        episodes: [
+          {
+            id: 90,
+            episode_number: 1,
+            title: 'Special',
+            air_date: '2009-03-08',
+            has_file: false,
+            monitored,
+            watched: false,
+            aired: true,
+            files: [],
+          },
+        ],
+      });
+      return d;
+    };
+    routes['/library'] = () => special(true);
+    const first = render(<LibraryTab kind="show" id={445} />);
+    await screen.findByRole('button', { name: 'Get missing' });
+    expect(first.container.querySelector('[data-issue="missing"]')?.textContent).toContain(
+      '2 aired episodes missing',
+    );
+    first.unmount();
+    routes['/library'] = () => special(false);
+    const second = render(<LibraryTab kind="show" id={445} />);
+    await screen.findByRole('button', { name: 'Get missing' });
+    const issue = second.container.querySelector('[data-issue="missing"]') as HTMLElement;
+    expect(issue.textContent).toContain('1 aired episode missing');
+    expect(issue.textContent).not.toContain('unmonitored');
+  });
 
   it('get missing leaves unmonitored seasons alone and says how many it left', async () => {
     routes['/library'] = () => showWithOffSeason();

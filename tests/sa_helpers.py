@@ -152,6 +152,16 @@ def sa_env(monkeypatch, tmp_path):
     monkeypatch.setattr(links, "_root_names", lambda: {"audiobook": "audiobooks", "podcast": "podcasts"})
     monkeypatch.setattr(links, "_book_index", lambda: {})
     monkeypatch.setattr(live, "_maybe_maintain", lambda now: None)
+    # soulsync's own player: no live screens, no real player.db or profiles
+    from core.player import presence
+    from core.server_activity import soulsync
+    presence._sessions.clear()
+    presence._stops.clear()
+    presence._notes.clear()
+    soulsync.reset()
+    monkeypatch.setattr(soulsync, "_server_name", lambda: "SoulSync")
+    monkeypatch.setattr(soulsync, "_profiles", lambda: {})
+    monkeypatch.setattr(soulsync, "_facts", lambda *a, **k: {})
     # background work is collected, not started: a test runs it when it wants
     monkeypatch.setattr(live, "_spawn", lambda fn: env.spawned.append(fn))
     monkeypatch.setattr(stats, "_spawn", lambda fn: env.spawned.append(fn))
@@ -199,6 +209,9 @@ def sa_env(monkeypatch, tmp_path):
     env.use_plex = use_plex
     env.use_jellyfin = use_jellyfin
     yield env
+    presence._sessions.clear()
+    presence._stops.clear()
+    presence._notes.clear()
     store.use_connection_factory(None)
     images.use_cache_dir(None)
     live.reset_for_tests()

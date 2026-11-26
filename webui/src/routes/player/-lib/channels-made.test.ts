@@ -151,11 +151,11 @@ describe('channels people make', () => {
       ['d', 'd', false],
     ]);
     const numbered = numberChannels(lined.filter((x) => !x.hidden));
-    // kids sit before genres in the guide's groups; within genres, the lineup's order
+    // genres sit before kids in the satellite-style guide; within genres, the lineup's order
     expect(numbered.map((x) => [x.id, x.number])).toEqual([
-      ['d', 101],
-      ['c', 102],
-      ['b', 103],
+      ['c', 101],
+      ['b', 102],
+      ['d', 103],
     ]);
   });
 });

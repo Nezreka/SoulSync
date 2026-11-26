@@ -62,8 +62,12 @@ class FakeMedia {
 
 function setup(opts: {
   playable?: (item: PlayItem, q?: string, pick?: TrackPick) => Playable;
+  /** a lookup that answers when the test says so (a sleeping drive) */
+  slowPlayable?: (item: PlayItem) => Promise<Playable> | null;
   saved?: SavedPosition | null;
   tracks?: Tracks;
+  listened?: EngineDeps['listened'];
+  counted?: EngineDeps['counted'];
 }) {
   const media: Partial<Record<MediaKind, FakeMedia>> = {};
   const saves: { id: string; position: number; finished: boolean }[] = [];
@@ -73,6 +77,7 @@ function setup(opts: {
   const deps: EngineDeps = {
     createMedia: (kind) => (media[kind] = new FakeMedia(kind)) as unknown as HTMLMediaElement,
     playable: async (item, q, pick) =>
+      (await opts.slowPlayable?.(item)) ??
       opts.playable?.(item, q, pick) ?? { url: `/s/${item.type}/${item.id}`, duration: 100 },
     progress: async () => opts.saved ?? null,
     tracks: async () => opts.tracks ?? { audio: [], subtitles: [] },
@@ -80,6 +85,8 @@ function setup(opts: {
     // copied video starts at the keyframe before: here, the whole second below
     transcodeStart: async (_url, t) => ({ start: Math.floor(t), seek: Math.floor(t) + 0.3 }),
     save: (item, position, _d, finished) => saves.push({ id: item.id, position, finished }),
+    listened: opts.listened,
+    counted: opts.counted,
     store: { get: (k) => store.get(k) ?? null, set: (k, v) => void store.set(k, v) },
     now: () => now,
     mediaSession: null,
@@ -151,17 +158,34 @@ describe('player engine', () => {
     expect(t.saves).toEqual([]);
   });
 
-  it('a guide channel joined mid-way saves nothing of its own', async () => {
+  it('a guide channel joined mid-way saves nothing of its own, even when advancing to the next item', async () => {
+    const marked: string[] = [];
     const t = setup({
       saved: { position: 10, finished: false },
       playable: (item) => ({ url: `/s/${item.type}/${item.id}`, duration: 5400 }),
     });
-    t.engine.playItems([movie('1')], 0, { startAt: 600, live: true });
+    (t.engine as unknown as { deps: EngineDeps }).deps.watched = (i) =>
+      marked.push(`${i.type}:${i.id}`);
+    const ep1: PlayItem = { type: 'episode', id: '101', title: 'Ep 1' };
+    const mov2: PlayItem = movie('202');
+    t.engine.playItems([ep1, mov2], 0, { startAt: 600, live: true });
     await t.flush();
     expect(t.media.video!.currentTime).toBe(600);
+    t.media.video!.duration = 5400;
+    t.media.video!.tick(5100); // >92% of episode on live guide: should NOT mark episode watched
+    t.every10s();
+    expect(t.saves).toEqual([]);
+    expect(marked).toEqual([]);
+    // Advance to next item in guide queue: live flag must stay true
+    t.media.video!.finish();
+    await t.flush();
+    expect(t.engine.getState().live).toBe(true);
+    t.media.video!.duration = 5400;
     t.media.video!.tick(700);
     t.every10s();
     expect(t.saves).toEqual([]);
+    t.media.video!.tick(5100); // >92% of movie on live guide: DOES mark movie watched
+    expect(marked).toEqual(['movie:202']);
   });
 
   it('a file a browser cannot play says so instead of playing', async () => {
@@ -671,5 +695,176 @@ describe("the profile's playback settings", () => {
     }
     expect(t.engine.getState().stillWatching).toBe(false);
     expect(t.engine.getState().queue.index).toBe(5);
+  });
+});
+
+/** a promise the test resolves by hand */
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+describe('while the next item loads', () => {
+  it('the old file stops, and its clock never lands on the new item', async () => {
+    const gate = deferred<Playable>();
+    const t = setup({
+      slowPlayable: (item) => (item.id === 'e2' ? gate.promise : null),
+    });
+    t.engine.playItems([movie('m1')]);
+    await t.flush();
+    const el = t.media.video!;
+    el.duration = 7000;
+    el.tick(6000);
+    t.engine.playItems([{ type: 'episode', id: 'e2', title: 'e2', duration: 1400 }]);
+    await t.flush();
+    // the movie kept where it got to, and stopped
+    expect(t.saves).toContainEqual({ id: 'm1', position: 6000, finished: false });
+    expect(el.paused).toBe(true);
+    // a stray tick from the old src: not the episode's position, not watched
+    el.tick(6001);
+    t.every10s();
+    expect(t.engine.getState().position).toBe(0);
+    expect(t.engine.getState().watchedKey).toBeNull();
+    expect(t.saves.some((x) => x.id === 'e2')).toBe(false);
+    gate.resolve({ url: '/s/episode/e2', duration: 1400 });
+    await t.flush();
+    expect(el.src).toBe('/s/episode/e2');
+  });
+
+  it('the old file ending does not skip the next item', async () => {
+    const gate = deferred<Playable>();
+    const t = setup({ slowPlayable: (item) => (item.id === 'b' ? gate.promise : null) });
+    t.engine.playItems([track('a'), track('b'), track('c')]);
+    await t.flush();
+    t.engine.next();
+    await t.flush();
+    t.media.audio!.finish(); // 'a' running out under the load
+    await t.flush();
+    expect(t.engine.getState().item?.id).toBe('b');
+    gate.resolve({ url: '/s/track/b', duration: 100 });
+    await t.flush();
+    expect(t.engine.getState().item?.id).toBe('b');
+    expect(t.media.audio!.src).toBe('/s/track/b');
+  });
+
+  it("a seek before the next item's source is known does nothing", async () => {
+    const gate = deferred<Playable>();
+    const t = setup({ slowPlayable: (item) => (item.id === 'b' ? gate.promise : null) });
+    t.engine.playItems([movie('a'), movie('b')]);
+    await t.flush();
+    t.engine.next();
+    await t.flush();
+    t.engine.seek(500);
+    expect(t.media.video!.src).toBe('/s/movie/a');
+    gate.resolve({ url: '/s/movie/b', duration: 100 });
+    await t.flush();
+    expect(t.media.video!.src).toBe('/s/movie/b');
+  });
+});
+
+describe('two quick seeks on a converted stream', () => {
+  it('the last one wins even when its answer comes first', async () => {
+    const answers: Record<
+      number,
+      ReturnType<typeof deferred<{ start: number; seek: number }>>
+    > = {};
+    const t = setup({
+      playable: () => ({
+        url: '/t/1',
+        duration: 5000,
+        transcode: { video: 'copy', audio: 'aac', reasons: [] },
+      }),
+    });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    // swap the keyframe lookup for one the test answers by hand
+    const deps = (t.engine as unknown as { deps: EngineDeps }).deps;
+    deps.transcodeStart = (_url, at) => (answers[at] = deferred()).promise;
+    t.engine.seek(1000);
+    t.engine.seek(3000);
+    answers[3000].resolve({ start: 3000, seek: 3000 });
+    await t.flush();
+    answers[1000].resolve({ start: 1000, seek: 1000 });
+    await t.flush();
+    expect(t.media.video!.src).toBe('/t/1?t=3000.00');
+    expect(t.engine.getState().position).toBe(3000);
+  });
+});
+
+describe('saving the start', () => {
+  it('a restart to the very beginning is saved', async () => {
+    const t = setup({});
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    const el = t.media.video!;
+    el.tick(50);
+    t.engine.saveNow();
+    el.tick(0);
+    t.engine.saveNow();
+    expect(t.saves.at(-1)).toEqual({ id: '1', position: 0, finished: false });
+  });
+});
+
+describe('a song played here is a play', () => {
+  it('goes into the listening history ten seconds in, once, and counts at half way', async () => {
+    const heard: string[] = [];
+    const counted: number[] = [];
+    const t = setup({
+      listened: async (item) => {
+        heard.push(item.id);
+        return 77;
+      },
+      counted: (id) => counted.push(id),
+    });
+    t.engine.playItems([track('a')]);
+    await t.flush();
+    const el = t.media.audio!;
+    el.tick(9);
+    expect(heard).toEqual([]);
+    el.tick(10);
+    el.tick(12);
+    await t.flush();
+    expect(heard).toEqual(['a']); // once, however many ticks
+    el.tick(49);
+    expect(counted).toEqual([]);
+    el.tick(50); // half of the 100 second song
+    el.tick(60);
+    expect(counted).toEqual([77]);
+  });
+
+  it('the next song is its own play, and a film is not a listen', async () => {
+    const heard: string[] = [];
+    const t = setup({
+      listened: async (item) => {
+        heard.push(item.id);
+        return 1;
+      },
+    });
+    t.engine.playItems([track('a'), track('b')]);
+    await t.flush();
+    t.media.audio!.tick(11);
+    await t.flush();
+    t.engine.next();
+    await t.flush();
+    t.media.audio!.tick(11);
+    await t.flush();
+    expect(heard).toEqual(['a', 'b']);
+    t.engine.playItems([movie('m')]);
+    await t.flush();
+    t.media.video!.tick(30);
+    await t.flush();
+    expect(heard).toEqual(['a', 'b']);
+  });
+
+  it('a play that was not recorded is never counted', async () => {
+    const counted: number[] = [];
+    const t = setup({ listened: async () => null, counted: (id) => counted.push(id) });
+    t.engine.playItems([track('a')]);
+    await t.flush();
+    t.media.audio!.tick(11);
+    await t.flush();
+    t.media.audio!.tick(90);
+    expect(counted).toEqual([]);
   });
 });

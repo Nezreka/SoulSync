@@ -1131,15 +1131,48 @@ class MusicBrainzSearchClient:
             logger.error(f'get_recording_flat({mbid}) error: {e}')
             return None
 
-    def get_album_tracks(self, album_mbid: str) -> Optional[Dict[str, Any]]:
-        """Return {items: [...], total: N} track listing for a release/release-group MBID."""
-        album = self.get_album(album_mbid, include_tracks=True)
+    def get_album_tracks(
+        self, album_mbid: str, *, allow_fallback: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """Return a track listing for a release or release group.
+
+        Exact-release consumers disable fallback so a release-group
+        representative cannot masquerade as a concrete release.
+        """
+        if allow_fallback:
+            album = self.get_album(album_mbid, include_tracks=True)
+        else:
+            try:
+                album = self._render_release_as_album(
+                    album_mbid, exact=True,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "Exact MusicBrainz release lookup failed for %s: %s",
+                    album_mbid, exc,
+                )
+                return None
+
+            if (
+                not album
+                or album.get('musicbrainz_release_id') != album_mbid
+            ):
+                return None
+
         if album is None:
             return None
+
         flat = album.get('tracks', [])
         if isinstance(flat, dict):
-            return flat
-        return {'items': flat, 'total': len(flat)}
+            payload = dict(flat)
+        else:
+            payload = {'items': flat, 'total': len(flat)}
+
+        if not allow_fallback:
+            payload['provider'] = 'musicbrainz'
+            payload['provider_entity_id'] = album['musicbrainz_release_id']
+
+        return payload
 
     def get_artist(self, artist_id: str) -> Optional[Dict[str, Any]]:
         """Return Spotify-compatible artist detail dict."""
@@ -1263,7 +1296,8 @@ class MusicBrainzSearchClient:
             return None
 
     def _render_release_as_album(self, release_mbid: str,
-                                  rg_fallback: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+                                  rg_fallback: Optional[Dict[str, Any]] = None,
+                                  *, exact: bool = False) -> Optional[Dict[str, Any]]:
         """Fetch a specific release and project it to the album-detail dict
         shape the download modal expects. `rg_fallback` supplies release-group
         metadata (type, artist credits) when resolving from a release-group
@@ -1277,6 +1311,15 @@ class MusicBrainzSearchClient:
             release_mbid, includes=['recordings', 'artist-credits', 'release-groups']
         )
         if not release:
+            return None
+
+        # Verify the response itself, not the requested MBID echoed
+        # into the projected album dictionary.
+        if exact and release.get('id') != release_mbid:
+            logger.debug(
+                "MusicBrainz returned release %s for requested release %s",
+                release.get('id'), release_mbid,
+            )
             return None
 
         title = release.get('title', '')

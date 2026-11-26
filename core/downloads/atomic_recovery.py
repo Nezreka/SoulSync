@@ -183,14 +183,42 @@ def _pending_from_manifest(manifest: Optional[Dict[str, Any]]) -> List[Dict[str,
     return pending
 
 
+def publish_without_overwriting(staging_root: str, transfer_dir: str, move_fn, db_path_update_fn=None) -> dict:
+    """Publish a staged album, never on top of a file the library already has.
+
+    The staged files whose final path is taken are set aside into the recycle
+    bin first (``_set_aside_superseded``), then the rest publish. The same rule
+    the startup recovery follows, for the live publish: it moved every staged
+    file with ``os.replace`` and replaced whatever was there, with none of the
+    import pipeline's protections (the quality comparison, the length guard,
+    retiring the old file), since those only ever looked at the staged path,
+    which was always free.
+
+    Returns ``publish_album_batch``'s result, with ``superseded`` (how many
+    were set aside). When they cannot be set aside nothing is published:
+    ``{'published': [], 'failed': [(root, reason)], 'superseded': 0}``."""
+    staged_files = _publish.iter_staged_files(staging_root)
+    set_aside = _set_aside_superseded(staging_root, transfer_dir, staged_files)
+    if set_aside is None:
+        return {'published': [], 'superseded': 0,
+                'failed': [(staging_root, 'files already in the library could not be set aside')]}
+    result = _publish.publish_album_batch(staging_root, transfer_dir, move_fn, db_path_update_fn)
+    result['superseded'] = set_aside
+    return result
+
+
 def _set_aside_superseded(root: str, transfer_dir: str,
                           staged_files: List[str]) -> Optional[int]:
     """Quarantine staged files the library already has, before publishing.
 
-    A LIVE atomic batch cannot collide: ``album_folder_is_fresh`` only lets a
-    batch stage into an album folder that holds no audio. A tree recovered weeks
-    later has no such guarantee — the user has almost certainly re-requested the
-    stranded tracks in the meantime, and some of them have landed. And
+    A tree recovered weeks later can collide: the user has almost certainly
+    re-requested the stranded tracks in the meantime, and some have landed. So
+    can a LIVE batch. ``album_folder_is_fresh`` is asked once, when the batch
+    starts, of the first track's folder, and a batch then downloads for minutes
+    or hours; a second request for the same album, a wishlist single or another
+    disc's folder can file a track into that folder before this batch
+    publishes. (This comment used to say a live batch cannot collide, and the
+    live publish did not check.) And
     ``safe_move_file`` publishes with ``os.replace``, which OVERWRITES, so a
     straight publish would silently put a months-old staged copy on top of the
     file the normal pipeline just imported and verified.

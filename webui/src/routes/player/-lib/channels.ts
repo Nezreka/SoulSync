@@ -10,7 +10,13 @@
 
 import { appURL } from '@/platform/url-base';
 
-import type { CatalogMovie, CatalogShow, CatalogYoutube, VideoCatalog } from '../-player.types';
+import type {
+  CatalogHome,
+  CatalogMovie,
+  CatalogShow,
+  CatalogYoutube,
+  VideoCatalog,
+} from '../-player.types';
 import type { GuideItem, ScheduleOptions } from './schedule';
 
 import { youtubeThumb } from './images';
@@ -107,6 +113,19 @@ export function episodeItems(show: CatalogShow): GuideItem[] {
   return items;
 }
 
+/** a home video as a guide item */
+export function homeGuideItem(video: CatalogHome): GuideItem {
+  return {
+    key: `home:${video.id}`,
+    title: video.title,
+    subtitle: video.album || undefined,
+    seconds: video.duration_s ?? 0,
+    art: video.thumb_url ? appURL(video.thumb_url) : null,
+    kind: 'home',
+    href: '/player/home-videos',
+  };
+}
+
 export function youtubeItem(video: CatalogYoutube): GuideItem {
   return {
     key: `youtube:${video.id}`,
@@ -153,6 +172,10 @@ function hasEnough(pool: GuideItem[], need = MIN_POOL): boolean {
 }
 
 function add(out: Channel[], channel: Channel) {
+  // two names can make one id ("Disney+" and "Disney" both slug to
+  // network-disney): the first keeps it, as the android app does, so the
+  // lineup and channel numbers match on every device
+  if (out.some((c) => c.id === channel.id)) return;
   const playable = channel.pool.filter((item) => item.seconds >= 60);
   if (hasEnough(playable)) out.push({ ...channel, pool: playable });
 }
@@ -163,7 +186,7 @@ export function musicTypeChannel(tracks: readonly MusicTrackLike[]): Channel | n
   add(out, {
     id: 'type-music',
     name: 'Music',
-    kind: 'type',
+    kind: 'music',
     blurb: 'songs from your library',
     pool: tracks.map(trackItem),
     music: true,
@@ -214,6 +237,14 @@ export function autoChannels(
     kind: 'type',
     blurb: 'your downloaded videos',
     pool: youtube.map(youtubeItem),
+  });
+  // home libraries an admin switched into the guide (off by default)
+  add(out, {
+    id: 'type-home',
+    name: 'Home videos',
+    kind: 'type',
+    blurb: 'your own clips',
+    pool: (catalog.home ?? []).map(homeGuideItem),
   });
   const music = musicTypeChannel(tracks);
   if (music) out.push(music);
@@ -282,7 +313,9 @@ export function autoChannels(
     blurb: 'films and shows scored 8 or better',
     pool: [...movies.filter(scored).map(movieItem), ...shows.filter(scored).flatMap(episodeItems)],
   });
-  const monthAgo = Date.now() - 30 * 86_400_000;
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const monthAgo = todayStart.getTime() - 30 * 86_400_000;
   const fresh = (x: { added_at: string | null }) => {
     const t = x.added_at
       ? Date.parse(x.added_at.includes('T') ? x.added_at : `${x.added_at.replace(' ', 'T')}Z`)
@@ -505,19 +538,19 @@ export function matchesFilter(
 }
 
 export const CHANNEL_GROUPS: { kind: ChannelKind; label: string }[] = [
-  { kind: 'type', label: 'Everything' },
+  { kind: 'network', label: 'Networks' },
+  { kind: 'pick', label: 'Picks' },
   { kind: 'server', label: 'Channels for everyone' },
   { kind: 'rule', label: 'Your channels' },
-  { kind: 'playlist', label: 'Your playlists' },
-  { kind: 'vibe', label: 'Vibes' },
-  { kind: 'music', label: 'Music genres' },
-  { kind: 'pick', label: 'Picks' },
-  { kind: 'kids', label: 'Kids' },
+  { kind: 'type', label: 'Everything' },
   { kind: 'genre', label: 'Movie and TV genres' },
-  { kind: 'network', label: 'Networks' },
   { kind: 'studio', label: 'Studios' },
   { kind: 'collection', label: 'Film series' },
   { kind: 'decade', label: 'Decades' },
+  { kind: 'kids', label: 'Kids' },
+  { kind: 'playlist', label: 'Your playlists' },
+  { kind: 'vibe', label: 'Vibes' },
+  { kind: 'music', label: 'Music' },
 ];
 
 /** channel numbers in guide order, from 101: stable while the library is */
@@ -534,11 +567,12 @@ export function numberChannels(channels: readonly Channel[]): Channel[] {
 /** what goes on a channel someone made (core/player/lineup.py clean_spec) */
 export interface ChannelSpec {
   name: string;
-  kinds: ('movies' | 'tv')[];
+  kinds: ('movies' | 'tv' | 'youtube')[];
   genres: string[];
   decades: number[];
   studios: string[];
   networks: string[];
+  youtube_channels?: string[];
   collection: string | null;
   min_score: number | null;
   kids: boolean;
@@ -570,6 +604,7 @@ export const EMPTY_SPEC: ChannelSpec = {
   decades: [],
   studios: [],
   networks: [],
+  youtube_channels: [],
   collection: null,
   min_score: null,
   kids: false,
@@ -628,10 +663,10 @@ export function specBlurb(spec: ChannelSpec, showTitle?: string | null): string 
   if (spec.show) return `${showTitle ?? 'one show'}, start to finish`;
   return [
     (spec.people ?? []).map((p) => p.name).join(', '),
-    spec.kinds.map((k) => (k === 'tv' ? 'TV' : 'movies')).join(' + '),
+    spec.kinds.map((k) => (k === 'tv' ? 'TV' : k === 'youtube' ? 'YouTube' : 'movies')).join(' + '),
     spec.genres.slice(0, 2).join(', '),
     spec.decades.length ? spec.decades.map((d) => `${d}s`).join(', ') : '',
-    [...spec.studios, ...spec.networks].slice(0, 2).join(', '),
+    [...spec.studios, ...spec.networks, ...(spec.youtube_channels ?? [])].slice(0, 2).join(', '),
     spec.collection ?? '',
     spec.min_score != null ? `★ ${spec.min_score}+` : '',
     spec.added_days ? `added in ${spec.added_days} days` : '',
@@ -657,6 +692,18 @@ export function specPool(
     pool.push(
       ...catalog.shows.filter((x) => specMatches(spec, x, 'tv', now, people)).flatMap(episodeItems),
     );
+  if (spec.kinds.includes('youtube')) {
+    const ytChans = spec.youtube_channels ?? [];
+    pool.push(
+      ...catalog.youtube
+        .filter((y) => {
+          if (spec.people?.length) return false;
+          if (!sameWord(ytChans, y.channel_title) && !sameWord(ytChans, y.channel_id)) return false;
+          return true;
+        })
+        .map(youtubeItem),
+    );
+  }
   return pool;
 }
 
@@ -784,6 +831,44 @@ export function channelArt(channel: Pick<Channel, 'pool'>, n = 4): string[] {
     if (out.length >= n) break;
   }
   logoCache.set(channel.pool, out);
+  return out;
+}
+
+/** Build 24/7 live channels from SoulSync Collection Studio collections (1:1 parity with Android). */
+export function studioCollectionChannels(
+  collections: readonly {
+    id: number;
+    name: string;
+    media_type: 'movie' | 'show';
+    members: number[];
+    pinned?: boolean;
+  }[],
+  catalog: VideoCatalog,
+): Channel[] {
+  const movieById = new Map(catalog.movies.map((m) => [m.id, m]));
+  const showById = new Map(catalog.shows.map((x) => [x.id, x]));
+  const out: Channel[] = [];
+  for (const col of collections) {
+    const pool: GuideItem[] = [];
+    if (col.media_type === 'movie') {
+      for (const id of col.members) {
+        const m = movieById.get(id);
+        if (m) pool.push(movieItem(m));
+      }
+    } else {
+      for (const id of col.members) {
+        const x = showById.get(id);
+        if (x) pool.push(...episodeItems(x));
+      }
+    }
+    add(out, {
+      id: `studio-col-${col.id}`,
+      name: col.name,
+      kind: 'collection',
+      blurb: `${col.members.length} ${col.media_type === 'movie' ? 'films' : 'shows'} · SoulSync Collection`,
+      pool,
+    });
+  }
   return out;
 }
 

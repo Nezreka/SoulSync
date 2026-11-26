@@ -22,19 +22,25 @@ class VideoCap:
     """what a profile may see on the video side, per kind (#2166): a rating
     cap age for movies and one for shows (None = no cap), and the kinds it
     can't see at all (movies.access / tv.access off). every helper here
-    takes one of these or the old plain int cap (one age for both kinds)."""
+    takes one of these or the old plain int cap (one age for both kinds).
 
-    __slots__ = ("movie", "show", "blocked")
+    ``hidden``: the libraries an admin hid from this profile in the player
+    (core/player/libraries.py). a title in one of them is not this
+    profile's to see or play, whatever its rating."""
 
-    def __init__(self, movie=None, show=None, blocked=()):
+    __slots__ = ("movie", "show", "blocked", "hidden")
+
+    def __init__(self, movie=None, show=None, blocked=(), hidden=()):
         self.movie, self.show, self.blocked = movie, show, frozenset(blocked)
+        self.hidden = frozenset(int(x) for x in hidden)
 
     def __repr__(self):  # pragma: no cover - debugging
-        return "VideoCap(movie=%r, show=%r, blocked=%r)" % (self.movie, self.show, sorted(self.blocked))
+        return "VideoCap(movie=%r, show=%r, blocked=%r, hidden=%r)" % (
+            self.movie, self.show, sorted(self.blocked), sorted(self.hidden))
 
     def __eq__(self, other):
-        return isinstance(other, VideoCap) and (self.movie, self.show, self.blocked) == (
-            other.movie, other.show, other.blocked)
+        return isinstance(other, VideoCap) and (self.movie, self.show, self.blocked, self.hidden) == (
+            other.movie, other.show, other.blocked, other.hidden)
 
     __hash__ = None
 
@@ -57,6 +63,29 @@ def kind_allows(cap, kind, rating) -> bool:
     if isinstance(cap, VideoCap):
         return cap.allows(kind, rating)
     return title_allowed(rating, cap)
+
+
+def hidden_libraries(cap) -> frozenset:
+    """the library ids hidden under ``cap`` (empty for none)"""
+    return cap.hidden if isinstance(cap, VideoCap) else frozenset()
+
+
+def _in_hidden_library(db, cap, k, ids) -> set:
+    """the library title ids of kind ``k`` that sit in a library hidden
+    under ``cap``. empty when nothing is hidden (no query). a lookup that
+    fails hides them all: can't vouch, so no."""
+    hidden = hidden_libraries(cap)
+    ids = [i for i in ids if i is not None]
+    if not hidden or not ids:
+        return set()
+    try:
+        from core.player.libraries import library_ids_for
+        from database.player_database import get_player_database
+        where = library_ids_for(db, get_player_database(), k, ids)
+    except Exception:  # noqa: BLE001
+        logger.exception("hidden libraries: lookup failed for %s", k)
+        return {int(i) for i in ids}
+    return {int(i) for i in ids if where.get(int(i)) in hidden}
 
 
 def kind_visible(cap, kind) -> bool:
@@ -112,8 +141,31 @@ def video_cap():
         blocked = tuple(k for k, row in (("movie", "movies"), ("show", "tv"))
                         if not c.get("is_admin") and not perms.get("%s.access" % row))
         cap = None if (age is None and not blocked) else VideoCap(age, age, blocked)
+    cap = _with_hidden_libraries(cap, c)
     g._video_cap = cap
     return cap
+
+
+def _with_hidden_libraries(cap, c):
+    """``cap`` with the libraries hidden from this profile in the player.
+    an admin sees every library. a read that fails is said out loud and
+    hides nothing: a broken player.db must not lock a household out of its
+    video library (the rating cap, which is the safety gate, is untouched)."""
+    if c.get("is_admin") or c.get("profile_id") is None:
+        return cap
+    try:
+        from core.player.libraries import hidden_for
+        from database.player_database import get_player_database
+        hidden = hidden_for(get_player_database(), c.get("profile_id"))
+    except Exception:  # noqa: BLE001
+        logger.exception("hidden libraries: couldn't read them for profile %s", c.get("profile_id"))
+        return cap
+    if not hidden:
+        return cap
+    if isinstance(cap, VideoCap):
+        return VideoCap(cap.movie, cap.show, cap.blocked, hidden)
+    # an old plain int cap is one age for both kinds
+    return VideoCap(cap, cap, (), hidden)
 
 
 def feed_cap(profile):
@@ -158,6 +210,8 @@ def library_title_allowed(db, kind, library_id, cap) -> bool:
         return True
     k = _kind(kind)
     if not k or not kind_visible(cap, k):
+        return False
+    if _in_hidden_library(db, cap, k, [library_id]):
         return False
     try:
         rating = db.content_ratings_by_id(k, [library_id]).get(int(library_id))
@@ -273,21 +327,26 @@ def filter_library_items(db, items, cap, kind, id_key="id"):
     k = _kind(kind)
     if k is None or not kind_visible(cap, k):
         return []
-    if not _needs_rating(cap, k):
+    rated = _needs_rating(cap, k)
+    if not rated and not hidden_libraries(cap):
         return items
     ids = [it.get(id_key) for it in items if isinstance(it, dict) and it.get(id_key) is not None]
-    try:
-        ratings = db.content_ratings_by_id(k, ids) if k else {}
-    except Exception:  # noqa: BLE001
-        logger.exception("kids: rating lookup failed")
-        ratings = {}
+    gone = _in_hidden_library(db, cap, k, ids)
+    ratings = {}
+    if rated:
+        try:
+            ratings = db.content_ratings_by_id(k, ids) if k else {}
+        except Exception:  # noqa: BLE001
+            logger.exception("kids: rating lookup failed")
     out = []
     for it in items:
         try:
             rid = int(it.get(id_key))
         except (TypeError, ValueError):
             continue
-        if kind_allows(cap, k, ratings.get(rid)):
+        if rid in gone:
+            continue
+        if not rated or kind_allows(cap, k, ratings.get(rid)):
             out.append(it)
     return out
 
@@ -305,10 +364,13 @@ def filter_mixed_library_items(db, items, cap, kind_key="kind", id_key="id", sho
         key = show_id_key if (k == "show" and show_id_key) else id_key
         return k, it.get(key)
 
+    every: dict = {"movie": [], "show": []}
     for it in items:
         k, rid = _ref(it)
-        if k and rid is not None and _needs_rating(cap, k):
-            ids[k].append(rid)
+        if k and rid is not None:
+            every[k].append(rid)
+            if _needs_rating(cap, k):
+                ids[k].append(rid)
     ratings = {}
     for k, v in ids.items():
         try:
@@ -316,10 +378,16 @@ def filter_mixed_library_items(db, items, cap, kind_key="kind", id_key="id", sho
         except Exception:  # noqa: BLE001
             logger.exception("kids: rating lookup failed")
             ratings[k] = {}
+    gone = {k: _in_hidden_library(db, cap, k, v) for k, v in every.items()}
     out = []
     for it in items:
         k, rid = _ref(it)
         if not k or rid is None or not kind_visible(cap, k):
+            continue
+        try:
+            if int(rid) in gone[k]:
+                continue
+        except (TypeError, ValueError):
             continue
         if not _needs_rating(cap, k) or kind_allows(cap, k, ratings.get(k, {}).get(int(rid))):
             out.append(it)

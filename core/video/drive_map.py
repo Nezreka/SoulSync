@@ -168,6 +168,14 @@ def _server_folders_cached(fetch: Optional[Callable[[], Any]] = None):
     return folders
 
 
+def forget_server_folders() -> None:
+    """the library picks changed or a scan finished: ask the server again on
+    the next look, and count its files again"""
+    _folders_cache.update(at=0.0, folders=None)
+    _counts_cache.clear()
+    _suggest_cache.clear()
+
+
 def _configured_roles(db) -> List[tuple]:
     """(local folder, what it is) for every folder set in Settings"""
     from core.video.library_roots import additional_paths, four_k_path
@@ -223,6 +231,83 @@ def _recognise(db, folder: str, sample_paths: List[str], roles: List[tuple]) -> 
     return None
 
 
+# ── a suggestion for a folder nobody has filled in ──
+
+_SUGGEST_TTL = 600.0
+_suggest_cache: Dict[tuple, Any] = {}
+
+
+def _split_local(local: str) -> tuple:
+    """(lead, parts, sep) of a local path: '\\\\' for a share, '/' for posix,
+    '' for a drive letter (its first part is 'E:')"""
+    text = str(local or "").strip()
+    sep = "\\" if ("\\" in text or re.match(r"^[A-Za-z]:", text)) else "/"
+    if text.startswith("\\\\") or text.startswith("//"):
+        lead = "\\\\" if sep == "\\" else "//"
+    elif text.startswith("/"):
+        lead = "/"
+    else:
+        lead = ""
+    return lead, [x for x in re.split(r"[\\/]+", text) if x], sep
+
+
+def prefix_rules(entries: List[Dict[str, str]]) -> List[tuple]:
+    """(server prefix, local prefix, sep, how many saved folders agree) read
+    off the saved folders: /mnt/sdb/PLEX/MOVIES at \\\\nas\\sdb\\PLEX\\MOVIES
+    says /mnt is reached at \\\\nas. most agreed on first, then the longest."""
+    rules: Dict[tuple, int] = {}
+    for e in entries or []:
+        server = _norm_server(e.get("server"))
+        if not server.startswith("/") or server.startswith("//"):
+            continue
+        sparts = [x for x in server.split("/") if x]
+        lead, lparts, sep = _split_local(e.get("local"))
+        n = 0
+        while (n < len(sparts) - 1 and n < len(lparts) - 1
+               and sparts[-1 - n].casefold() == lparts[-1 - n].casefold()):
+            n += 1
+        if not n:
+            continue
+        spre = "/" + "/".join(sparts[:len(sparts) - n])
+        lpre = lead + sep.join(lparts[:len(lparts) - n])
+        key = (spre, lpre, sep)
+        rules[key] = rules.get(key, 0) + 1
+    return sorted(((k[0], k[1], k[2], c) for k, c in rules.items()),
+                  key=lambda r: (-r[3], -len(r[0])))
+
+
+def suggest(db, server: Any, entries: List[Dict[str, str]], *,
+            exists: Callable[[str], bool] = os.path.exists,
+            isdir: Callable[[str], bool] = os.path.isdir) -> Optional[Dict[str, Any]]:
+    """where SoulSync likely reaches ``server``, by the pattern the saved
+    folders follow, or None. only offered once check() finds the library's
+    own files there; never saved here."""
+    server = _norm_server(server)
+    if not server:
+        return None
+    for spre, lpre, sep, _n in prefix_rules(entries):
+        if not server.startswith(spre.rstrip("/") + "/"):
+            continue
+        rest = [x for x in server[len(spre):].split("/") if x]
+        if not rest:
+            continue
+        cand = lpre.rstrip("/\\") + sep + sep.join(rest)
+        key = (str(getattr(db, "database_path", id(db))), server, cand)
+        hit = _suggest_cache.get(key)
+        if hit and time.monotonic() - hit[0] < _SUGGEST_TTL:
+            res = hit[1]
+        else:
+            try:
+                res = check(db, server, cand, sample=10, exists=exists, isdir=isdir)
+            except Exception:   # noqa: BLE001 - an unreadable share is no suggestion
+                res = {"ok": False}
+            _suggest_cache[key] = (time.monotonic(), res)
+        # the folder alone isn't proof: the library's own files must be there
+        if res.get("ok") and res.get("found"):
+            return {"local": cand, "message": res.get("message") or ""}
+    return None
+
+
 _COUNTS_TTL = 600.0
 _counts_cache: Dict[str, Any] = {}
 
@@ -272,9 +357,13 @@ def _counts_cached(db, folders: tuple):
     return counts, samples
 
 
-def server_folders(db, *, fetch: Optional[Callable[[], Any]] = None) -> List[Dict[str, Any]]:
+def server_folders(db, *, fetch: Optional[Callable[[], Any]] = None,
+                   exists: Callable[[str], bool] = os.path.exists,
+                   isdir: Callable[[str], bool] = os.path.isdir) -> List[Dict[str, Any]]:
     """every folder the server's libraries read, Movies or TV, biggest first,
-    with how many library files are in it and where SoulSync reaches it"""
+    with how many library files are in it and where SoulSync reaches it. a
+    folder nobody filled in that follows the saved folders' pattern carries
+    ``suggest`` {local, message}: offered, never saved."""
     listed = _server_folders_cached(fetch)
     by_server: Dict[str, Dict[str, Any]] = {}
     if listed:
@@ -288,7 +377,8 @@ def server_folders(db, *, fetch: Optional[Callable[[], Any]] = None) -> List[Dic
         for root in _drive_roots_cached(db):
             by_server[root] = {"server": root, "kind": None, "library": None}
     counts, samples = _counts_cached(db, tuple(sorted(by_server)))
-    saved = {e["server"]: e for e in load(db)}
+    entries = load(db)
+    saved = {e["server"]: e for e in entries}
     roles = _configured_roles(db)
     out = []
     for server, f in by_server.items():
@@ -300,6 +390,10 @@ def server_folders(db, *, fetch: Optional[Callable[[], Any]] = None) -> List[Dic
             known = _recognise(db, server, samples[server], roles)
             if known:
                 row.update(local=known["local"], auto=True, role=known["role"])
+            elif entries and counts[server]:
+                hint = suggest(db, server, entries, exists=exists, isdir=isdir)
+                if hint:
+                    row["suggest"] = hint
         out.append(row)
     # a folder saved earlier that the server no longer lists stays visible
     for server, e in saved.items():

@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import type { RailCard } from '../-lib/rails';
 
 import { movieCard } from '../-lib/rails';
-import { decadeOf, genresOf, sortTitles, validateBrowseSearch } from '../-lib/video';
+import { decadeOf, genresOf, libraryTitles, sortTitles, validateBrowseSearch } from '../-lib/video';
 import { videoCatalogQuery } from '../-player.api';
 import { BrowseTabs, MovieCollections, VideoCategories, VideoForYou } from '../-ui/browse';
 import { CardGrid, Empty, PageTitle, useViewMode, ViewToggle, styles as s } from '../-ui/kit';
@@ -22,12 +22,20 @@ function MoviesBrowse() {
   const sections = useSections();
   const [view, setView] = useViewMode('movies');
   const search = Route.useSearch();
-  const { sort = 'added', genre = '', decade } = search;
+  const { sort = 'added', genre = '', decade, library } = search;
   // a filter link (a genre, a decade) lands on the library
   const tab = search.tab ?? (genre || decade ? 'library' : 'foryou');
   const navigate = useNavigate({ from: '/player/movies/' });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.movies });
-  const movies = useMemo(() => catalog.data?.movies ?? [], [catalog.data]);
+  // a library's own page shows only its titles; Movies itself, everything not in one
+  const here = useMemo(
+    () => (catalog.data?.libraries ?? []).find((l) => l.id === library && l.kind === 'movie'),
+    [catalog.data, library],
+  );
+  const movies = useMemo(
+    () => libraryTitles(catalog.data?.movies ?? [], catalog.data?.libraries ?? [], library),
+    [catalog.data, library],
+  );
   const genres = useMemo(() => genresOf(movies), [movies]);
 
   const cards: RailCard[] = useMemo(
@@ -45,12 +53,12 @@ function MoviesBrowse() {
 
   return (
     <>
-      <PageTitle>Movies</PageTitle>
+      <PageTitle>{here?.name ?? 'Movies'}</PageTitle>
       <BrowseTabs
         value={tab}
         onChange={(next) =>
           void navigate({
-            search: next === 'library' ? { tab: next, sort } : { tab: next },
+            search: next === 'library' ? { tab: next, sort, library } : { tab: next, library },
             replace: true,
           })
         }
@@ -60,11 +68,16 @@ function MoviesBrowse() {
         <Empty title="Could not load your movies">Try again in a moment.</Empty>
       ) : null}
       {catalog.data && tab === 'foryou' ? (
-        <VideoForYou kind="movie" movies={movies} shows={catalog.data.shows} />
+        <VideoForYou
+          kind="movie"
+          movies={movies}
+          shows={catalog.data.shows}
+          library={here ? { id: here.id, name: here.name } : undefined}
+        />
       ) : null}
       {catalog.data && tab === 'collections' ? <MovieCollections movies={movies} /> : null}
       {catalog.data && tab === 'categories' ? (
-        <VideoCategories kind="movie" items={movies} />
+        <VideoCategories kind="movie" items={movies} library={here?.id} />
       ) : null}
       {catalog.data && tab === 'library' ? (
         <>

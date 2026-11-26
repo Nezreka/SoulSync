@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request, send_file, session
 
+from core.connect.device_access import device_playback
 from core.permissions import may_manage_profile
 from core.profile_context import admin_only, admin_or_api_key, get_current_profile_id
 from core.security.rate_limit import TargetedLimiter
@@ -457,6 +458,34 @@ def _avatar_path(profile_id: int) -> str:
     return os.path.join(_avatar_dir(), f"profile-{int(profile_id)}.webp")
 
 
+def store_avatar(profile_id, raw: bytes):
+    """any image pillow reads, re-encoded to a 512px webp (so nothing but
+    pixels is kept: no metadata, no svg, no scripts), saved as the profile's
+    avatar. returns its url, or None when it isn't an image"""
+    if not raw or len(raw) > AVATAR_MAX_BYTES:
+        return None
+    try:
+        from PIL import Image, ImageOps
+        img = Image.open(io.BytesIO(raw))
+        img.verify()
+        img = Image.open(io.BytesIO(raw))
+        img = ImageOps.exif_transpose(img)
+        img = img.convert("RGBA")
+        img = ImageOps.fit(img, (AVATAR_SIDE, AVATAR_SIDE), method=Image.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, "WEBP", quality=88)
+    except Exception:  # noqa: BLE001
+        return None
+    path = _avatar_path(profile_id)
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as fh:
+        fh.write(out.getvalue())
+    os.replace(tmp, path)
+    url = f"/api/profiles/{int(profile_id)}/avatar?v={int(time.time())}"
+    get_database().update_profile(profile_id, avatar_url=url)
+    return url
+
+
 @bp.route("/api/profiles/<int:profile_id>/avatar", methods=["POST"])
 @own_or_admin
 def upload_avatar(profile_id):
@@ -474,25 +503,9 @@ def upload_avatar(profile_id):
     raw = f.read(AVATAR_MAX_BYTES + 1)
     if len(raw) > AVATAR_MAX_BYTES:
         return jsonify({"success": False, "error": "That image is over 3 MB"}), 413
-    try:
-        from PIL import Image, ImageOps
-        img = Image.open(io.BytesIO(raw))
-        img.verify()
-        img = Image.open(io.BytesIO(raw))
-        img = ImageOps.exif_transpose(img)
-        img = img.convert("RGBA")
-        img = ImageOps.fit(img, (AVATAR_SIDE, AVATAR_SIDE), method=Image.LANCZOS)
-        out = io.BytesIO()
-        img.save(out, "WEBP", quality=88)
-    except Exception:  # noqa: BLE001
+    url = store_avatar(profile_id, raw)
+    if not url:
         return jsonify({"success": False, "error": "That file isn't an image we can read"}), 400
-    path = _avatar_path(profile_id)
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as fh:
-        fh.write(out.getvalue())
-    os.replace(tmp, path)
-    url = f"/api/profiles/{int(profile_id)}/avatar?v={int(time.time())}"
-    db.update_profile(profile_id, avatar_url=url)
     if int(profile_id) != int(pid):
         audit("avatar_changed", profile_id, (db.get_profile(profile_id) or {}).get("name"),
               actor=(pid, name, is_admin))
@@ -500,6 +513,7 @@ def upload_avatar(profile_id):
 
 
 @bp.route("/api/profiles/<int:profile_id>/avatar", methods=["GET"])
+@device_playback
 @signed_in
 def get_avatar(profile_id):
     path = _avatar_path(profile_id)

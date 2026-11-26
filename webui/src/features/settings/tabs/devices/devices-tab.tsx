@@ -29,6 +29,7 @@ import {
   Row,
   Say,
   StatusWords,
+  Switch,
   Tag,
   TextArea,
   TextField,
@@ -55,6 +56,7 @@ import {
   renameDevice,
   revokeDevice,
   saveAddresses,
+  setUpnpEnabled,
   type ServerInfo,
 } from './api';
 import css from './devices.module.css';
@@ -62,6 +64,9 @@ import { MusicAppsCard } from './music-apps';
 import { groupFingerprint } from './server-fingerprint';
 
 export const DEVICES_TAB = 'devices';
+
+// where the player app is downloaded, for a phone that doesn't have it yet
+const APP_RELEASES = 'https://github.com/Nezreka/soulsync-mobile-app/releases';
 
 const toast = (message: string, type = 'info') =>
   (window as Window & { showToast?: (m: string, t?: string) => void }).showToast?.(message, type);
@@ -181,7 +186,7 @@ export function DevicesPage({ opened, active }: SettingsTabProps) {
         <div className={s.cards} aria-label="Devices">
           <Card
             title="Pair a device"
-            hint="Pair a phone, a car or a speaker app with a one-time code. It picks a profile and can only play: never settings, downloads or people."
+            hint="Pair the SoulSync app on a phone, tablet, TV, or car with a one-time code for movies, shows, music, podcasts, and audiobooks. It picks a profile and can only play: never settings, downloads, or people."
             actions={
               <Btn kind="primary" id="devices-add" busy={busy} onClick={() => void add()}>
                 Add a device
@@ -391,7 +396,20 @@ function ShownCode({
             </Btn>
           </FieldLine>
         </div>
-        <QrImage className={css.qr} text={code.payload_text} label="Pairing QR code" />
+        <figure className={css.qrBox}>
+          <QrImage
+            className={css.qr}
+            text={code.qr_text || code.payload_text}
+            label="Pairing QR code"
+          />
+          <figcaption className={`${itemClass.dim} ${css.qrNote}`}>
+            Scan with your phone&apos;s camera to open the SoulSync Player app. No app yet? Get it
+            at{' '}
+            <a href={APP_RELEASES} target="_blank" rel="noopener noreferrer">
+              github.com/Nezreka/soulsync-mobile-app/releases
+            </a>
+          </figcaption>
+        </figure>
       </div>
     </div>
   );
@@ -421,6 +439,7 @@ function ThisServer({
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<CheckResult | null>(null);
   const [probe, setProbe] = useState<Probe | null>(null);
+  const [upnpBusy, setUpnpBusy] = useState(false);
 
   // the saved addresses fill the fields when they change, not on every
   // reload (the page looks again every few seconds while a code is up)
@@ -476,6 +495,25 @@ function ThisServer({
     setProbe(r.data.probe);
   };
 
+  const toggleUpnp = async (enabled: boolean) => {
+    setUpnpBusy(true);
+    const r = await setUpnpEnabled(enabled);
+    setUpnpBusy(false);
+    if (!r.ok) {
+      toast(r.message, 'error');
+      return;
+    }
+    toast(
+      enabled
+        ? r.data.upnp?.active
+          ? `Remote access open on port ${r.data.upnp.external_port}`
+          : 'Automatic port forwarding enabled (no UPnP router responded)'
+        : 'Automatic port forwarding turned off',
+      'info',
+    );
+    onSaved();
+  };
+
   const outside = probe?.hits.filter((h) => h.via === 'outside') ?? [];
   const last = outside[outside.length - 1];
   return (
@@ -498,6 +536,35 @@ function ThisServer({
         ) : (
           <Note info>No addresses found yet. Add the remote address below.</Note>
         )}
+      </Row>
+      <Row
+        label="Automatic remote access (UPnP / NAT-PMP)"
+        htmlFor="devices-upnp-toggle"
+        help="Optional. Asks your home router to open a port for mobile data automatically (off by default — leave off if you use a manual forward, Tailscale, or a reverse proxy)."
+      >
+        <div className={css.stack}>
+          <FieldLine>
+            <Switch
+              id="devices-upnp-toggle"
+              checked={!!server.upnp?.enabled}
+              disabled={upnpBusy}
+              onChange={(e) => void toggleUpnp(e.target.checked)}
+            />
+            {server.upnp?.enabled ? (
+              server.upnp.active ? (
+                <StatusWords tone="ok">
+                  {`Active — ${server.upnp.external_ip ?? 'WAN'}:${server.upnp.external_port} → ${server.upnp.internal_port} (${server.upnp.method === 'natpmp' ? 'NAT-PMP' : 'UPnP'})`}
+                </StatusWords>
+              ) : (
+                <StatusWords tone="warn">
+                  {`No UPnP / NAT-PMP router responded. Forward TCP ${server.upnp.internal_port} manually.`}
+                </StatusWords>
+              )
+            ) : (
+              <span className={itemClass.dim}>Off (LAN only unless forwarded manually)</span>
+            )}
+          </FieldLine>
+        </div>
       </Row>
       <Row
         field

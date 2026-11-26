@@ -18,8 +18,9 @@ import type { PlayerState } from '../../-engine/engine';
 
 import { converting } from '../../-engine/describe';
 import { current, nextIndex } from '../../-engine/queue';
-import { clock } from '../../-engine/timeline';
+import { clock, skippableAt } from '../../-engine/timeline';
 import { NextIcon, PauseIcon, PlayIcon } from '../icons';
+import { ReportIssueButton } from '../report-issue';
 import { inPlayer } from '../trailer';
 import {
   AudioMenu,
@@ -44,6 +45,11 @@ import {
   StatsIcon,
 } from './icons';
 import { MarkButton, useMarks } from './marks';
+import {
+  handleWatchPartyPlayerToggle,
+  PartyReactionsOverlay,
+  setActiveWatchPartyId,
+} from './party-reactions';
 import s from './playback.module.css';
 import { SeekBar } from './seek-bar';
 import { StatsOverlay } from './stats';
@@ -134,12 +140,16 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         'input, textarea, select, [role="menu"]',
       );
       if (typing) return;
-      // a menu is open: its own keys (escape closes it, and only it)
-      if (document.querySelector('[role="menu"]')) return;
+      // a menu or a dialog is open over the player (report an issue, a sheet):
+      // its own keys. escape closes it, and only it; space doesn't pause behind it
+      if (document.querySelector('[role="menu"], [aria-modal="true"]')) return;
       const v = engine.getState();
+      const togglePlayOrParty = () => {
+        if (!handleWatchPartyPlayerToggle()) engine.toggle();
+      };
       const act: Record<string, () => void> = {
-        ' ': () => engine.toggle(),
-        k: () => engine.toggle(),
+        ' ': togglePlayOrParty,
+        k: togglePlayOrParty,
         j: () => engine.skip(-10),
         l: () => engine.skip(10),
         ArrowLeft: () => engine.skip(-10),
@@ -194,7 +204,9 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
       <div
         ref={frame}
         className={s.fullFrame}
-        onClick={() => engine.toggle()}
+        onClick={() => {
+          if (!handleWatchPartyPlayerToggle()) engine.toggle();
+        }}
         onDoubleClick={toggleFullscreen}
       />
       <Dimmer brightness={brightness} />
@@ -218,6 +230,8 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         </div>
       ) : null}
 
+      <PartyReactionsOverlay hudVisible={!idle} />
+      <SkipMark state={state} />
       <div className={s.fullTop}>
         <button
           type="button"
@@ -228,7 +242,6 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
           data-nav
         >
           <ChevronDownBigIcon />
-          <span>Minimize</span>
         </button>
         <div className={s.fullTitles}>
           <span className={s.fullTitle}>{item.title}</span>
@@ -242,11 +255,23 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
               : ''}
           </span>
         ) : null}
+        <ReportIssueButton
+          entityType={item.type}
+          entityId={item.id}
+          title={item.title}
+          subtitle={item.subtitle}
+          positionSec={state.position}
+          iconOnly
+          className={s.ctl}
+        />
         <button
           type="button"
           className={s.ctl}
           aria-label="Stop and close"
-          onClick={() => engine.stop()}
+          onClick={() => {
+            setActiveWatchPartyId(null);
+            engine.stop();
+          }}
           data-nav
         >
           <CloseIcon />
@@ -280,7 +305,9 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
               type="button"
               className={s.playBtn}
               aria-label={playing ? 'Pause' : 'Play'}
-              onClick={() => engine.toggle()}
+              onClick={() => {
+                if (!handleWatchPartyPlayerToggle()) engine.toggle();
+              }}
               data-nav
             >
               {playing ? <PauseIcon /> : <PlayIcon />}
@@ -431,5 +458,20 @@ export function VideoPlayer() {
     ) : (
       <MiniPlayer onOpen={() => setOpen(true)} />
     ),
+  );
+}
+
+/**
+ * "Skip intro" (or recap, or credits) while the file's own chapter of that
+ * name plays. only a video whose file marks it gets one: nothing is guessed.
+ */
+function SkipMark({ state }: { state: PlayerState }) {
+  if (state.kind !== 'video' || state.status === 'error') return null;
+  const skip = skippableAt(state.chapters, state.position, state.duration);
+  if (!skip) return null;
+  return (
+    <button type="button" className={s.skipMark} onClick={() => getEngine().seek(skip.to)} data-nav>
+      {skip.label}
+    </button>
   );
 }

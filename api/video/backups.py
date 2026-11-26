@@ -49,4 +49,7 @@ def register_routes(bp):
         p = _resolve(name)
         if not p:
             return jsonify({"error": "Unknown backup."}), 404
-        return send_file(p, as_attachment=True, download_name=name)
+        response = send_file(p, as_attachment=True, download_name=name)
+        # a whole database: never kept by a browser or a proxy (the music side's rule)
+        response.headers["Cache-Control"] = "no-store"
+        return response

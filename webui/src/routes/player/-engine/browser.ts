@@ -13,6 +13,7 @@ import type { Tracks } from './tracks';
 import type { MediaKind, PlayItem } from './types';
 
 import { progressPayload } from '../-lib/progress';
+import { getCachedTrackBlobUrl } from './crossfade';
 
 const STORE_PREFIX = 'ss-player:';
 const PLAYABLE_TIMEOUT_MS = 90_000;
@@ -39,12 +40,23 @@ const SCREEN = (() => {
   }
 })();
 
+/** this screen's id: the converter's owner, and its watching-now session */
+export function screenId(): string {
+  return SCREEN;
+}
+
 function tagScreen(url: string): string {
   if (!url.includes('/api/player/transcode/')) return url;
   return `${url}${url.includes('?') ? '&' : '?'}ps=${SCREEN}`;
 }
 
 async function playable(item: PlayItem, quality: Quality, pick: TrackPick): Promise<Playable> {
+  if (item.type === 'track') {
+    const cachedBlob = getCachedTrackBlobUrl(item.id);
+    if (cachedBlob) {
+      return { url: cachedBlob, duration: item.duration ?? null, via: 'cache' };
+    }
+  }
   if (item.type === 'podcast_episode') {
     if (!item.url) throw new Error('This episode has no audio address.');
     // podcast audio lives on the feed's host: the podcast side's checked proxy fetches it
@@ -110,9 +122,12 @@ async function subtitle(item: PlayItem, id: string): Promise<string> {
 /** where a converted stream (copied video) really starts if asked for ``t`` */
 async function transcodeStart(url: string, t: number): Promise<{ start: number; seek: number }> {
   const [path, query] = url.split('?');
+  // a probe that never answers would leave the player on "resuming" for good
   const res = await fetch(`${path}/start?${query ? `${query}&` : ''}t=${t}`, {
     credentials: 'same-origin',
+    signal: AbortSignal.timeout(10_000),
   });
+  if (!res.ok) throw new Error(`start probe ${res.status}`);
   const body = (await res.json()) as { start?: number; seek?: number };
   return { start: body.start ?? t, seek: body.seek ?? t };
 }
@@ -234,6 +249,31 @@ function analyser(el: HTMLMediaElement): AnalyserNode | null {
   return graph(el)?.analyser ?? null;
 }
 
+/** a song heard here goes into the listening history, as a play from the old
+ *  web player does: the same endpoint, so one pile, one set of rules */
+async function listened(item: PlayItem, duration: number | null): Promise<number | null> {
+  const numeric = /^\d+$/.test(item.id);
+  const out = await apiClient
+    .post('library/log-play', {
+      json: {
+        track: {
+          id: item.id,
+          lib2_track_id: numeric ? Number(item.id) : null,
+          title: item.title,
+          artist: item.subtitle ?? '',
+          album: item.parentTitle ?? '',
+        },
+        duration_ms: duration ? Math.round(duration * 1000) : 0,
+      },
+    })
+    .json<{ play_id?: number | null }>();
+  return typeof out.play_id === 'number' ? out.play_id : null;
+}
+
+function counted(playId: number) {
+  void apiClient.post('library/log-play/eligible', { json: { play_id: playId } }).catch(() => {});
+}
+
 export function browserDeps(): EngineDeps {
   return {
     createMedia,
@@ -246,6 +286,8 @@ export function browserDeps(): EngineDeps {
     subtitle,
     save,
     watched,
+    listened,
+    counted,
     store,
     now: () => Date.now(),
     mediaSession:

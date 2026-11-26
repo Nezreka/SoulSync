@@ -2,8 +2,8 @@
  * Library > Folders, Video (settings-bic phase 4): where downloads arrive
  * (with the video minimum free disk space beside the download folder, DESIGN
  * 3.3), the Movies, TV, Anime and YouTube libraries, the optional 4K ones,
- * More libraries (#2029), your library's folders (the drive map), the folders
- * your server doesn't list, and the Docker volume lines. The folders are the
+ * More libraries (#2029), your library's folders (the drive map), the extra
+ * folders, and the Docker volume lines. The folders are the
  * video downloads config (video-downloads.ts), saved whole on each change as
  * before; More libraries and the drive map have their own endpoints.
  *
@@ -21,6 +21,7 @@ import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } f
 import {
   Btn,
   Card,
+  FieldLine,
   NumberField,
   PathField,
   Pre,
@@ -43,6 +44,7 @@ import {
 } from './library-card';
 import { videoDownloads, useVideoDownloads, type DownloadsConfig } from './video-downloads';
 import { useVideoOrganization, videoOrganization } from './video-organization';
+import { useVideoServer, videoServer } from './video-server';
 
 const str = (v: unknown) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '');
 
@@ -102,9 +104,9 @@ function VideoPath({
 }
 
 /** the extra folders of one kind: rows of their own, saved when left */
-function ExtraPaths({ kind }: { kind: 'movies' | 'tv' }) {
+function ExtraPaths({ kind }: { kind: 'movies' | 'tv' | 'home' }) {
   const { config, loads } = useVideoDownloads();
-  const key = `${kind}_additional_paths`;
+  const key = kind === 'home' ? 'home_paths' : `${kind}_additional_paths`;
   const rows = (config?.[key] as string[] | undefined) || [];
   const commitAll = useCommit<HTMLDivElement>(() => void videoDownloads.save());
   return (
@@ -119,9 +121,21 @@ function ExtraPaths({ kind }: { kind: 'movies' | 'tv' }) {
       onAdd={(next) => {
         if (loads) videoDownloads.edit({ [key]: next });
       }}
-      placeholder={kind === 'movies' ? '/media/movies2' : '/media/tv2'}
-      itemLabel={kind === 'movies' ? 'Additional movie library path' : 'Additional TV library path'}
-      check={checkAttrs('video', kind === 'movies' ? 'Movie folder' : 'TV folder', 'existing')}
+      placeholder={
+        kind === 'movies' ? '/media/movies2' : kind === 'tv' ? '/media/tv2' : '/media/family-videos'
+      }
+      itemLabel={
+        kind === 'movies'
+          ? 'Additional movie library path'
+          : kind === 'tv'
+            ? 'Additional TV library path'
+            : 'Home videos folder'
+      }
+      check={checkAttrs(
+        'video',
+        kind === 'movies' ? 'Movie folder' : kind === 'tv' ? 'TV folder' : 'Home videos folder',
+        'existing',
+      )}
       addAttrs={{ 'data-video-add-path': kind }}
     />
   );
@@ -406,7 +420,7 @@ function LibraryRow({
       </div>
       {builtin ? (
         <div className="video-library-known">
-          {lib.path || 'No folder set'} <span>(set above)</span>
+          {lib.path || 'No folder set'} <span>(its folder is set in Libraries)</span>
         </div>
       ) : null}
       <div className={s.libBody} id={bodyId} hidden={!open}>
@@ -721,6 +735,9 @@ interface Drive {
   auto?: boolean;
   local?: string;
   role?: string;
+  /** where it likely is, by the pattern the saved folders follow, checked
+   *  against the library's own files; offered, never saved by itself */
+  suggest?: { local: string; message?: string };
 }
 type DriveStatus = { text: string; tone: 'ok' | 'bad' | 'idle' | 'busy' };
 
@@ -753,6 +770,8 @@ function DriveMap({ loads }: { loads: number }) {
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const localNow = useRef(local);
   localNow.current = local;
+  // found on their own (they read "Already reached") but not in the saved map
+  const unsaved = (drives ?? []).filter((d) => d.auto && d.local).length;
 
   function render(folders: Drive[]) {
     // a drive's folders side by side, so filling one fills its neighbours
@@ -829,6 +848,14 @@ function DriveMap({ loads }: { loads: number }) {
       .catch(() => {});
   }, [loads]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** Use this: the suggestion goes in its box and the folders are saved */
+  function takeSuggestion(d: Drive) {
+    if (!d.suggest) return;
+    localNow.current = { ...localNow.current, [d.server]: d.suggest.local };
+    setLocal(localNow.current);
+    void save();
+  }
+
   async function save() {
     if (!drives) return;
     const map = drives.map((d) => ({
@@ -887,7 +914,10 @@ function DriveMap({ loads }: { loads: number }) {
                   {head}
                   <div className={s.driveLocal}>
                     <div className={s.driveKnown}>{d.local}</div>
-                    <StatusWords tone="ok">{d.role || 'Already reached'}</StatusWords>
+                    <StatusWords tone="idle">
+                      {d.role || 'Already reached'} · not saved yet, so its files aren&apos;t sorted
+                      into libraries until you Save folders
+                    </StatusWords>
                   </div>
                 </div>
               );
@@ -923,17 +953,33 @@ function DriveMap({ loads }: { loads: number }) {
                   <div className={s.check} data-tone={st?.tone} aria-live="polite">
                     {st?.text || ''}
                   </div>
+                  {d.suggest && !(local[d.server] || '').trim() ? (
+                    <div className={s.check} data-tone="idle" data-drive-suggest={d.suggest.local}>
+                      Looks like it is at <code>{d.suggest.local}</code>
+                      {d.suggest.message ? ` (${d.suggest.message})` : ''}.{' '}
+                      <Btn small onClick={() => takeSuggestion(d)}>
+                        Use this
+                      </Btn>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );
           })
         )}
       </div>
-      <div>
+      <FieldLine wrap>
         <Btn small id="video-drive-map-save" onClick={() => void save()}>
           Save folders
         </Btn>
-      </div>
+        {unsaved ? (
+          <span className={s.check} data-tone="idle" data-drive-unsaved={unsaved}>
+            {unsaved === 1
+              ? '1 folder SoulSync found on its own isn’t saved yet.'
+              : `${unsaved} folders SoulSync found on its own aren’t saved yet.`}
+          </span>
+        ) : null}
+      </FieldLine>
     </>
   );
 }
@@ -1179,6 +1225,11 @@ export function VideoFolders({ docker }: { docker: boolean | null }) {
   useEffect(() => {
     if (loads) refreshChecks('video');
   }, [loads]);
+  // the extra folders' hint follows the setup: a media server or Standalone
+  const { active } = useVideoServer();
+  useEffect(() => {
+    if (loads) videoServer.ensureServer();
+  }, [loads]);
 
   const fourK = (kind: 'movies' | 'tv') => !!config?.[`${kind}_4k_enabled`];
   function toggle4k(kind: 'movies' | 'tv', on: boolean) {
@@ -1333,11 +1384,9 @@ export function VideoFolders({ docker }: { docker: boolean | null }) {
           <VideoLibraries loads={loads} />
         </div>
         <p className={s.cardFoot}>
-          A new title files into the library picked for it (in its Get or Manual search window),
-          else the 4K one when its quality profile says so, else the first library whose rules match
-          its genres or TMDB keywords, else the default library for its kind. Titles you have stay
-          where they are. The main and 4K libraries are here too; their folders are the ones above.
-          Each library saves with its own Save.
+          Where a new title goes: the library you pick when you get it, else the 4K one if its
+          quality says so, else the first library whose genres or keywords match, else the default.
+          Titles you already have stay where they are. Each library saves with its own Save.
         </p>
       </Card>
 
@@ -1350,16 +1399,18 @@ export function VideoFolders({ docker }: { docker: boolean | null }) {
           <DriveMap loads={loads} />
         </div>
         <p className={s.cardFoot}>
-          The ones SoulSync already reaches are ticked. Tell it where it reaches the rest and every
-          file in them is found, renamed to your templates, recycled on delete and kept track of.
-          New downloads still go to the folders above. Leave one blank and it works the way it does
-          today.
+          Ticked folders are already reached. For the rest, type where SoulSync finds that folder
+          and it manages every file in it. Leave one blank to keep things as they are.
         </p>
       </Card>
 
       <SectionLabel
-        title="Folders your server doesn't list"
-        hint="A collection SoulSync should manage that your server doesn't read. New downloads never go here"
+        title="Extra folders"
+        hint={
+          active === 'soulsync'
+            ? 'More movie and TV folders for SoulSync to scan, like a second drive. New downloads never go here.'
+            : "Folders SoulSync should also manage that the libraries it scans from your server don't include. New downloads never go here."
+        }
       />
       <Card>
         <Row stack label="Movie folders">
@@ -1367,6 +1418,16 @@ export function VideoFolders({ docker }: { docker: boolean | null }) {
         </Row>
         <Row stack label="TV folders">
           <ExtraPaths kind="tv" />
+        </Row>
+      </Card>
+
+      <SectionLabel
+        title="Home videos folders"
+        hint="Clips from your phone or camera, for the player's Home videos. Never looked up or renamed; each folder becomes an album. Read straight off the disk, with or without a media server."
+      />
+      <Card>
+        <Row stack label="Folders">
+          <ExtraPaths kind="home" />
         </Row>
       </Card>
 

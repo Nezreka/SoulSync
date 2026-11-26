@@ -48,6 +48,7 @@ export const ABOUT: Record<string, string> = {
   'advanced/security': 'Who can get into SoulSync, and how they sign in.',
   'advanced/api': 'Keys that let other apps talk to SoulSync.',
   'advanced/maintenance': 'Keep the database and artwork cache tidy, and reset things.',
+  'advanced/backups': 'Back up and restore every database, and download your key.',
   'advanced/activity': 'The play log, and what Now playing shows about streams.',
   'advanced/developer': 'Developer mode, preview tools and experimental features.',
   'advanced/logs': 'What the server writes to its log, and the live viewer.',

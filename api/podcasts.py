@@ -14,6 +14,8 @@ Self-contained and purely additive. Does not modify any existing tables or route
 
 from __future__ import annotations
 
+from core.connect.device_access import device_playback
+
 import hashlib
 import html
 import os
@@ -858,6 +860,7 @@ def create_podcasts_blueprint() -> Blueprint:
         return jsonify({"success": True, "category": category, "results": results})
 
     @bp.route("/show", methods=["GET"])
+    @device_playback
     @requires("podcasts.access")
     def show_detail():
         """Fetch full show metadata and episode list from RSS feed URL."""
@@ -984,6 +987,7 @@ def create_podcasts_blueprint() -> Blueprint:
     # -----------------------------------------------------------------------
 
     @bp.route("/watchlist", methods=["GET"])
+    @device_playback
     @requires("podcasts.access")
     def podcasts_watchlist_list():
         """List all watchlisted podcasts."""

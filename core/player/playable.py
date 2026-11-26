@@ -98,6 +98,11 @@ def _video(kind):
     return run
 
 
+def _home(item_id, part=None):
+    from core.player.sources import home
+    return home.locate(item_id)
+
+
 def _youtube(item_id, part=None):
     from core.player.sources import youtube
     return youtube.locate(item_id)
@@ -108,12 +113,32 @@ def _audiobook(item_id, part=None):
     return audiobook.locate(item_id, part)
 
 
+def _commercial(item_id, part=None):
+    import mimetypes
+    from core.player import commercials
+    clip = commercials.get_clip(item_id)
+    if clip is None:
+        raise Refused(404, "not_found", "That commercial clip is no longer cached.")
+    mime = mimetypes.guess_type(clip.path)[0] or "video/mp4"
+    return Source(
+        mode="file",
+        mime=mime,
+        path=clip.path,
+        duration=float(clip.duration_seconds),
+        extra={"title": clip.title, "era": clip.era},
+        private={"video_codec": "h264", "audio_codec": "aac"},
+    )
+
+
 KINDS: Dict[str, Kind] = {
     "track": Kind(("music.access",), _music),
     "movie": Kind(("movies.access",), _video("movie")),
     "episode": Kind(("tv.access",), _video("episode")),
     "youtube": Kind(("movies.access", "tv.access"), _youtube),
+    # a home video (core/video/home_videos.py): any of the video side
+    "home": Kind(("movies.access", "tv.access"), _home),
     "audiobook": Kind(("books.access",), _audiobook),
+    "commercial": Kind(("movies.access", "tv.access"), _commercial),
 }
 
 

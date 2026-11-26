@@ -17,11 +17,21 @@ from core.connect import device_tokens as T
 logger = logging.getLogger(__name__)
 
 # the permission each kind of app needs
-KIND_PERMISSION = {T.KIND_MUSIC: "music.apps"}
+KIND_PERMISSION = {
+    T.KIND_MUSIC: "music.apps",
+    T.KIND_PLAYER: "music.apps",
+}
 
 # what each kind of app may play (core/player/playable.py's item types). a
 # kind missing here plays nothing; a new kind adds its line beside its permission.
-KIND_ITEM_TYPES = {T.KIND_MUSIC: frozenset({"track"})}
+KIND_ITEM_TYPES = {
+    T.KIND_MUSIC: frozenset({"track"}),
+    T.KIND_PLAYER: frozenset({"track", "movie", "episode", "youtube", "home", "podcast", "audiobook",
+                                 "commercial"}),
+}
+
+
+_PLAYER_SECTIONS = ("movies.access", "tv.access", "music.access", "podcasts.access", "audiobooks.access")
 
 
 def may_use(db, profile: Optional[Mapping[str, Any]], kind: str) -> bool:
@@ -40,6 +50,8 @@ def may_use(db, profile: Optional[Mapping[str, Any]], kind: str) -> bool:
     except Exception:  # noqa: BLE001
         logger.warning("device pick: no permissions for profile %s", profile.get("id"), exc_info=True)
         return False
+    if kind == T.KIND_PLAYER:
+        return can(ctx, perm) or any(can(ctx, sec) for sec in _PLAYER_SECTIONS)
     return can(ctx, perm)
 
 

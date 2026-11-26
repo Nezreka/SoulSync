@@ -14,6 +14,7 @@ import { LONG_FORM } from '../../-engine/types';
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon, ShuffleIcon } from '../icons';
 import { PlayerLink } from '../kit';
 import { SongActions } from '../music/song-actions';
+import { ReportIssueButton } from '../report-issue';
 import { RetryImg } from '../retry-img';
 import { ChapterMenu, SleepMenu, SpeedMenu, VolumeControl } from './controls';
 import {
@@ -194,6 +195,15 @@ export function TransportBar() {
           <QueueIcon />
         </button>
         <VolumeControl volume={state.volume} muted={state.muted} />
+        <ReportIssueButton
+          entityType={item.type}
+          entityId={item.id}
+          title={item.title}
+          subtitle={item.subtitle}
+          positionSec={state.position}
+          iconOnly
+          className={s.ctl}
+        />
         <button
           type="button"
           className={s.ctl}

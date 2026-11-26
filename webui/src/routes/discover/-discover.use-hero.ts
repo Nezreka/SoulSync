@@ -4,7 +4,6 @@ import type { HeroWatchlistButton, WatchAllPhase } from './-discover.hero';
 import type { DiscoverHeroArtist } from './-discover.types';
 
 import {
-  allWatched,
   HERO_SLIDE_MS,
   heroArtistId,
   heroAutoAdvances,
@@ -27,11 +26,9 @@ import { watchlistRequest, watchlistToast } from './-discover.your-artists-actio
  * `watchlistRequest` builds) and `watchAllHeroArtists` +
  * `checkAllHeroWatchlistStatus` (599-668, 1200-1232).
  *
- * Rotation auto-advances every 8s ONLY with more than one artist, holds while
- * someone is on the hero, and restarts its clock on any slide change. The button is
- * NULL until its check answers — a failed check says nothing about
- * membership. The all-watched probe short-circuits on the first miss, exactly
- * as the vanilla's early break.
+ * Rotation auto-advances every 8s ONLY with more than one artist, pauses while
+ * the hero is in use, and restarts on a slide change. The watchlist button is
+ * NULL until membership is confirmed; a failed check cannot infer membership.
  */
 
 export type HeroToast = { message: string; level: 'success' | 'info' | 'error' };
@@ -42,6 +39,7 @@ export interface HeroController {
   artist: DiscoverHeroArtist | null;
   watchlist: HeroWatchlistButton | null;
   watchAllPhase: WatchAllPhase;
+  watchlistPending: boolean;
   navigate: (direction: number) => void;
   jump: (index: number) => void;
   toggleWatchlist: () => Promise<void>;
@@ -61,22 +59,39 @@ export function useHero(
   const [watchlist, setWatchlist] = useState<HeroWatchlistButton | null>(null);
   const [watchAllPhase, setWatchAllPhase] = useState<WatchAllPhase>('idle');
   const checkGen = useRef(0);
+  const mutationGen = useRef(0);
+  const inFlight = useRef(false);
+  const [watchlistPending, setWatchlistPending] = useState(false);
 
   const artist = artists[index] ?? null;
   const artistKey = heroArtistId(artist);
 
   // A fresh artist list restarts at the first slide (427-428).
-  const listKey = artists.map((a) => heroArtistId(a)).join('|');
+  const listKey = JSON.stringify(artists.map((a) => [a.source, heroArtistId(a)]));
+  const viewKey = JSON.stringify([listKey, artist?.source, artistKey]);
+  const context = useRef({ listKey, viewKey, listGeneration: 0, viewGeneration: 0 });
+  if (context.current.listKey !== listKey) {
+    context.current.listKey = listKey;
+    context.current.listGeneration += 1;
+  }
+  if (context.current.viewKey !== viewKey) {
+    context.current.viewKey = viewKey;
+    context.current.viewGeneration += 1;
+  }
+  useEffect(
+    () => () => {
+      context.current.viewGeneration += 1;
+      context.current.listGeneration += 1;
+    },
+    [],
+  );
   useEffect(() => {
     setIndex(0);
+    setWatchAllPhase('idle');
   }, [listKey]);
 
-  // Auto-advance every 8s, only with more than one artist (432-437).
-  //
-  // the vanilla never paused, so you'd hit next and it would jump again a
-  // second later, or the watchlist button slid away under your cursor. now
-  // the clock restarts on every slide change (manual or not), and it holds
-  // while the pointer or focus is on the hero or motion is reduced.
+  // Keep the current hero's pause and restart behavior while changing its
+  // watchlist acknowledgement handling.
   const [paused, setPaused] = useState(false);
   useEffect(() => {
     if (!heroAutoAdvances(artists.length) || paused) return;
@@ -87,56 +102,53 @@ export function useHero(
     return () => clearTimeout(timer);
   }, [artists.length, index, paused]);
 
-  // The per-artist button check (547-577), re-run per slide; null until
-  // answered, and a stale answer never lands on a newer slide.
+  // Checks only hydrate the current context and cannot supersede a newer
+  // mutation. In particular, unknown membership is distinct from not watched.
   useEffect(() => {
     setWatchlist(null);
+    const gen = ++checkGen.current;
+    const view = context.current.viewGeneration;
     if (!artistKey) return;
-    checkGen.current += 1;
-    const gen = checkGen.current;
-    void (async () => {
-      try {
-        const res = await fetch('/api/watchlist/check', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(heroWatchlistCheckBody(artistKey)),
-        });
-        const data = (await res.json()) as { success?: boolean; is_watching?: boolean };
-        if (checkGen.current !== gen) return;
-        setWatchlist(heroWatchlistButtonState(data));
-      } catch {
-        /* the button stays as it was (573-575) */
-      }
-    })();
-  }, [artistKey]);
+    void checkMembership(artistKey)
+      .then((watching) => {
+        if (checkGen.current !== gen || context.current.viewGeneration !== view) return;
+        setWatchlist(heroWatchlistButtonState({ success: true, is_watching: watching }));
+      })
+      .catch(() => {
+        /* unknown until a successful check or mutation */
+      });
+    return () => {
+      checkGen.current += 1;
+    };
+  }, [artistKey, viewKey]);
 
-  // The all-watched probe on load, short-circuiting on the first miss
-  // (1200-1232).
+  // Probe completion belongs to this list and precedes any later mutation.
   useEffect(() => {
     if (artists.length === 0) return;
     let cancelled = false;
+    const list = context.current.listGeneration;
+    const mutation = mutationGen.current;
     void (async () => {
-      const results: { success?: boolean; is_watching?: boolean }[] = [];
       for (const a of artists) {
         const id = heroArtistId(a);
         if (!id) return;
         try {
-          const res = await fetch('/api/watchlist/check', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(heroWatchlistCheckBody(id)),
-          });
-          const data = (await res.json()) as { success?: boolean; is_watching?: boolean };
-          results.push(data);
-          if (!data.success || !data.is_watching) break; // early break (1215)
+          if (!(await checkMembership(id))) return;
         } catch {
-          return; // probe failure leaves the button idle
+          return;
         }
+        if (
+          cancelled ||
+          context.current.listGeneration !== list ||
+          mutationGen.current !== mutation
+        )
+          return;
       }
-      // The length check is defense-in-depth and EQUIVALENT in practice:
-      // every early-broken result set already contains a false entry, and the
-      // catch path returns before evaluating at all.
-      if (!cancelled && results.length === artists.length && allWatched(results)) {
+      if (
+        !cancelled &&
+        context.current.listGeneration === list &&
+        mutationGen.current === mutation
+      ) {
         setWatchAllPhase('done');
       }
     })();
@@ -161,50 +173,108 @@ export function useHero(
   );
 
   const toggleWatchlist = useCallback(async () => {
-    if (!artist || !artistKey) return;
-    const watching = Boolean(watchlist?.watching);
-    const req = watchlistRequest(watching, {
-      sourceId: artistKey,
-      artistName: artist.artist_name ?? '',
-      source: artist.source ?? '',
-    });
+    if (!artist || !artistKey || inFlight.current) return;
+    inFlight.current = true;
+    setWatchlistPending(true);
+    const view = context.current.viewGeneration;
+    const list = context.current.listGeneration;
+    const acknowledgedView = context.current.viewKey;
+    const isCurrent = () =>
+      context.current.viewGeneration === view && context.current.listGeneration === list;
+    ++checkGen.current;
+    ++mutationGen.current;
     try {
+      // the button shows add while membership is unknown, so a press means
+      // add: check first, then add unless they are already on it (one press,
+      // never two)
+      let watching = Boolean(watchlist?.watching);
+      if (!watchlist) {
+        const already = await checkMembership(artistKey);
+        if (!isCurrent()) return;
+        if (already) {
+          setWatchlist(heroWatchlistButtonState({ success: true, is_watching: true }));
+          toastRef.current({
+            message: `${artist.artist_name ?? 'This artist'} is already on your watchlist`,
+            level: 'info',
+          });
+          return;
+        }
+        watching = false;
+      }
+      const req = watchlistRequest(watching, {
+        sourceId: artistKey,
+        artistName: artist.artist_name ?? '',
+        source: artist.source ?? '',
+      });
       const res = await fetch(req.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(req.body),
       });
-      if (!res.ok) return;
+      const data: unknown = await res.json();
+      if (!res.ok || !acknowledged(data)) throw new Error('Watchlist update refused');
+      if (context.current.listGeneration === list) {
+        ++mutationGen.current;
+        if (watching) setWatchAllPhase('idle');
+      }
+      // A navigation round trip can return to this artist before its commit.
+      // Reconcile that same identity while still excluding other views, list
+      // replacements and unmounts. Older checks cannot undo this acknowledgement.
+      if (context.current.listGeneration !== list || context.current.viewKey !== acknowledgedView)
+        return;
+      ++checkGen.current;
       const toast = watchlistToast(watching, artist.artist_name ?? '');
-      toastRef.current({ message: toast.message, level: toast.level });
+      toastRef.current(toast);
       setWatchlist(heroWatchlistButtonState({ success: true, is_watching: !watching }));
     } catch {
-      toastRef.current({ message: 'Failed to update watchlist', level: 'error' });
+      if (isCurrent()) {
+        toastRef.current({
+          message: watchlist
+            ? 'Failed to update watchlist. Please try again.'
+            : 'Could not check watchlist status. Please try again.',
+          level: 'error',
+        });
+      }
+    } finally {
+      inFlight.current = false;
+      setWatchlistPending(false);
     }
   }, [artist, artistKey, watchlist]);
 
   const watchAll = useCallback(async () => {
-    // An all-watched button is inert (601-602).
-    if (watchAllPhase === 'done' || artists.length === 0) return;
+    if (watchAllPhase === 'done' || artists.length === 0 || inFlight.current) return;
+    inFlight.current = true;
+    setWatchlistPending(true);
     setWatchAllPhase('busy');
+    const list = context.current.listGeneration;
+    ++checkGen.current;
+    ++mutationGen.current;
     try {
+      const payload = watchAllPayload(artists);
       const res = await fetch('/api/watchlist/add-batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // The endpoint reads an { artists } envelope (617) — the module's
-        // payload is the array inside it.
-        body: JSON.stringify({ artists: watchAllPayload(artists) }),
+        body: JSON.stringify({ artists: payload }),
       });
-      const data = (await res.json()) as { success?: boolean };
-      if (data.success) {
-        setWatchAllPhase('done');
-        // The current slide's own button follows (628-632).
-        setWatchlist(heroWatchlistButtonState({ success: true, is_watching: true }));
-      } else {
-        setWatchAllPhase('idle');
-      }
+      const data: unknown = await res.json();
+      if (!res.ok || !batchAcknowledged(data, payload.length))
+        throw new Error('Incomplete watchlist update');
+      if (context.current.listGeneration !== list) return;
+      ++checkGen.current;
+      ++mutationGen.current;
+      setWatchAllPhase('done');
+      setWatchlist(heroWatchlistButtonState({ success: true, is_watching: true }));
     } catch {
-      setWatchAllPhase('idle');
+      if (context.current.listGeneration === list) {
+        setWatchAllPhase('idle');
+        toastRef.current({
+          message: 'Could not add every artist to watchlist. Please try again.',
+          level: 'error',
+        });
+      }
+    } finally {
+      inFlight.current = false;
+      setWatchlistPending(false);
     }
   }, [watchAllPhase, artists]);
 
@@ -214,10 +284,46 @@ export function useHero(
     artist,
     watchlist,
     watchAllPhase,
+    watchlistPending,
     navigate,
     jump,
     toggleWatchlist,
     watchAll,
     setPaused,
   };
+}
+
+function acknowledged(data: unknown): data is Record<string, unknown> {
+  return typeof data === 'object' && data !== null && 'success' in data && data.success === true;
+}
+
+async function checkMembership(artistKey: string): Promise<boolean> {
+  const res = await fetch('/api/watchlist/check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(heroWatchlistCheckBody(artistKey)),
+  });
+  const data: unknown = await res.json();
+  if (!res.ok || !acknowledged(data) || typeof data.is_watching !== 'boolean') {
+    throw new Error('Could not check watchlist status');
+  }
+  return data.is_watching;
+}
+
+function batchAcknowledged(data: unknown, count: number): boolean {
+  // This endpoint returns success:true for partial failures and silently omits
+  // invalid input rows. Only complete counts with no rejections confirm all.
+  if (!acknowledged(data)) return false;
+  const { added, skipped, rejected } = data;
+  return (
+    typeof added === 'number' &&
+    Number.isSafeInteger(added) &&
+    added >= 0 &&
+    typeof skipped === 'number' &&
+    Number.isSafeInteger(skipped) &&
+    skipped >= 0 &&
+    added + skipped === count &&
+    Array.isArray(rejected) &&
+    rejected.length === 0
+  );
 }

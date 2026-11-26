@@ -1,21 +1,25 @@
 /**
  * a list of songs: an album, a playlist, search results. each row plays on
  * click or enter, shows which one is playing (moving bars, still when
- * paused), and has its own add-to-playlist. on one of your playlists rows
- * can be dragged into a new order (or moved with alt + up/down) and taken
- * out. a song this profile can't play stays in the list, dimmed, with why.
+ * paused), and keeps two things on the row: the Heart (Liked Songs) and a
+ * ⋯ that opens the More menu (play next, queue, playlist, download, info,
+ * report), the same one right-click opens.
  */
 
-import { useState, type ReactNode } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState, type ReactNode } from 'react';
 
+import type { PlayItem } from '../../-engine/types';
 import type { SongRef } from '../../-player.api';
 
 import { clock } from '../../-engine/timeline';
-import { GripIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
+import { playlistEdits, playlistQuery, playlistsQuery } from '../../-player.api';
+import { MoreButton, openContextMenu, type ContextMenuTarget } from '../context-menu';
+import { DownloadIcon, GripIcon, HeartIcon, PlayIcon } from '../icons';
 import { PlayerLink } from '../kit';
-import { usePlayer } from '../playback/use-player';
+import { longPress } from '../long-press';
+import { getEngine, usePlayer } from '../playback/use-player';
 import { RetryImg } from '../retry-img';
-import { openAddToPlaylist } from './add-to-playlist';
 import s from './music.module.css';
 
 export interface TrackRow {
@@ -37,8 +41,16 @@ export interface TrackRow {
   end?: ReactNode;
   /** why it can't play */
   why?: string;
+  /** when not in the library, clicking the row requests it */
+  onRequest?: () => void;
+  /** optional inline action button for missing tracks */
+  playable?: boolean;
+  onMissingAction?: () => void;
+  missingActionLabel?: string;
+  missingActionDone?: boolean;
+  missingActionBusy?: boolean;
   /** the song as playlists take it; null: can't be added */
-  song: SongRef | null;
+  song?: SongRef | null;
 }
 
 export function EqBars({ paused }: { paused?: boolean }) {
@@ -49,6 +61,10 @@ export function EqBars({ paused }: { paused?: boolean }) {
       <span />
     </span>
   );
+}
+
+function songKey(artist: string | undefined, title: string): string {
+  return `${(artist ?? '').trim().toLowerCase()}|${title.trim().toLowerCase()}`;
 }
 
 export function TrackList({
@@ -71,10 +87,105 @@ export function TrackList({
   onMove?: (from: number, to: number) => void;
 }) {
   const player = usePlayer();
+  const queryClient = useQueryClient();
   const playingId = player.item?.type === 'track' ? Number(player.item.id) : null;
+  const hasActivePlayback = !!player.item;
   const paused = player.status === 'paused';
   const [drag, setDrag] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
+  const [optimisticLiked, setOptimisticLiked] = useState<Record<string, boolean>>({});
+
+  // Single lightweight lookup of the profile's Liked Songs playlist for O(1) per-row Heart state
+  const lists = useQuery({ ...playlistsQuery(), retry: false });
+  const likedPlaylist = lists.data?.yours.find((p) => p.liked) ?? null;
+  const likedDetail = useQuery({
+    ...playlistQuery(likedPlaylist?.id ?? 0),
+    enabled: !!likedPlaylist?.id,
+    retry: false,
+  });
+
+  const likedSets = useMemo(() => {
+    const byId = new Set<number>();
+    const byName = new Set<string>();
+    for (const song of likedDetail.data?.songs ?? []) {
+      if (song.track_id != null) byId.add(Number(song.track_id));
+      byName.add(songKey(song.artist, song.title));
+    }
+    return { byId, byName };
+  }, [likedDetail.data]);
+
+  const isRowLiked = (row: TrackRow): boolean => {
+    if (row.key in optimisticLiked) return optimisticLiked[row.key];
+    if (row.trackId !== null && likedSets.byId.has(row.trackId)) return true;
+    const artist = row.song?.artist ?? row.artist;
+    return likedSets.byName.has(songKey(artist, row.title));
+  };
+
+  const toggleLike = async (row: TrackRow) => {
+    if (!row.song) return;
+    const next = !isRowLiked(row);
+    setOptimisticLiked((prev) => ({ ...prev, [row.key]: next }));
+    try {
+      if (next) await playlistEdits.like([row.song]);
+      else await playlistEdits.unlike([row.song]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['player', 'playlists'] }),
+        queryClient.invalidateQueries({ queryKey: ['player', 'playlist-membership'] }),
+        likedPlaylist
+          ? queryClient.invalidateQueries({ queryKey: ['player', 'playlist', likedPlaylist.id] })
+          : null,
+      ]);
+    } catch {
+      setOptimisticLiked((prev) => ({ ...prev, [row.key]: !next }));
+    }
+  };
+
+  const rowItem = (row: TrackRow): PlayItem => ({
+    type: 'track',
+    id: String(row.trackId),
+    title: row.title,
+    subtitle: row.song?.artist ?? row.artist ?? '',
+    artwork: row.art ?? null,
+    href: row.albumHref,
+    duration: row.duration ?? null,
+    parentTitle: row.song?.album ?? row.album,
+  });
+
+  const addToQueue = (row: TrackRow) => {
+    if (row.trackId === null) return;
+    getEngine().append([rowItem(row)]);
+  };
+
+  /** a row's More menu: the same one right-click and the ⋯ open */
+  const rowTarget = (row: TrackRow, index: number): Omit<ContextMenuTarget, 'x' | 'y'> => {
+    const playable = row.playable !== undefined ? row.playable : row.trackId !== null;
+    const id = playable && row.trackId !== null ? String(row.trackId) : null;
+    const artist = row.artist ?? row.song?.artist ?? null;
+    return {
+      kind: 'track',
+      owned: playable,
+      id,
+      title: row.title,
+      subtitle: artist,
+      artwork: row.art ?? null,
+      href: row.albumHref ?? row.artistHref ?? null,
+      onPlay: playable ? () => onPlay(index) : undefined,
+      onPlayNext: id && hasActivePlayback ? () => getEngine().playNext([rowItem(row)]) : undefined,
+      onQueue: id ? () => addToQueue(row) : undefined,
+      liked: playable ? isRowLiked(row) : false,
+      onToggleLike: playable && row.song ? () => void toggleLike(row) : undefined,
+      song: playable ? (row.song ?? null) : null,
+      downloadType: id ? 'track' : null,
+      downloadId: id,
+      report: id
+        ? { entityType: 'track', entityId: id, title: row.title, subtitle: artist ?? undefined }
+        : null,
+      onRequest: !playable ? (row.onMissingAction ?? row.onRequest) : undefined,
+      extraActions: onRemove
+        ? [{ label: 'Remove from playlist', onSelect: () => onRemove(index), danger: true }]
+        : undefined,
+    };
+  };
 
   return (
     <div
@@ -86,14 +197,24 @@ export function TrackList({
       aria-label={label}
     >
       {rows.map((row, index) => {
-        const playable = row.trackId !== null;
-        const playing = playable && row.trackId === playingId;
-        const play = () => playable && onPlay(index);
+        const playable = row.playable !== undefined ? row.playable : row.trackId !== null;
+        const requestable = !playable && !!(row.onRequest || row.onMissingAction);
+        const interactive = playable || requestable;
+        const playing = playable && row.trackId !== null && row.trackId === playingId;
+        const liked = !!row.song && isRowLiked(row);
+        const activate = () => {
+          if (playable) onPlay(index);
+          else if (row.onMissingAction) row.onMissingAction();
+          else if (row.onRequest) row.onRequest();
+        };
+        const openRowMenu = (e: { clientX: number; clientY: number }) =>
+          openContextMenu({ ...rowTarget(row, index), x: e.clientX, y: e.clientY });
         return (
           <div
             key={row.key}
             role="listitem"
             className={s.track}
+            data-track-id={row.trackId ?? undefined}
             data-playing={playing ? 'true' : undefined}
             data-off={playable ? undefined : 'true'}
             data-drag={drag === index ? 'true' : undefined}
@@ -104,7 +225,13 @@ export function TrackList({
                   : 'before'
                 : undefined
             }
-            title={playable ? undefined : (row.why ?? 'Not in your library')}
+            title={
+              playable
+                ? undefined
+                : requestable
+                  ? `Click to request "${row.title}"`
+                  : (row.why ?? 'Not in your library')
+            }
             draggable={!!onMove}
             onDragStart={(e) => {
               setDrag(index);
@@ -125,20 +252,29 @@ export function TrackList({
               setDrag(null);
               setOver(null);
             }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              openRowMenu(e);
+            }}
+            {...longPress((e) => openRowMenu(e))}
           >
             <div
               className={s.trackHit}
               role="button"
-              tabIndex={playable ? 0 : -1}
+              tabIndex={interactive ? 0 : -1}
               aria-label={
-                playable ? `Play ${row.title}` : `${row.title}, ${row.why ?? 'not in your library'}`
+                playable
+                  ? `Play ${row.title}`
+                  : requestable
+                    ? `Request ${row.title}`
+                    : `${row.title}, ${row.why ?? 'not in your library'}`
               }
-              aria-disabled={!playable}
-              onClick={play}
+              aria-disabled={!interactive}
+              onClick={activate}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  play();
+                  activate();
                 } else if (onMove && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
                   e.preventDefault();
                   e.stopPropagation();
@@ -146,7 +282,7 @@ export function TrackList({
                   if (to >= 0 && to < rows.length) onMove(index, to);
                 }
               }}
-              data-nav={playable ? true : undefined}
+              data-nav={interactive ? true : undefined}
             >
               <span className={s.trackNum}>
                 {playing ? (
@@ -157,6 +293,10 @@ export function TrackList({
                     {playable ? (
                       <span className={s.trackNumPlay}>
                         <PlayIcon />
+                      </span>
+                    ) : requestable ? (
+                      <span className={s.trackNumPlay}>
+                        <DownloadIcon />
                       </span>
                     ) : null}
                   </>
@@ -171,12 +311,13 @@ export function TrackList({
               ) : null}
               <span className={s.trackMain}>
                 <span className={s.trackTitle}>
-                  {row.title}
+                  <span className={s.trackTitleText}>{row.title}</span>
                   {row.explicit ? (
                     <span className={s.explicit} title="Explicit" aria-label="Explicit">
                       E
                     </span>
                   ) : null}
+                  {!playable ? <span className={s.missingTag}>Missing</span> : null}
                 </span>
                 {row.artist ? (
                   <span className={s.trackSub}>
@@ -209,29 +350,55 @@ export function TrackList({
                 </span>
               ) : null}
             </div>
-            <span className={s.trackActions}>
-              {row.song ? (
+            <span
+              className={s.trackActions}
+              style={liked || (!playable && row.onMissingAction) ? { opacity: 1 } : undefined}
+            >
+              {playable && row.song ? (
                 <button
                   type="button"
                   className={s.trackBtn}
-                  aria-label={`Add ${row.title} to a playlist`}
-                  title="Add to playlist"
-                  onClick={() => openAddToPlaylist([row.song!])}
+                  aria-pressed={liked}
+                  aria-label={liked ? `Remove ${row.title} from Liked Songs` : `Like ${row.title}`}
+                  title={liked ? 'In Liked Songs' : 'Add to Liked Songs'}
+                  style={liked ? { color: 'var(--accent-light, #f43f5e)' } : undefined}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void toggleLike(row);
+                  }}
                   data-nav
                 >
-                  <PlusIcon />
+                  <HeartIcon filled={liked} />
                 </button>
               ) : null}
-              {onRemove ? (
+              {playable || onRemove ? (
+                <MoreButton label={row.title} target={() => rowTarget(row, index)} />
+              ) : null}
+              {!playable && row.onMissingAction ? (
                 <button
                   type="button"
                   className={s.trackBtn}
-                  aria-label={`Take ${row.title} out of this playlist`}
-                  title="Take out of this playlist"
-                  onClick={() => onRemove(index)}
+                  style={{
+                    width: 'auto',
+                    padding: '0 10px',
+                    height: 26,
+                    fontSize: '0.76rem',
+                    fontWeight: 600,
+                    borderRadius: 999,
+                    border: '1px solid rgba(255,255,255,0.16)',
+                    background: row.missingActionDone
+                      ? 'rgba(255,255,255,0.06)'
+                      : 'rgba(var(--accent-rgb), 0.22)',
+                    color: '#fff',
+                  }}
+                  disabled={row.missingActionBusy || row.missingActionDone}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    row.onMissingAction?.();
+                  }}
                   data-nav
                 >
-                  <XIcon />
+                  {row.missingActionLabel ?? 'Request'}
                 </button>
               ) : null}
               {onMove ? (
@@ -245,7 +412,7 @@ export function TrackList({
               ) : null}
             </span>
             <span className={s.trackEnd}>
-              {row.end}
+              {row.end ? <span className={s.trackNote}>{row.end}</span> : null}
               <span>{row.duration ? clock(row.duration) : ''}</span>
             </span>
           </div>

@@ -531,3 +531,43 @@ def test_extensionless_encoded_title_exact_stem_wins_in_any_walk_order(
     )
 
     assert found == str(target)
+
+
+# ── a close name is not the same file ───────────────────────────────────────
+
+import pytest as _pytest
+
+from core.downloads import file_finder as _ff
+
+
+@_pytest.mark.parametrize("wanted,on_disk,same", [
+    ("01 - Intro.flac", "02 - Intro.flac", False),          # the neighbour on the album
+    ("Track01.flac", "Track02.flac", False),
+    ("Song.flac", "Song (Live).flac", False),               # brackets dropped made these equal
+    ("Song (Live).flac", "Song.flac", False),
+    ("Song.flac", "Song (Remastered 2016).flac", True),     # a label, the same file
+    ("Song.flac", "Song [FLAC].flac", True),
+    ("Artist - Song.flac", "01 - Artist - Song.flac", True),  # a client that numbers files
+    ("01 - Intro.flac", "01 - Intro_639012345678901234.flac", True),   # slskd's own suffix
+    ("05 Song 2.flac", "05 Song 2.flac", True),
+])
+def test_the_fuzzy_tier_tells_two_tracks_apart(wanted, on_disk, same):
+    assert _ff._same_track_marks(wanted, on_disk) is same
+
+
+def test_a_neighbours_file_is_not_handed_over(tmp_path):
+    """this task's file is gone (already moved, or renamed). the finder used
+    to return the next track of the album, at 0.93"""
+    folder = tmp_path / "downloads" / "user" / "Album"
+    folder.mkdir(parents=True)
+    (folder / "02 - Intro.flac").write_bytes(b"x")
+    path, score = _ff._search_in_directory(
+        str(tmp_path / "downloads"), "downloads", "01 - Intro.flac",
+        _ff._normalize_for_finding("01 - Intro.flac"), [])
+    assert path is None or score < _ff._FUZZY_THRESHOLD
+    # the same file under a slightly different spelling is still found
+    (folder / "01 - Intro .flac").write_bytes(b"x")
+    path, score = _ff._search_in_directory(
+        str(tmp_path / "downloads"), "downloads", "01 - Intro.flac",
+        _ff._normalize_for_finding("01 - Intro.flac"), [])
+    assert path and path.endswith("01 - Intro .flac") and score >= _ff._FUZZY_THRESHOLD

@@ -1,5 +1,6 @@
-"""server activity: what's playing on plex and jellyfin, who, how and from where,
-plus soulsync's own play log (history and stats) built from it.
+"""server activity: what's playing on plex, jellyfin and soulsync's own player,
+who, how and from where, plus soulsync's own play log (history and stats)
+built from it.
 
 the package keeps its seams here (server configs, the cached plex connection)
 so a test patches one place and every submodule sees it. submodules import this
@@ -8,6 +9,7 @@ package and look the seams up at call time.
 layout:
   plex.py       plex session xml -> the shared session shape
   jellyfin.py   jellyfin /Sessions json -> the same shape, plus stop / message
+  soulsync.py   soulsync's own player (its heartbeats) -> the same shape, plus stop / message
   reasons.py    why a stream is converted, in plain words (one table)
   quality.py    labels shared by both servers (4K, HDR10, FLAC 24-bit · 96 kHz)
   geo.py        city / region for remote viewers, cached

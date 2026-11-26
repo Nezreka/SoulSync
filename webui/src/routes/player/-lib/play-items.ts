@@ -82,10 +82,18 @@ function artistsOf(t: LibTrack, fallback?: string | null) {
 }
 
 /** an album's playable tracks, in disc and track order */
+/** True only when a library_v2 album track actually has a playable file/stream. */
+export function isLibTrackOwned(t: LibTrack): boolean {
+  if (t.id === null || t.id === undefined || t.is_missing) return false;
+  if (t.file_status === 'missing') return false;
+  if ('file' in t && t.file == null && !t.file_count && !t.server_track_id) return false;
+  return true;
+}
+
 export function albumItems(album: LibAlbumDetail): PlayItem[] {
   const art = libraryThumb(album.image_url);
   return album.tracks
-    .filter((t) => t.id !== null && !t.is_missing)
+    .filter(isLibTrackOwned)
     .slice()
     .sort(
       (a, b) =>
@@ -173,7 +181,14 @@ export function artistItems(rows: readonly ArtistQueueRow[]): PlayItem[] {
   }));
 }
 
-const GUIDE_TYPES: ReadonlySet<string> = new Set(['movie', 'episode', 'youtube', 'track']);
+const GUIDE_TYPES: ReadonlySet<string> = new Set([
+  'movie',
+  'episode',
+  'youtube',
+  'home',
+  'track',
+  'commercial',
+]);
 
 /** a guide program as a queue item (its key is "type:id"); null for one that can't play */
 export function guideItem(p: GuideProgram): PlayItem | null {

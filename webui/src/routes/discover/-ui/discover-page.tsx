@@ -115,7 +115,7 @@ import { DiscoveryInbox } from './discovery-inbox';
 import { DownloadBar } from './download-bar';
 import { GenreDiveModal } from './genre-dive-modal';
 import { GreetingGrid } from './greeting-grid';
-import { MixModal } from './mix-modal';
+import { CompactPlaylist, MixModal } from './mix-modal';
 import { MixShelf } from './mix-shelf';
 import { NowPlayingBanner, useNowPlaying } from './now-playing-banner';
 import { AlbumPoster, ArtistPoster, ConcertPoster, PosterRow } from './poster-row';
@@ -1245,17 +1245,21 @@ export function DiscoverPage() {
         return (
           <ListenBrainzSection
             username={lb.username}
+            showsConnect={lb.showsConnect}
             activeTab={lb.activeTab}
             hasData={lb.hasData}
             mixes={lbMixesHydrated}
-            loading={!lb.loaded && !lb.error}
+            loading={lb.loading}
             error={lb.error}
+            refreshError={lb.refreshError}
+            refreshing={lb.refreshing}
             loaded={lb.loaded}
             groups={lb.groups ?? undefined}
             activeGroup={lb.activeGroup}
             onSelectTab={lb.selectTab}
             onSelectGroup={lb.selectGroup}
             onRefresh={() => void lb.refresh()}
+            onRetry={() => void lb.retry()}
             onConnect={() => window.openMyAccountsModal?.()}
             onOpenMix={modal.open}
             onPlayMix={playMixFromCard}
@@ -1322,7 +1326,9 @@ export function DiscoverPage() {
             infoOpen={bp.infoOpen}
             onToggleInfo={bp.toggleInfo}
             loaded={true}
-          />
+          >
+            <CompactPlaylist tracks={bp.tracks ?? []} />
+          </BuildPlaylistSection>
         );
       default:
         return null;
@@ -1596,6 +1602,7 @@ export function DiscoverPage() {
                 index={hero.index}
                 watchlist={hero.watchlist}
                 watchAllPhase={hero.watchAllPhase}
+                watchlistPending={hero.watchlistPending}
                 discographyHref={
                   hero.artist?.artist_id != null
                     ? detailPath(hero.artist.artist_id, hero.artist.source ?? null)

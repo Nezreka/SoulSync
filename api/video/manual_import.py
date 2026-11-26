@@ -161,13 +161,16 @@ def register_routes(bp):
             probe_info = prober(src) if prober is not None else None
         except Exception:   # noqa: BLE001 - a probe crash must not block the import
             probe_info = None
-        from core.video.download_monitor import template_ids
+        from core.video.download_monitor import absolute_lookup, naming_series_type, template_ids
         # the picked identity's ids (its media_id is a TMDB id), not the grab's
-        ids = template_ids(db, {"kind": _KIND_FOR_SCOPE[scope], "media_source": "tmdb",
-                                "media_id": override.get("media_id")}, settings)
+        picked = {"kind": _KIND_FOR_SCOPE[scope], "media_source": "tmdb",
+                  "media_id": override.get("media_id")}
+        named = organization.for_series_type(settings, naming_series_type(db, picked, settings))
+        ids = template_ids(db, picked, named)
         plan = plan_import(row, src, list_dir=fs.list_dir, probe=probe_info,
-                           settings=settings, force=True, override=override,
-                           expected_duration_sec=_expected_duration_sec(db, row), ids=ids)
+                           settings=named, force=True, override=override,
+                           expected_duration_sec=_expected_duration_sec(db, row), ids=ids,
+                           absolute_of=absolute_lookup(db, ids, named, picked))
         if plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
                 db.update_video_download(dl_id, dest_path=plan["dest"]["path"])
@@ -211,6 +214,15 @@ def register_routes(bp):
                           "poster_url": row.get("poster_url"),
                           "search_ctx": json.dumps({"scope": scope, "season": override.get("season"),
                                                     "episode": override.get("episode")})}
+            # in the library now, as the picked title (core/video/library_ingest.py)
+            from core.video.library_ingest import ingest_landed
+            ingest_landed(db, {**row, **sidecar_dl, "title": body.get("title") or row.get("title"),
+                               "year": body.get("year") or row.get("year"),
+                               "search_ctx": json.dumps({"scope": scope, "season": override.get("season"),
+                                                         "episode": override.get("episode"),
+                                                         "title": body.get("title") or row.get("title"),
+                                                         "year": body.get("year") or row.get("year")})},
+                          patch["dest_path"], replaced=patch.get("_replaced"))
             if settings.get("save_artwork") or settings.get("write_nfo"):
                 try:
                     from core.video.download_monitor import write_sidecars

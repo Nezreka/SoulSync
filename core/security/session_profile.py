@@ -108,6 +108,11 @@ def no_profile_request_is_blocked(path: str, method: str) -> bool:
     # key-authed public api: the key is the credential there
     if path.startswith('/api/v1/') and not path.startswith('/api/v1/api-keys-internal'):
         return False
+    # signed short-lived Chromecast stream endpoints: HMAC ?ct= token is the credential there
+    if method in ('GET', 'OPTIONS') and (
+        path.startswith('/api/player/cast-stream/') or path.startswith('/api/player/cast-hls/')
+    ):
+        return False
     if method == 'GET' and path in _ALLOWED_GET:
         return False
     if is_open_profile_path(path, method):

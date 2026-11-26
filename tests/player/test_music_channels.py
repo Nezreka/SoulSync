@@ -95,3 +95,27 @@ def test_read_runs_on_the_real_schema_and_only_airs_owned_tracks(tmp_path):
     assert len(out["music-vibe-high-energy"]["tracks"]) == 22
     assert out["music-genre-jazz"]["count"] == 26
     assert len(out["music-genre-jazz"]["tracks"]) == 25
+
+
+def test_a_profile_that_hides_explicit_music_gets_channels_without_it(tmp_path):
+    """the channels were built from every owned track whatever the profile
+    hid, so a kids profile's guide listed songs that were refused on play"""
+    from core.library2.schema import ensure_library_v2_schema
+    from tests import lib2_seed
+
+    conn = lib2_seed.row_conn(str(tmp_path / "m.db"))
+    ensure_library_v2_schema(conn)
+    for i in range(25):
+        lib2_seed.track(conn, "Miles Davis", "Kind of Blue", f"take {i}", duration=300_000,
+                        album_cols={"genres": json.dumps(["Jazz"])})
+    for i in range(25):
+        lib2_seed.track(conn, "Run DMC", "Raising Hell", f"cut {i}", duration=200_000,
+                        album_cols={"genres": json.dumps(["Hip Hop"])})
+    conn.execute("UPDATE lib2_tracks SET explicit=1 WHERE album_id IN "
+                 "(SELECT id FROM lib2_albums WHERE title='Raising Hell')")
+    conn.commit()
+    everything = {c["id"] for c in mc.read(conn)}
+    clean = {c["id"]: c for c in mc.read(conn, hide_explicit=True)}
+    assert "music-genre-hip-hop" in everything
+    assert set(clean) == {"music-genre-jazz"}
+    assert len(clean["music-genre-jazz"]["tracks"]) == 25

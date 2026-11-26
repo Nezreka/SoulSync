@@ -123,7 +123,7 @@ function TrackRow({
               type="button"
               className="wl-list-album-x"
               title={`Remove all tracks from "${track.album}"`}
-              onClick={() => onRemoveAlbum(track.album, track.artist)}
+              onClick={() => onRemoveAlbum(track.album, track.albumArtist || track.artist)}
             >
               ✕
             </button>

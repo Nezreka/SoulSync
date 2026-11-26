@@ -12,7 +12,7 @@ import time
 
 from flask import Blueprint, g, jsonify, request
 
-from core.connect.device_access import device_pick
+from core.connect.device_access import device_pick, device_playback
 from core.permissions import device_only, public
 from core.security.rate_limit import AttemptLimiter
 from core.profile_context import admin_only
@@ -32,6 +32,12 @@ def configure(*, get_database, config_manager, require_login_enabled=None):
     globals()["config_manager"] = config_manager
     if require_login_enabled is not None:
         globals()["_require_login_enabled"] = require_login_enabled
+    try:  # the rendezvous is best-effort: it self-gates on having a certificate
+        from core.connect import rendezvous
+
+        rendezvous.start(get_database, config_manager)
+    except Exception:  # noqa: BLE001 - pairing must never break app setup
+        logger.debug("connect rendezvous start failed", exc_info=True)
 
 
 def create_blueprint():
@@ -62,12 +68,14 @@ def server_identity_view():
 def _pairing(code):
     """the pairing payload for a code: what the QR carries. the addresses
     are this server's, home ones first, the browser's own among them."""
-    from core.connect.addresses import pairing_payload, payload_text, warnings
+    from core.connect.addresses import pairing_link, pairing_payload, payload_text, warnings
     ident = _identity()
     addrs = _addresses()
     payload = pairing_payload(lookup_id=ident.lookup_id, fingerprint=ident.fingerprint,
                               addresses=addrs, code=code)
-    return {"payload": payload, "payload_text": payload_text(payload), "warnings": warnings(addrs)}
+    # qr_text is what the QR shows: a soulsync:// link a phone camera opens
+    return {"payload": payload, "payload_text": payload_text(payload),
+            "qr_text": pairing_link(payload), "warnings": warnings(addrs)}
 
 
 # ── paired devices (admin) ───────────────────────────────────────────────
@@ -155,12 +163,33 @@ def device_me():
     if dev is None:
         return _no_device()
     from core.connect import device_tokens as T
+    from core.connect import rendezvous as R
     from core.connect.server_key import public_view
     db = get_database()
     row = T.get(db, dev["id"]) or {}
     out = T.public_row(row)
     out.pop("last_ip", None)
-    return jsonify({"success": True, "device": out, "server": public_view(_identity())})
+    profile_info = None
+    pid = row.get("profile_id")
+    if pid is not None:
+        try:
+            prof = db.get_profile(int(pid))
+            if prof:
+                profile_info = {
+                    "id": int(prof["id"]),
+                    "name": prof.get("name") or "",
+                    "avatar_color": prof.get("avatar_color"),
+                    "avatar_url": prof.get("avatar_url"),
+                }
+        except Exception:  # noqa: BLE001
+            profile_info = None
+    return jsonify({
+        "success": True,
+        "device": out,
+        "profile": profile_info,
+        "server": public_view(_identity()),
+        "addresses": R.current_addresses(get_database, config_manager),
+    })
 
 
 @bp.route("/api/devices/me/profiles", methods=["GET"])
@@ -218,6 +247,63 @@ def device_pick_profile():
     return jsonify({"success": True, "profile": {"id": profile_id, "name": profile.get("name")}})
 
 
+@bp.route("/api/devices/me/switch-profiles", methods=["GET"])
+@device_only
+@device_playback
+def device_switch_profiles():
+    """List household profiles a live paired device may switch to (with PIN/password requirements)."""
+    dev = _device()
+    if dev is None:
+        return _no_device()
+    from core.connect.pick import pick_list
+    db = get_database()
+    current_pid = dev.get("profile_id")
+    profiles = pick_list(db, dev.get("kind") or "", login_mode=bool(_require_login_enabled()))
+    for p in profiles:
+        p["active"] = (p.get("id") == current_pid)
+    return jsonify({"success": True, "profiles": profiles})
+
+
+@bp.route("/api/devices/me/switch-profile", methods=["POST"])
+@device_only
+@device_playback
+def device_switch_profile():
+    """Switch a live paired device to another household profile (enforces PIN/password via check_profile_pick)."""
+    dev = _device()
+    if dev is None:
+        return _no_device()
+    body = request.get_json(silent=True) or {}
+    try:
+        profile_id = int(body.get("profile_id") or 0)
+    except (TypeError, ValueError):
+        profile_id = 0
+    db = get_database()
+    profile = db.get_profile(profile_id) if profile_id else None
+    from core.connect.pick import may_use
+    if not profile or not may_use(db, profile, dev.get("kind") or ""):
+        return jsonify({"success": False, "error": "Profile not found"}), 404
+    from api.user_profiles import check_profile_pick
+    refused, _pin_checked = check_profile_pick(
+        db, profile, pin=str(body.get("pin") or ""), password=str(body.get("password") or ""),
+        ip=request.remote_addr or "unknown", now=time.time(),
+        is_new_sign_in=True, always_ask_pin=True)
+    if refused is not None:
+        return refused
+    from core.connect import device_tokens as T
+    if not T.switch_profile(db, dev["id"], profile_id):
+        return jsonify({"success": False, "error": "switch_failed",
+                        "message": "Could not switch profile on this device."}), 409
+    return jsonify({
+        "success": True,
+        "profile": {
+            "id": profile_id,
+            "name": profile.get("name"),
+            "avatar_color": profile.get("avatar_color"),
+            "avatar_url": profile.get("avatar_url"),
+        },
+    })
+
+
 # ── invite codes (admin) ─────────────────────────────────────────────────
 
 # failed redemptions per address: 10 a minute (PAIRING_SPEC.md 2)
@@ -250,6 +336,12 @@ def create_code():
         return jsonify({"success": False, "error": f"{C.MAX_LIVE} codes are already waiting. "
                         "Cancel one or let it run out."}), 409
     C.sweep(db)
+    try:  # tell the rendezvous, when it is running, so the code is live there too
+        from core.connect import rendezvous
+
+        rendezvous.register_created(row["code_hash"], int(row["seconds_left"]))
+    except Exception:  # noqa: BLE001
+        logger.debug("connect rendezvous register failed", exc_info=True)
     _audit("device_code_created", detail=note.strip()[:80] or None)
     out = {"success": True, "code": C.display(code), **row}
     out.update(_pairing(C.display(code)))
@@ -303,9 +395,19 @@ def redeem_code():
         _redeem_limiter.record_failure(ip, now)
         return jsonify({"success": False, "error": "unknown_or_expired_code",
                         "message": "That code isn't valid. Ask for a new one."}), 404
+    app_name = str(body.get("app") or "").strip()
+    kind = T.KIND_PLAYER if app_name.lower() == T.KIND_PLAYER else T.KIND_MUSIC
     token, device_id = T.create(db, name=str(body.get("name") or ""), platform=str(body.get("platform") or ""),
-                                app=str(body.get("app") or ""), ip=ip, invite_code_id=code_id, now=now)
+                                app=app_name, kind=kind, ip=ip, invite_code_id=code_id, now=now)
     C.mark_device(db, code_id, device_id)
+    try:  # the service drops the registration the moment a code is redeemed
+        from core.connect import rendezvous
+
+        normalized = C.normalize(body.get("code"))
+        if normalized:
+            rendezvous.report_redeemed(C.code_hash(normalized))
+    except Exception:  # noqa: BLE001
+        logger.debug("connect rendezvous redeemed report failed", exc_info=True)
     T.sweep_expired(db, now=now)
     _audit("device_code_used", detail=str(body.get("name") or "")[:80] or None,
            actor=(None, "a device", False))
@@ -322,12 +424,14 @@ def _addresses():
 
 def _server_payload():
     from core.connect import reachability as R
+    from core.connect import rendezvous as RV
     from core.connect.addresses import configured, warnings
     from core.connect.server_key import public_view
     addrs = _addresses()
     conf = configured(config_manager.get)
     return {**public_view(_identity()), "addresses": addrs, **conf, "warnings": warnings(addrs),
-            "probe": _probe_view(R.latest(), conf["remote_url"]), "guidance": R.GUIDANCE}
+            "probe": _probe_view(R.latest(), conf["remote_url"]), "guidance": R.GUIDANCE,
+            "upnp": RV.upnp_status(config_manager)}
 
 
 def _probe_view(probe, remote_url):
@@ -368,6 +472,17 @@ def save_addresses():
         return jsonify({"success": False, "error": f"At most {MAX_CUSTOM} extra addresses"}), 400
     config_manager.set(REMOTE_KEY, remote or "")
     config_manager.set(CUSTOM_KEY, custom)
+    return jsonify({"success": True, **_server_payload()})
+
+
+@bp.route("/api/devices/upnp", methods=["PUT"])
+@admin_only
+def save_upnp():
+    """{enabled: bool}: toggle automatic UPnP IGD / NAT-PMP port forwarding."""
+    from core.connect import rendezvous as RV
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get("enabled", False))
+    RV.set_upnp_enabled(enabled, get_database, config_manager)
     return jsonify({"success": True, **_server_payload()})
 
 

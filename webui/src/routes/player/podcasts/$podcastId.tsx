@@ -7,9 +7,10 @@ import { remoteImage } from '../-lib/images';
 import { podcastItems } from '../-lib/play-items';
 import { episodeKey, fraction } from '../-lib/rails';
 import { podcastShowQuery, podcastSubsQuery, progressLookupQuery } from '../-player.api';
+import { MoreButton, openContextMenu, type ContextMenuTarget } from '../-ui/context-menu';
 import { Art, Badge, Hero, PlayButton, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
-import { playItems, usePlayer } from '../-ui/playback/use-player';
+import { getEngine, playItems, usePlayer } from '../-ui/playback/use-player';
 import { useSections } from '../-ui/sections';
 
 export const Route = createFileRoute('/player/podcasts/$podcastId')({
@@ -52,6 +53,22 @@ function PodcastPage() {
     if (at >= 0) playItems(queue, at);
   };
   const about = plainText(show.data?.description ?? sub.description);
+  /** an episode row's More menu: the same one right-click and the ⋯ open */
+  const episodeMenu = (episode: (typeof episodes)[number]): Omit<ContextMenuTarget, 'x' | 'y'> => {
+    const key = episodeKey(episode);
+    const item = queue.find((x) => x.id === key);
+    return {
+      kind: 'podcast',
+      id: key,
+      title: episode.title,
+      subtitle: sub.title,
+      artwork: remoteImage(episode.artwork_url ?? art),
+      onPlay: item ? () => playEpisode(key) : undefined,
+      onQueue: item ? () => getEngine().append([item]) : undefined,
+      info: { type: 'podcast_episode', id: `${sub.id}:${key}` },
+      report: { entityType: 'podcast', entityId: key, title: episode.title, subtitle: sub.title },
+    };
+  };
 
   return (
     <>
@@ -74,11 +91,27 @@ function PodcastPage() {
         }
         overview={about}
         actions={
-          <PlayButton
-            label="Play latest"
-            onPlay={queue.length ? () => playItems(queue) : undefined}
-            why="This feed has no episodes with audio."
-          />
+          <>
+            <PlayButton
+              label="Play latest"
+              onPlay={queue.length ? () => playItems(queue) : undefined}
+              why="This feed has no episodes with audio."
+            />
+            {queue.length ? (
+              <MoreButton
+                label={show.data?.title ?? sub.title}
+                heroClassName={s.btn}
+                target={() => ({
+                  kind: 'podcast',
+                  page: true,
+                  id: String(sub.id),
+                  title: show.data?.title ?? sub.title,
+                  info: null,
+                  download: { type: 'podcast', id: String(sub.id) },
+                })}
+              />
+            ) : null}
+          </>
         }
       />
 
@@ -110,6 +143,10 @@ function PodcastPage() {
               aria-label={`Play ${episode.title}`}
               tabIndex={0}
               onClick={() => playEpisode(key)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                openContextMenu({ ...episodeMenu(episode), x: e.clientX, y: e.clientY });
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
@@ -147,8 +184,9 @@ function PodcastPage() {
                   <span className={s.rowText}>{plainText(episode.description)}</span>
                 ) : null}
               </div>
-              <div className={s.rowEnd}>
+              <div className={s.rowEnd} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {episode.downloaded ? <Badge tone="yes">Downloaded</Badge> : null}
+                <MoreButton label={episode.title} target={() => episodeMenu(episode)} />
               </div>
             </div>
           );

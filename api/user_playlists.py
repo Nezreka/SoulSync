@@ -13,6 +13,7 @@ never land it in someone else's playlist.
 import os
 
 from flask import Blueprint, jsonify, request, send_file
+from core.connect.device_access import device_playback
 
 from core.playlists import auto_identify
 from core.playlists import user_playlists as up
@@ -47,6 +48,12 @@ def _own_user_playlist(database, playlist_id):
     a foreign or non-user playlist reads exactly like a missing one."""
     playlist = database.get_mirrored_playlist(playlist_id, profile_id=get_current_profile_id())
     return playlist if up.is_user_playlist(playlist) else None
+
+
+def _own_playlist_for_cover(database, playlist_id):
+    """any playlist of the active profile: a cover can go on a mirror or a
+    request list too, not just a user playlist (#2280)."""
+    return database.get_mirrored_playlist(playlist_id, profile_id=get_current_profile_id())
 
 
 def _cover_base_dir():
@@ -115,6 +122,7 @@ def create_user_playlist():
 
 
 @bp.route('/api/user-playlists/<int:playlist_id>/tracks', methods=['POST'])
+@device_playback
 @requires("music.access")
 def add_user_playlist_tracks(playlist_id):
     data = request.get_json(silent=True) or {}
@@ -145,6 +153,7 @@ def _tracks_arg(data):
 
 
 @bp.route('/api/user-playlists/<int:playlist_id>/tracks/remove', methods=['POST'])
+@device_playback
 @requires("music.access")
 def remove_matching_user_playlist_tracks(playlist_id):
     """the picker's untick: drop these songs wherever they are in the list."""
@@ -187,6 +196,7 @@ def user_playlist_membership():
 
 
 @bp.route('/api/user-playlists/liked', methods=['POST'])
+@device_playback
 @requires("music.access")
 def like_songs():
     data = request.get_json(silent=True) or {}
@@ -206,6 +216,7 @@ def like_songs():
 
 
 @bp.route('/api/user-playlists/liked/remove', methods=['POST'])
+@device_playback
 @requires("music.access")
 def unlike_songs():
     data = request.get_json(silent=True) or {}
@@ -333,7 +344,7 @@ def upload_user_playlist_cover(playlist_id):
         return jsonify({"error": "No image"}), 400
     try:
         database = get_database()
-        playlist = _own_user_playlist(database, playlist_id)
+        playlist = _own_playlist_for_cover(database, playlist_id)
         if not playlist:
             return _not_found()
         image_url = up.set_cover_upload(
@@ -354,7 +365,7 @@ def set_user_playlist_cover(playlist_id):
     data = request.get_json(silent=True) or {}
     try:
         database = get_database()
-        playlist = _own_user_playlist(database, playlist_id)
+        playlist = _own_playlist_for_cover(database, playlist_id)
         if not playlist:
             return _not_found()
         if 'image_url' in data:
@@ -376,7 +387,7 @@ def set_user_playlist_cover(playlist_id):
 def clear_user_playlist_cover(playlist_id):
     try:
         database = get_database()
-        playlist = _own_user_playlist(database, playlist_id)
+        playlist = _own_playlist_for_cover(database, playlist_id)
         if not playlist:
             return _not_found()
         up.clear_cover(database, playlist, base_dir=_cover_base_dir())

@@ -862,7 +862,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"6\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"6\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -1359,6 +1359,23 @@
       "asked": "guard-probe",
       "shows": ["lidarr_download.transfer_path"]
     },
+    "#lidarr-import-through-lidarr": {
+      "sel": "#lidarr-import-through-lidarr",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "lidarr_download": {
+            "import_through_lidarr": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["lidarr_download.import_through_lidarr"]
+    },
     "#lidarr-download-path": {
       "sel": "#lidarr-download-path",
       "kind": "text",
@@ -1539,6 +1556,23 @@
       },
       "asked": "guard-secret",
       "shows": ["prowlarr.api_key"]
+    },
+    "#flaresolverr-url": {
+      "sel": "#flaresolverr-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "flaresolverr": {
+            "url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["flaresolverr.url"]
     },
     "#prowlarr-search-min-gap": {
       "sel": "#prowlarr-search-min-gap",
@@ -3095,7 +3129,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"off\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"off\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -3114,7 +3148,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":true}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":true}"
           }
         ]
       },
@@ -3428,7 +3462,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"21\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"21\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -4635,7 +4669,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"guard-probe\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"guard-probe\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -4654,11 +4688,30 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode-guard\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode-guard\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
       "asked": "$series/Season $season/$series - S$seasonE$episode-guard",
+      "showsEndpoint": "/api/video/organization"
+    },
+    "#vo-anime-episode-template": {
+      "sel": "#vo-anime-episode-template",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/organization",
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"guard-probe\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+          }
+        ]
+      },
+      "asked": "guard-probe",
       "showsEndpoint": "/api/video/organization"
     },
     "#vo-colon-replacement": {
@@ -4673,7 +4726,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"delete\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"delete\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -4692,7 +4745,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"guard-probe\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"guard-probe\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6438,7 +6491,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":false,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":false,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6457,7 +6510,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":true,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":true,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6476,7 +6529,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":false,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":false,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6699,7 +6752,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"move\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"move\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6718,7 +6771,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":false,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":false,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6737,7 +6790,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":false,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":false,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6756,7 +6809,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":false,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":false,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6775,7 +6828,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"15\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"15\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6794,7 +6847,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"guard-probe\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"guard-probe\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6813,7 +6866,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":false,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":false,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6832,7 +6885,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,fr\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,fr\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6851,7 +6904,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"off\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"off\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6870,7 +6923,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":true,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":true,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6889,7 +6942,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":false,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":false,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6908,7 +6961,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":false,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":false,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6927,7 +6980,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":true,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":true,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6946,7 +6999,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":true,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":true,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -6965,7 +7018,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"tiny\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"tiny\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           },
           {
             "method": "POST",
@@ -6990,7 +7043,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":false,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":false,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -7009,7 +7062,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":true,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":true,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -7028,7 +7081,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":31,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":31,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -7047,7 +7100,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":21,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":21,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -7066,7 +7119,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":16,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":16,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -7085,7 +7138,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":31,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":31,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -7104,7 +7157,7 @@
           {
             "method": "POST",
             "url": "/api/video/organization",
-            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":11,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+            "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":11,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
           }
         ]
       },
@@ -7810,6 +7863,23 @@
       },
       "asked": true,
       "shows": ["security.require_login"]
+    },
+    "#security-share-connected-accounts": {
+      "sel": "#security-share-connected-accounts",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "security": {
+            "share_connected_accounts": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["security.share_connected_accounts"]
     },
     "#security-plex-signin": {
       "sel": "#security-plex-signin",
@@ -9056,6 +9126,24 @@
       "asked": "11",
       "shows": ["musicbrainz.base_url", "musicbrainz.request_interval"]
     },
+    "#acoustid-user-key": {
+      "sel": "#acoustid-user-key",
+      "kind": "text",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "acoustid": {
+            "user_key": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["acoustid.user_key"]
+    },
     "#acoustid-api-key": {
       "sel": "#acoustid-api-key",
       "kind": "text",
@@ -9315,6 +9403,24 @@
       },
       "asked": true
     },
+    "#devices-upnp-toggle": {
+      "sel": "#devices-upnp-toggle",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/devices/upnp",
+            "body": "{\"enabled\":true}"
+          }
+        ]
+      },
+      "asked": true
+    },
     "#devices-remote-url": {
       "sel": "#devices-remote-url",
       "kind": "text",
@@ -9386,11 +9492,31 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"\",\"tv\":\"TV\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"TV\"]}"
+            "body": "{\"movies\":\"\",\"movies_more\":[],\"tv\":\"TV\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"TV\"]}"
           }
         ]
       },
       "asked": "",
+      "showsEndpoint": "/api/video/libraries"
+    },
+    "input[data-video-lib-movies-scan=\"Movies 4K\"]": {
+      "sel": "input[data-video-lib-movies-scan=\"Movies 4K\"]",
+      "kind": "checkbox",
+      "only": "video",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/libraries",
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[\"Movies 4K\"],\"tv\":\"TV\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"TV\"]}"
+          }
+        ]
+      },
+      "asked": true,
       "showsEndpoint": "/api/video/libraries"
     },
     "#video-lib-tv": {
@@ -9406,7 +9532,7 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"Movies\",\"tv\":\"\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"TV\"]}"
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[],\"tv\":\"\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"TV\"]}"
           }
         ]
       },
@@ -9426,7 +9552,7 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"Movies\",\"tv\":\"TV\",\"tv_more\":[\"Anime\",\"Kids TV\"],\"anime\":[\"TV\"]}"
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[],\"tv\":\"TV\",\"tv_more\":[\"Anime\",\"Kids TV\"],\"anime\":[\"TV\"]}"
           }
         ]
       },
@@ -9446,7 +9572,7 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"Movies\",\"tv\":\"TV\",\"tv_more\":[\"Anime\",\"Kids TV\"],\"anime\":[\"Anime\",\"TV\"]}"
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[],\"tv\":\"TV\",\"tv_more\":[\"Anime\",\"Kids TV\"],\"anime\":[\"Anime\",\"TV\"]}"
           }
         ]
       },
@@ -9466,7 +9592,7 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"Movies\",\"tv\":\"TV\",\"tv_more\":[],\"anime\":[\"TV\"]}"
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[],\"tv\":\"TV\",\"tv_more\":[],\"anime\":[\"TV\"]}"
           }
         ]
       },
@@ -9486,7 +9612,7 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"Movies\",\"tv\":\"TV\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"Kids TV\",\"TV\"]}"
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[],\"tv\":\"TV\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"Kids TV\",\"TV\"]}"
           }
         ]
       },
@@ -11230,7 +11356,7 @@
               {
                 "method": "POST",
                 "url": "/api/video/organization",
-                "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"opensubtitles\",\"subdl\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+                "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"opensubtitles\",\"subdl\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
               }
             ]
           }
@@ -11243,7 +11369,7 @@
               {
                 "method": "POST",
                 "url": "/api/video/organization",
-                "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+                "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
               }
             ]
           }
@@ -11256,7 +11382,7 @@
               {
                 "method": "POST",
                 "url": "/api/video/organization",
-                "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
+                "body": "{\"movie_template\":\"\",\"episode_template\":\"$series/Season $season/$series - S$seasonE$episode\",\"anime_episode_template\":\"\",\"youtube_template\":\"\",\"transfer_mode\":\"copy\",\"colon_replacement\":\"smart\",\"verify_with_ffprobe\":true,\"replace_existing\":true,\"carry_subtitles\":true,\"save_artwork\":false,\"write_nfo\":true,\"download_subtitles\":true,\"subtitle_langs\":\"en,es\",\"subtitle_provider_order\":[\"subdl\",\"opensubtitles\"],\"subtitle_min_score\":30,\"subtitle_daily_quota\":20,\"subtitle_upgrade_min_delta\":15,\"subtitle_worker_interval_min\":30,\"subtitle_worker_batch\":10,\"subtitle_hi_forced\":\"prefer_hi\",\"subtitle_forced\":false,\"subtitle_use_embedded\":true,\"subtitle_ignore_pgs\":true,\"subtitle_ignore_vobsub\":false,\"subtitle_ignore_ass\":false,\"subtitle_autosync\":false,\"whisper_enabled\":true,\"whisper_model\":\"base\",\"whisper_model_downloaded\":true,\"whisper_model_path\":\"/models/base\",\"whisper_model_size_bytes\":145000000,\"whisper_model_downloaded_at\":\"2026-11-01T10:00:00\",\"recycle_deletes\":true,\"recycle_keep_days\":\"14\",\"recycle_path\":\"\",\"min_free_disk_gb\":\"20\",\"youtube_follow_count\":\"5\",\"youtube_sponsorblock\":\"mark\",\"youtube_embed_subs\":false}"
               }
             ]
           }
@@ -11450,6 +11576,13 @@
     },
     "#video-server-pick \"Jellyfin\"": {
       "label": "Jellyfin",
+      "anchor": "video-server-pick",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-server-pick \"Standalone\"": {
+      "label": "Standalone",
       "anchor": "video-server-pick",
       "count": 1,
       "sides": ["music", "video"],
@@ -12308,7 +12441,7 @@
     "#lidarr-download-settings-container \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "lidarr-download-settings-container",
-      "count": 2,
+      "count": 3,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -12335,7 +12468,7 @@
     "#prowlarr-settings-container \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "prowlarr-settings-container",
-      "count": 4,
+      "count": 5,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -13182,7 +13315,7 @@
     "#folders-video-panel \"Add folder\"": {
       "label": "Add folder",
       "anchor": "folders-video-panel",
-      "count": 2,
+      "count": 3,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -13326,7 +13459,7 @@
     "#organization-video-panel \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "organization-video-panel",
-      "count": 4,
+      "count": 5,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -13897,7 +14030,7 @@
     "#stg-view-advanced-security \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "stg-view-advanced-security",
-      "count": 8,
+      "count": 9,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -14071,6 +14204,20 @@
     "#quarantine-clear-btn": {
       "id": "quarantine-clear-btn",
       "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-backups \"Check now\"": {
+      "label": "Check now",
+      "anchor": "stg-view-advanced-backups",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-backups \"Back up now\"": {
+      "label": "Back up now",
+      "anchor": "stg-view-advanced-backups",
+      "count": 2,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -14390,7 +14537,7 @@
     "#stg-view-devices-all \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "stg-view-devices-all",
-      "count": 2,
+      "count": 3,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -15169,6 +15316,7 @@
       "video-redownload-failed",
       "prowlarr-url",
       "prowlarr-api-key",
+      "flaresolverr-url",
       "prowlarr-indexer-ids",
       "prowlarr-search-min-gap",
       "prowlarr-max-searches-per-minute",

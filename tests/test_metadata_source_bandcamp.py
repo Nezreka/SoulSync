@@ -201,7 +201,7 @@ def test_embed_source_ids_writes_bandcamp_tags(monkeypatch):
 
     genre_tags = [f for f in audio.tags.added if f.kind == 'TCON']
     assert len(genre_tags) == 1
-    assert 'Idm' in genre_tags[0].kwargs['text'][0]
+    assert 'IDM' in genre_tags[0].kwargs['text'][0]
 
 
 def test_embed_source_ids_respects_url_and_label_toggles_independently(monkeypatch):

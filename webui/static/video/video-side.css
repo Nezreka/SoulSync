@@ -114,49 +114,94 @@ html[data-sidebar="collapsed"] .side-toggle-btn .side-toggle-icon {
     height: 16px;
 }
 
-/* ── The way into the player, under the toggle ─────────────────────────── */
+/* ── The way into the player, under the toggle ───────────────────────────
+   its own card: a lit play key, what it is in words, an arrow. a full row,
+   but one that reads as the door to the other half of the app. */
 .open-player {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 8px;
-    margin-top: 8px;
-    padding: 8px 10px;
-    border: 1px solid var(--white-a07);
-    border-radius: 11px;
-    background: var(--white-a03);
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 8px 10px 8px 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.32);
+    border-radius: 12px;
+    background: linear-gradient(135deg,
+        rgba(var(--accent-rgb), 0.2),
+        rgba(var(--accent-rgb), 0.06));
+    color: var(--text-primary);
     text-decoration: none;
-    transition: color var(--dur-base) ease, background var(--dur-base) ease, border-color var(--dur-base) ease;
+    transition: border-color var(--dur-base) ease, background var(--dur-base) ease, transform var(--dur-base) ease;
 }
 .open-player:hover,
 .open-player:focus-visible {
-    border-color: rgba(var(--accent-rgb), 0.45);
-    background: rgba(var(--accent-rgb), 0.12);
+    border-color: rgba(var(--accent-rgb), 0.6);
+    background: linear-gradient(135deg,
+        rgba(var(--accent-rgb), 0.3),
+        rgba(var(--accent-rgb), 0.1));
+}
+.open-player:active {
+    transform: scale(0.98);
+}
+.open-player-key {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.8));
+    box-shadow: 0 3px 10px rgba(var(--accent-rgb), 0.4);
     color: var(--text-primary);
 }
 .open-player-icon {
     width: 13px;
     height: 13px;
+    margin-left: 2px;
+}
+.open-player-text {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    line-height: 1.2;
+}
+.open-player-label {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.open-player-sub {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+.open-player-chevron {
+    width: 14px;
+    height: 14px;
     flex: none;
-    color: rgb(var(--accent-rgb));
+    color: var(--text-secondary);
+    transition: transform var(--dur-base) ease;
+}
+.open-player:hover .open-player-chevron {
+    transform: translateX(2px);
 }
 html[data-sidebar="collapsed"] .open-player {
+    justify-content: center;
     width: 46px;
     margin-left: auto;
     margin-right: auto;
-    padding: 9px 0;
-    border-radius: 13px;
+    padding: 0;
+    border: 0;
+    background: none;
 }
-html[data-sidebar="collapsed"] .open-player-label {
+html[data-sidebar="collapsed"] .open-player-key {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+}
+html[data-sidebar="collapsed"] .open-player-text,
+html[data-sidebar="collapsed"] .open-player-chevron {
     display: none;
-}
-html[data-sidebar="collapsed"] .open-player-icon {
-    width: 15px;
-    height: 15px;
 }
 
 /* ── Nav swap: music nav vs video nav ──────────────────────────────────── */

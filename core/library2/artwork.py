@@ -634,7 +634,11 @@ def _stored_image(conn, kind: str, entity_id: int) -> Optional[bytes]:
     try:
         from core.media_server.engine import get_media_server_engine
         client = get_media_server_engine().active_client()
-        hook = getattr(client, "image_url", None)
+        # the server's own download address when it has one: image_url may
+        # be a link for the browser only (navidrome's cover proxy, #2293)
+        hook = getattr(client, "image_fetch_url", None)
+        if not callable(hook):
+            hook = getattr(client, "image_url", None)
         absolute = hook(url) if callable(hook) else None
     except Exception as e:  # noqa: BLE001
         logger.debug("media-server image url failed (%s %s): %s", kind, entity_id, e)

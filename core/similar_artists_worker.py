@@ -78,6 +78,52 @@ def pick_source_artist_id(row: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+PLAYED_WINDOW_DAYS = 90
+
+
+def next_played_artist(conn, *, days: int = PLAYED_WINDOW_DAYS) -> Optional[Dict[str, Any]]:
+    """the most played library artist of the last ``days`` that this worker
+    has never asked about, or None.
+
+    recommendations are seeded by what you play, and each seed pulls in its
+    similar artists from this table. the queue fills it in catalogue order,
+    so on a big library the artists you actually listen to could wait behind
+    thousands you never play, and until their turn came they recommended
+    nothing: only watchlist artists (whose similars the scan fetches) did.
+    asking about the played ones first is what makes "because you listen to"
+    follow listening from the first day.
+
+    only artists with a provider id (the table is keyed by one), and only
+    ones never attempted: an artist already answered for is the queue's to
+    retry on its own schedule."""
+    row = conn.execute(
+        """
+        SELECT ar.id, ar.name, ar.spotify_id, ar.musicbrainz_id, ar.external_ids, COUNT(*) AS plays
+        FROM listening_history lh
+        JOIN lib2_tracks t ON t.id = lh.lib2_track_id
+        JOIN lib2_albums al ON al.id = t.album_id
+        JOIN lib2_artists ar ON ar.id = COALESCE(
+            (SELECT canonical_artist_id FROM lib2_artists WHERE id = al.primary_artist_id),
+            al.primary_artist_id)
+        WHERE lh.played_at >= datetime('now', ?)
+          AND lh.lib2_track_id IS NOT NULL
+          AND ar.name IS NOT NULL AND ar.name <> ''
+          AND (COALESCE(ar.spotify_id, '') <> '' OR COALESCE(ar.musicbrainz_id, '') <> ''
+               OR COALESCE(ar.external_ids, '') NOT IN ('', '{}'))
+          AND NOT EXISTS (
+              SELECT 1 FROM lib2_provider_attempts pa
+              WHERE pa.entity_type = 'artist' AND pa.entity_id = ar.id
+                AND pa.service = 'similar_artists')
+        GROUP BY ar.id
+        ORDER BY plays DESC, ar.id
+        LIMIT 1
+        """, (f"-{int(days)} days",)).fetchone()
+    if row is None:
+        return None
+    return {'id': row[0], 'name': row[1], 'spotify_id': row[2], 'musicbrainz_id': row[3],
+            'external_ids': row[4], 'plays': row[5]}
+
+
 def process_artist(
     source_artist_id: str,
     artist_name: str,
@@ -295,6 +341,19 @@ class SimilarArtistsWorker:
             from core.library2.worker_queue import next_pending
 
             conn = self.db._get_connection()
+            # the artists you play come first (see next_played_artist). once
+            # there are none left to ask about, the history isn't read again on
+            # every pass of the loop: it is looked at afresh every ten minutes.
+            import time as _time
+            if _time.monotonic() >= getattr(self, '_played_checked_until', 0.0):
+                try:
+                    played = next_played_artist(conn)
+                except Exception as exc:  # noqa: BLE001 - the queue still runs without it
+                    logger.debug("Similar Artists played-first lookup failed: %s", exc)
+                    played = None
+                if played:
+                    return played
+                self._played_checked_until = _time.monotonic() + 600
             item = next_pending(
                 conn, 'similar_artists',
                 retry_after_days=self.retry_days,

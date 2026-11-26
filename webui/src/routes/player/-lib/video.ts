@@ -115,6 +115,24 @@ export interface BrowseSearch {
   genre?: string;
   /** a decade's first year: 1990 is the 90s */
   decade?: number;
+  /** one library's page (a library with a page of its own) */
+  library?: number;
+}
+
+/**
+ * the titles a browse page shows. a library's own page: only its titles.
+ * Movies / TV itself: every title that isn't in a library with its own page
+ * (with no such library, everything, as it always was).
+ */
+export function libraryTitles<T extends { library_id?: number | null }>(
+  items: T[],
+  libraries: { id: number; own_page: boolean }[],
+  library: number | undefined,
+): T[] {
+  if (library) return items.filter((x) => x.library_id === library);
+  const split = new Set(libraries.filter((l) => l.own_page).map((l) => l.id));
+  if (!split.size) return items;
+  return items.filter((x) => x.library_id == null || !split.has(x.library_id));
 }
 
 /** the decade a year falls in (1994 -> 1990) */
@@ -141,5 +159,7 @@ export function validateBrowseSearch(search: Record<string, unknown>): BrowseSea
   const decade = Number(search.decade);
   if (Number.isInteger(decade) && decade >= 1880 && decade <= 2100 && decade % 10 === 0)
     out.decade = decade;
+  const library = Number(search.library);
+  if (Number.isInteger(library) && library > 0) out.library = library;
   return out;
 }

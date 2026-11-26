@@ -424,6 +424,141 @@ def _known_library_files(db):
     return known
 
 
+def _other_music_folders(db, main_folder):
+    """``(folders, excluded)``: the music library's other folders, the ones
+    beside the main music folder: the extra music folders in Settings and each
+    profile's own library folder, as the folder watch lists them
+    (core/library/folder_watch.configured_folders). a library on more than
+    one drive is one library: a scan reads all of it, whether or not the
+    watch is on. a folder inside the main one is read with the main one."""
+    try:
+        from core.library.folder_watch import configured_folders, is_under, norm
+        folders, _import, excluded = configured_folders(config_manager, db)
+        main = norm(docker_resolve_path(main_folder))
+        mains = {main, norm(main_folder), norm(os.path.realpath(main_folder))}
+        out = [f for f in folders if f not in mains and not any(is_under(f, m) for m in mains)]
+        return out, list(excluded)
+    except Exception as exc:  # noqa: BLE001 - the main folder is still scanned
+        logger.warning("could not list the other music folders: %s", exc)
+        return [], []
+
+
+def _scan_other_music_folders(db, main_folder, *, known=None, new_only=False):
+    """read the music folders beside the main one, the way the folder watch
+    reads a changed folder (core/library2/folder_rescan.py): files the
+    library doesn't know are indexed in place, and unless ``new_only``, moved
+    files are followed, known ones re-read and missing ones recorded. a folder
+    that can't be reached is skipped and said, never read as empty.
+    returns ``{folders, added, missing, moved, unreachable: [folders]}``."""
+    out = {"folders": 0, "added": 0, "missing": 0, "moved": 0, "unreachable": []}
+    folders, excluded = _other_music_folders(db, main_folder)
+    if not folders:
+        return out
+    from core.library2 import folder_rescan
+    for folder in folders:
+        _db_update_phase_callback(f'Reading {folder}...')
+        try:
+            if new_only:
+                if not folder_rescan._reachable(folder):
+                    out["unreachable"].append(folder)
+                    continue
+                known = known if known is not None else _known_library_files(db)
+                fresh = sorted(p for p in folder_rescan._audio_under(folder, True, excluded)
+                               if _file_key(p) not in known)
+                out["added"] += len(folder_rescan._adopt(db, fresh)) if fresh else 0
+            else:
+                res = folder_rescan.process_changes(db, folder, [(folder, True)], excluded=excluded,
+                                                    config_manager=config_manager)
+                if res.get("outage"):
+                    out["unreachable"].append(folder)
+                    continue
+                for key in ("added", "missing", "moved"):
+                    out[key] += int(res.get(key) or 0)
+            out["folders"] += 1
+        except Exception as exc:  # noqa: BLE001 - one folder never stops the scan
+            logger.error("[SoulSync scan] could not read %s: %s", folder, exc)
+            out["unreachable"].append(folder)
+    if out["unreachable"]:
+        logger.warning("[SoulSync scan] not reachable, skipped: %s", ", ".join(out["unreachable"]))
+    return out
+
+
+def _other_folders_words(other) -> str:
+    """what the other music folders added to a scan, for its summary"""
+    words = ""
+    if other.get("folders"):
+        bits = [f"{other['added']} new"] if other.get("added") else []
+        if other.get("moved"):
+            bits.append(f"{other['moved']} moved")
+        if other.get("missing"):
+            bits.append(f"{other['missing']} missing")
+        n = other["folders"]
+        words += f"; {n} other music folder{'s' if n != 1 else ''} read" + \
+                 (f" ({', '.join(bits)})" if bits else "")
+    if other.get("unreachable"):
+        words += f"; {len(other['unreachable'])} music folder(s) not reachable, skipped"
+    return words
+
+
+def _readable_audio(file_path) -> bool:
+    """the file opens as audio and has a length. a file that doesn't (zeroed
+    by a copy that never finished, cut short, not audio at all) has no tags
+    to read, and indexing it anyway filed it as a one-song album under
+    "Unknown Artist" that nothing could play"""
+    try:
+        import mutagen
+        audio = mutagen.File(file_path)
+    except Exception:  # noqa: BLE001 - unreadable is the answer
+        return False
+    info = getattr(audio, "info", None) if audio is not None else None
+    return bool(info is not None and (getattr(info, "length", 0) or 0) > 0)
+
+
+def _index_untracked_in_place(db, paths, label):
+    """index files the library doesn't know, where they sit, through the
+    native import writer. a file that isn't readable audio is left out and
+    named in the log. returns (new file ids, failed)."""
+    from core.library2.autolink import link_download_into_library_v2
+    new_ids, failed = [], 0
+    damaged = []
+    for index, file_path in enumerate(paths, 1):
+        if not _readable_audio(file_path):
+            damaged.append(file_path)
+            failed += 1
+            continue
+        try:
+            file_id = link_download_into_library_v2(
+                {'_final_processed_path': file_path, '_download_username': 'standalone_refresh',
+                 'username': 'standalone_refresh'},
+                raise_on_error=True)
+            if file_id is None:
+                raise RuntimeError("native import returned no file row")
+            new_ids.append(int(file_id))
+        except Exception as exc:  # noqa: BLE001 - one bad file never stops the scan
+            failed += 1
+            logger.error("[%s] Could not import %s: %s", label, file_path, exc)
+        if index % 50 == 0:
+            _db_update_phase_callback(f'Indexing new files... {index}/{len(paths)}')
+    if damaged:
+        shown = "; ".join(damaged[:10]) + (f" and {len(damaged) - 10} more" if len(damaged) > 10 else "")
+        logger.warning("[%s] %d files aren't readable audio and were left out (damaged or not audio): %s",
+                       label, len(damaged), shown)
+        add_activity_item("", f"{label}: damaged files left out",
+                          f"{len(damaged)} files in your music folder aren't readable audio, so they "
+                          f"weren't added: {shown}", "Now")
+    return new_ids, failed
+
+
+def _skip_hidden_dirs(dirs) -> None:
+    """keep an os.walk out of hidden folders, in place. an album still
+    downloading sits in <music folder>/.soulsync_atomic_staging until it is
+    whole: walked, a refresh indexed half an album as library tracks and a
+    deep scan moved its files to the import folder mid-download. the
+    standalone library's own reader skips them for the same reason
+    (core/soulsync_client.py), and so does the usual hidden clutter."""
+    dirs[:] = [d for d in dirs if not d.startswith('.')]
+
+
 def _run_soulsync_full_refresh(incremental=False):
     """Re-index the standalone output folder through the native import writer.
 
@@ -450,6 +585,7 @@ def _run_soulsync_full_refresh(incremental=False):
         audio_exts = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
         audio_files = []
         for root, _dirs, files in walk_library(transfer_path):
+            _skip_hidden_dirs(_dirs)
             for fname in files:
                 if os.path.splitext(fname)[1].lower() in audio_exts:
                     audio_files.append(os.path.join(root, fname))
@@ -509,11 +645,13 @@ def _run_soulsync_full_refresh(incremental=False):
                     label, kept, reactivated, successful - kept - reactivated)
 
         if incremental:
+            other = _scan_other_music_folders(db, transfer_path, known=known, new_only=True)
             artist_count, album_count = _artist_album_counts(db, new_file_ids)
             summary = (f"Incremental update complete: {len(new_file_ids)} new local tracks indexed, "
                        f"{kept + reactivated} already in the library")
             if failed > 0:
                 summary += f" ({failed} failed)"
+            summary += _other_folders_words(other)
             logger.info("[%s] %s", label, summary)
             add_activity_item("", label, summary, "Now")
             _db_update_finished_callback(artist_count, album_count, len(new_file_ids),
@@ -549,11 +687,13 @@ def _run_soulsync_full_refresh(incremental=False):
             from core.library2.scan import rescan_files
             rescan_files(db, file_ids=scoped_file_ids)
 
+        other = _scan_other_music_folders(db, transfer_path)
         artist_count, album_count = _artist_album_counts(db, scoped_file_ids)
         summary = (f"Full refresh complete: {successful} local tracks indexed "
                    f"from {album_count} albums by {artist_count} artists")
         if failed > 0:
             summary += f" ({failed} failed)"
+        summary += _other_folders_words(other)
         logger.info(f"[SoulSync Full Refresh] {summary}")
         add_activity_item("", "SoulSync Full Refresh", summary, "Now")
         _db_update_finished_callback(artist_count, album_count, total, successful, failed)
@@ -612,6 +752,7 @@ def _run_soulsync_deep_scan():
         audio_extensions = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
         transfer_files = set()
         for root, _dirs, files in walk_library(transfer_path):
+            _skip_hidden_dirs(_dirs)
             for filename in files:
                 if os.path.splitext(filename)[1].lower() in audio_extensions:
                     transfer_files.add(os.path.realpath(os.path.join(root, filename)))
@@ -674,18 +815,29 @@ def _run_soulsync_deep_scan():
         # Phase 4: Move untracked files to Staging for auto-import — unless guarded.
         moved_count = 0
         blocked_count = 0
-        if untracked and move_blocked:
+        indexed_count = index_failed = 0
+        if untracked and move_blocked and block_reason == BLOCK_TRANSFER_PERMANENT:
+            # the music folder is the library, so a file in it the library
+            # doesn't know is not something to move away: it is something a
+            # scan missed. it is indexed where it sits, by the same test and
+            # the same writer the incremental update uses. (this used to warn
+            # "nothing was moved" and leave the files out of the library, on a
+            # scan whose whole point is to catch what was missed.)
+            _db_update_phase_callback('indexing_untracked')
+            known = _known_library_files(db)
+            fresh = sorted(p for p in untracked if _file_key(p) not in known)
+            new_ids, index_failed = _index_untracked_in_place(db, fresh, "SoulSync Deep Scan")
+            indexed_count = len(new_ids)
+        elif untracked and move_blocked:
+            # BLOCK_DESYNC: the folder is not marked permanent, so untracked
+            # files would be MOVED, and far too many are untracked to believe
             blocked_count = len(untracked)
-            if block_reason == BLOCK_TRANSFER_PERMANENT:
-                warn = (f"Deep scan: {blocked_count} file(s) in your Music Library aren't in the database, "
-                        f"but it's marked your permanent library — nothing was moved.")
-            else:  # BLOCK_DESYNC
-                pct = round(100 * blocked_count / max(1, len(transfer_files)))
-                warn = (f"Deep scan STOPPED to protect your library: {blocked_count} of "
-                        f"{len(transfer_files)} files in your Music Library ({pct}%) aren't in the database. "
-                        f"That usually means the database is out of sync with disk, not that you "
-                        f"have {blocked_count} new files — so NOTHING was moved. Re-sync/import "
-                        f"before scanning, or enable 'Music Library is my permanent library'.")
+            pct = round(100 * blocked_count / max(1, len(transfer_files)))
+            warn = (f"Deep scan STOPPED to protect your library: {blocked_count} of "
+                    f"{len(transfer_files)} files in your Music Library ({pct}%) aren't in the database. "
+                    f"That usually means the database is out of sync with disk, not that you "
+                    f"have {blocked_count} new files — so NOTHING was moved. Re-sync/import "
+                    f"before scanning, or enable 'Music Library is my permanent library'.")
             logger.warning(f"[SoulSync Deep Scan] {warn}")
             add_activity_item("", "SoulSync Deep Scan — move blocked", warn, "Now")
         elif untracked and os.path.isdir(staging_path):
@@ -758,19 +910,29 @@ def _run_soulsync_deep_scan():
                 stale_count = 0
                 logger.error(f"[SoulSync Deep Scan] Error observing missing records: {e}")
 
+        # the library's other folders (more than one music drive is one library)
+        other = _scan_other_music_folders(db, transfer_path)
+
         summary = f"Deep scan complete: {len(transfer_files)} files scanned"
+        if indexed_count > 0:
+            summary += f", {indexed_count} new files added"
+        if index_failed > 0:
+            summary += f", {index_failed} could not be added"
         if moved_count > 0:
             summary += f", {moved_count} untracked files moved to Staging"
         if blocked_count > 0:
             summary += f", {blocked_count} untracked files LEFT IN PLACE (move blocked — see warning)"
         if stale_count > 0:
             summary += f", {stale_count} missing files recorded for repair"
-        if moved_count == 0 and blocked_count == 0 and stale_count == 0:
+        if moved_count == 0 and blocked_count == 0 and stale_count == 0 and indexed_count == 0 \
+                and index_failed == 0 and not (other["added"] or other["missing"] or other["unreachable"]):
             summary += " — library is clean"
+        summary += _other_folders_words(other)
 
         logger.info(f"[SoulSync Deep Scan] {summary}")
         add_activity_item("", "SoulSync Deep Scan", summary, "Now")
-        _db_update_finished_callback(0, 0, len(transfer_files), moved_count + stale_count, 0)
+        _db_update_finished_callback(0, 0, len(transfer_files),
+                                     moved_count + stale_count + indexed_count, index_failed)
 
     except Exception as e:
         logger.error(f"[SoulSync Deep Scan] {e}")
@@ -1154,63 +1316,69 @@ _BACKUP_FILENAME_RE = re.compile(r'^music_library\.db\.backup_\d{8}_\d{6}$')
 def backup_database_endpoint():
     """Create a rolling backup of the database (max 5)."""
     try:
-        import glob as _glob
-        from core.db_integrity import DBIntegrityError, safe_backup, prune_backups
+        from core.db_integrity import (DBIntegrityError, backup_lock, room_for, rotate_backups,
+                                       safe_backup)
         db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
         if not os.path.exists(db_path):
             return jsonify({"success": False, "error": "Database file not found"}), 404
         max_backups = 5
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        backup_path = f"{db_path}.backup_{timestamp}"
-        # safe_backup verifies the SOURCE is healthy before copying and the
-        # RESULT after — so a corrupt DB can never silently produce a backup
-        # (the incident where every rolling backup copied the corruption).
+        # a backup is a second copy of the database: say so before filling the drive
+        short = room_for(db_path, os.path.getsize(db_path))
+        if short:
+            return jsonify({"success": False, "error": short, "no_space": True}), 507
+        if not backup_lock.acquire(blocking=False):
+            return jsonify({"success": False, "busy": True,
+                            "error": "Another backup or restore is running. Try again when it finishes."}), 409
         try:
-            safe_backup(db_path, backup_path)
-        except DBIntegrityError as integ:
-            logger.error("Backup refused — database integrity check failed: %s", integ)
-            return jsonify({
-                "success": False,
-                "error": "Database failed its integrity check — backup refused to avoid "
-                         "saving a corrupt copy. Your existing backups are untouched. " + str(integ),
-                "integrity_failed": True,
-            }), 409
-        size_mb = round(os.path.getsize(backup_path) / (1024 * 1024), 1)
-        # Write version metadata sidecar
-        meta_path = backup_path + '.meta.json'
-        try:
-            with open(meta_path, 'w') as mf:
-                json.dump({"version": SOULSYNC_VERSION, "created": timestamp}, mf)
-        except Exception as e:
-            logger.debug("backup meta sidecar write: %s", e)
-        # Rolling cleanup — prune_backups never deletes the most-recent
-        # VERIFIED-HEALTHY backup, even to honor max_backups, so a run of bad
-        # backups can't evict your last good snapshot (the incident).
-        existing = [f for f in _glob.glob(f"{db_path}.backup_*")
-                    if not f.endswith('.meta.json')]
-        for removed in prune_backups(existing, max_backups):
-            try:
-                os.remove(removed)
-                if os.path.exists(removed + '.meta.json'):
-                    os.remove(removed + '.meta.json')
-            except Exception as e:
-                logger.debug("rolling backup cleanup failed: %s", e)
-        return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb, "version": SOULSYNC_VERSION})
+            return _backup_music_now(db_path, max_backups, DBIntegrityError, safe_backup, rotate_backups)
+        finally:
+            backup_lock.release()
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _backup_music_now(db_path, max_backups, DBIntegrityError, safe_backup, rotate_backups):
+    """the backup itself, with the lock held"""
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_path = f"{db_path}.backup_{timestamp}"
+    # safe_backup verifies the SOURCE is healthy before copying and the
+    # RESULT after — so a corrupt DB can never silently produce a backup
+    # (the incident where every rolling backup copied the corruption).
+    try:
+        safe_backup(db_path, backup_path)
+    except DBIntegrityError as integ:
+        logger.error("Backup refused — database integrity check failed: %s", integ)
+        return jsonify({
+            "success": False,
+            "error": "Database failed its integrity check — backup refused to avoid "
+                     "saving a corrupt copy. Your existing backups are untouched. " + str(integ),
+            "integrity_failed": True,
+        }), 409
+    size_mb = round(os.path.getsize(backup_path) / (1024 * 1024), 1)
+    # Write version metadata sidecar
+    meta_path = backup_path + '.meta.json'
+    try:
+        with open(meta_path, 'w') as mf:
+            json.dump({"version": SOULSYNC_VERSION, "created": timestamp}, mf)
+    except Exception as e:
+        logger.debug("backup meta sidecar write: %s", e)
+    # Rolling cleanup, counted in backups (not in the files beside them), and
+    # never dropping the most-recent verified-healthy one.
+    rotate_backups(db_path, max_backups)
+    # the player's and the audiobooks' databases ride along (core/backup_companions.py)
+    from core.backup_companions import backup_companions
+    also = backup_companions(timestamp, max_backups)
+    return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb,
+                    "version": SOULSYNC_VERSION, "also": also})
 
 @bp.route('/api/database/backups', methods=['GET'])
 @admin_only
 def list_backups_endpoint():
     """List all database backups with metadata."""
     try:
-        import glob as _glob
+        from core.db_integrity import list_backups
         db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
-        backup_files = sorted(
-            _glob.glob(f"{db_path}.backup_*"),
-            key=os.path.getmtime,
-            reverse=True
-        )
+        backup_files = sorted(list_backups(db_path), key=os.path.getmtime, reverse=True)
         backups = []
         for fp in backup_files:
             fname = os.path.basename(fp)
@@ -1253,17 +1421,69 @@ def delete_backup_endpoint(filename):
         backup_path = os.path.join(os.path.dirname(db_path), filename)
         if not os.path.exists(backup_path):
             return jsonify({"success": False, "error": "Backup not found"}), 404
-        os.remove(backup_path)
-        # Also remove sidecar metadata if present
-        meta_path = backup_path + '.meta.json'
-        if os.path.exists(meta_path):
-            try:
-                os.remove(meta_path)
-            except Exception as e:
-                logger.debug("backup sidecar removal failed: %s", e)
+        from core.db_integrity import remove_backup
+        remove_backup(backup_path)      # the backup and everything beside it
         return jsonify({"success": True, "deleted": filename})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+PRE_RESTORE_KEEP = 3
+
+
+def _restore_schema_problem(db_path, backup_path, dbi):
+    """a sentence when the backup's schema is newer than this database's
+    (a backup made by a newer SoulSync), else None. can't tell is no problem."""
+    theirs, ours = dbi.schema_version(backup_path), dbi.schema_version(db_path)
+    if theirs is None or ours is None or theirs <= ours:
+        return None
+    return (f"That backup is from a newer SoulSync (database version {theirs}; this one runs "
+            f"{ours}). Restoring it here would leave tables this version can't read. "
+            "Update SoulSync first, then restore it. Nothing was changed.")
+
+
+def _prune_pre_restore_copies(db_dir):
+    """keep the newest few "what was there before a restore" copies"""
+    try:
+        names = sorted(n for n in os.listdir(db_dir or ".")
+                       if re.match(r'^music_library\.db\.pre-restore_\d{8}_\d{6}$', n))
+    except OSError:
+        return
+    from core.db_integrity import remove_backup
+    for old in names[:-PRE_RESTORE_KEEP]:
+        remove_backup(os.path.join(db_dir or ".", old))
+
+
+def _forget_database_initialized(db_path):
+    """make the next open of ``db_path`` run schema creation and migrations again"""
+    try:
+        from database import music_database as mdb
+        with getattr(mdb, "_database_initialization_lock", _NO_LOCK):
+            for key in list(mdb._database_initialized_paths):
+                if os.path.abspath(str(key)) == os.path.abspath(db_path):
+                    mdb._database_initialized_paths.discard(key)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("could not re-arm database init after restore: %s", e)
+
+
+class _NoLock:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_a):
+        return False
+
+
+_NO_LOCK = _NoLock()
+
+
+def _reload_config_after_restore():
+    try:
+        from core.settings import config_manager
+        config_manager.load_config()
+        logger.info("settings reloaded from the restored database")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("could not reload settings after restore (restart to pick them up): %s", e)
+
 
 @bp.route('/api/database/backups/<filename>/restore', methods=['POST'])
 @admin_only
@@ -1307,31 +1527,66 @@ def restore_backup_endpoint(filename):
                 }), 409
             version_warning = f"Restored from v{backup_version} backup (current: v{SOULSYNC_VERSION})"
 
-        # Create safety backup of current DB before restoring
-        safety_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        safety_filename = f"music_library.db.backup_{safety_ts}"
-        safety_path = os.path.join(db_dir, safety_filename)
-        src_conn = sqlite3.connect(db_path)
-        dst_conn = sqlite3.connect(safety_path)
-        src_conn.backup(dst_conn)
-        dst_conn.close()
-        src_conn.close()
-        # Write version metadata for the safety backup too
+        from core import db_integrity as dbi
+
+        # 1. the backup itself, before anything is touched. nothing checked it:
+        #    a backup that had gone bad on disk was written straight over the
+        #    live database.
+        if not dbi.is_healthy(backup_path):
+            return jsonify({"success": False, "backup_corrupt": True,
+                            "error": "That backup failed its integrity check, so it was not restored. "
+                                     "Your database is untouched."}), 409
+        # 2. a database from a NEWER SoulSync: this version doesn't know its
+        #    tables, and nothing would migrate it back
+        problem = _restore_schema_problem(db_path, backup_path, dbi)
+        if problem:
+            return jsonify({"success": False, "newer_schema": True, "error": problem}), 409
+        # 3. room for the copy of the current database that is kept first
+        short = dbi.room_for(db_path, os.path.getsize(db_path) if os.path.exists(db_path) else 0)
+        if short:
+            return jsonify({"success": False, "no_space": True,
+                            "error": short + " Nothing was changed."}), 507
+        if not dbi.backup_lock.acquire(blocking=False):
+            return jsonify({"success": False, "busy": True,
+                            "error": "Another backup or restore is running. Try again when it finishes."}), 409
         try:
-            with open(safety_path + '.meta.json', 'w') as mf:
-                json.dump({"version": SOULSYNC_VERSION, "created": safety_ts}, mf)
-        except Exception as e:
-            logger.debug("safety backup metadata write failed: %s", e)
+            # 4. keep what is there now, as a verified copy OUTSIDE the rolling
+            #    backups: it used to be one of them, so the next backup could
+            #    rotate away the only way back. if it can't be made, stop here.
+            safety_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            safety_filename = f"music_library.db.pre-restore_{safety_ts}"
+            safety_path = os.path.join(db_dir, safety_filename)
+            try:
+                dbi.safe_backup(db_path, safety_path, verify_source=False)
+            except Exception as e:  # noqa: BLE001 - no way back, no restore
+                logger.error("restore stopped: the safety copy could not be made: %s", e)
+                return jsonify({"success": False,
+                                "error": "Could not keep a copy of the current database first, so "
+                                         f"nothing was restored. ({e})"}), 500
+            _prune_pre_restore_copies(db_dir)
 
-        # Restore using SQLite backup API (handles concurrent access safely)
-        from database.music_database import close_database, get_database
-        close_database()
+            # Restore using SQLite backup API (handles concurrent access safely)
+            from database.music_database import close_database, get_database
+            close_database()
 
-        src_restore = sqlite3.connect(backup_path)
-        dst_restore = sqlite3.connect(db_path)
-        src_restore.backup(dst_restore)
-        dst_restore.close()
-        src_restore.close()
+            src_restore = sqlite3.connect(backup_path)
+            dst_restore = sqlite3.connect(db_path)
+            try:
+                src_restore.backup(dst_restore)
+            finally:
+                dst_restore.close()
+                src_restore.close()
+            # 5. the restored file is whatever schema the backup had. opening it
+            #    must run the migrations again; they are remembered as done for
+            #    this path, so an older backup ran on unmigrated tables until the
+            #    next restart ("no such table").
+            _forget_database_initialized(db_path)
+        finally:
+            dbi.backup_lock.release()
+        # 6. the settings live in this database. the ones in memory are the old
+        #    database's, and the next settings save would write them over the
+        #    restored ones.
+        _reload_config_after_restore()
 
         # Reinitialize database and verify
         db = get_database()
@@ -1373,6 +1628,160 @@ def restore_backup_endpoint(filename):
         return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+# ── a damaged database: its health, and the repair ─────────────────────────
+
+_health_running = threading.Lock()
+
+
+def _db_path():
+    return os.environ.get('DATABASE_PATH', 'database/music_library.db')
+
+
+def _check_health_in_background():
+    """a full check of a large file takes a while: it runs off the request"""
+    from core import db_repair
+    if not _health_running.acquire(blocking=False):
+        return
+
+    def run():
+        try:
+            db_repair.check(_db_path())
+        except Exception:  # noqa: BLE001
+            logger.exception("database health check failed to run")
+        finally:
+            _health_running.release()
+    threading.Thread(target=run, name="db-health-check", daemon=True).start()
+
+
+@bp.route('/api/database/health', methods=['GET'])
+@admin_only
+def database_health():
+    """{healthy: true|false|null, detail, checked_at, checking}. the answer the
+    last backup or check gave; ?check=1 (or none known yet, or one over six
+    hours old) starts a fresh one in the background"""
+    from core import db_repair
+    health = db_repair.last_health()
+    stale = health["checked_at"] is None or time.time() - health["checked_at"] > 6 * 3600
+    if request.args.get('check') == '1' or stale:
+        _check_health_in_background()
+    return jsonify({"success": True, **health, "checking": _health_running.locked(),
+                    "repair_tool": bool(db_repair.sqlite_cli())})
+
+
+@bp.route('/api/database/repair', methods=['POST'])
+@admin_only
+def repair_database():
+    """repair a damaged database: the damaged files are kept first (raw, in
+    their own folder), a repaired copy is made and checked, and only then
+    swapped in, the way a restore is. when it can't be repaired the answer
+    names the newest healthy backup to restore instead."""
+    from core import db_integrity as dbi
+    from core import db_repair
+    db_path = _db_path()
+    db_dir = os.path.dirname(db_path)
+    health = db_repair.check(db_path)
+    if health["healthy"]:
+        return jsonify({"success": True, "healthy": True,
+                        "message": "Your database passed its check. There is nothing to repair."})
+    if not dbi.backup_lock.acquire(blocking=False):
+        return jsonify({"success": False, "busy": True,
+                        "error": "A backup or restore is running. Try again when it finishes."}), 409
+    try:
+        try:
+            kept = db_repair.keep_damaged(db_path)
+        except OSError as e:
+            return jsonify({"success": False,
+                            "error": f"Couldn't keep a copy of the damaged files first, so nothing was "
+                                     f"changed. {e}"}), 507
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        repaired = os.path.join(db_dir, f"music_library.db.repaired_{stamp}")
+        result = db_repair.rebuild(db_path, repaired)
+        if not result["ok"]:
+            backup = db_repair.newest_healthy_backup(db_path)
+            logger.warning("database repair failed: %s", result["detail"])
+            return jsonify({"success": False, "repaired": False, "kept": os.path.basename(kept),
+                            "error": result["detail"], "missing_tables": result["missing_tables"],
+                            "backup": backup}), 422
+        # swapped in the way a restore is: every connection closed, the file
+        # replaced, the old -wal and -shm (part of the damage) gone, the
+        # migrations and settings read again
+        from database.music_database import close_database, get_database
+        close_database()
+        os.replace(repaired, db_path)
+        for side in ('-wal', '-shm'):
+            try:
+                os.remove(db_path + side)
+            except OSError:
+                pass
+        _forget_database_initialized(db_path)
+    finally:
+        dbi.backup_lock.release()
+    _reload_config_after_restore()
+    get_database()
+    after = db_repair.check(db_path)
+    logger.info("database repaired (%s); damaged files kept in %s", result["method"], kept)
+    return jsonify({"success": True, "repaired": True, "method": result["method"],
+                    "message": result["detail"], "kept": os.path.basename(kept),
+                    "healthy": after["healthy"]})
+
+
+@bp.route('/api/database/companions', methods=['GET'])
+@admin_only
+def list_companion_backups_endpoint():
+    """The databases that ride along with a music backup (player, audiobooks),
+    each with its backups, and whether the encryption key file is there."""
+    try:
+        from core.backup_companions import companions_overview, key_file_path
+        return jsonify({"success": True, "companions": companions_overview(),
+                        "key_file": os.path.isfile(key_file_path())})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/database/companions/<name>/restore', methods=['POST'])
+@admin_only
+def restore_companion_endpoint(name):
+    """Restore the player or audiobook database from one of its backups."""
+    from core.backup_companions import CompanionRestoreError, restore_companion
+    body = request.get_json(silent=True) or {}
+    try:
+        result = restore_companion(name, body.get('filename'))
+    except CompanionRestoreError as e:
+        return jsonify({"success": False, "error": str(e)}), e.status
+    except Exception as e:
+        logger.exception("companion restore failed")
+        return jsonify({"success": False, "error": str(e)}), 500
+    _forget_player_caches()
+    return jsonify({"success": True, **result})
+
+
+def _forget_player_caches():
+    """what is held in memory about the player database is the old one's"""
+    try:
+        from core.player import libraries as _pl, settings as _ps
+        with _pl._lock:
+            _pl._hidden_cache.clear()
+        with _ps._lock:
+            _ps._cache.clear()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("player caches not cleared after restore: %s", e)
+
+
+@bp.route('/api/database/encryption-key/download', methods=['GET'])
+@admin_only
+def download_encryption_key_endpoint():
+    """The key every saved credential is encrypted with. A backup restored on
+    another machine needs it, or the logins and api keys saved in Settings are
+    unreadable there."""
+    from core.backup_companions import key_file_path
+    path = key_file_path()
+    if not os.path.isfile(path):
+        return jsonify({"success": False, "error": "There is no key file yet."}), 404
+    response = send_file(os.path.abspath(path), as_attachment=True, download_name="soulsync.encryption_key")
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
 
 @bp.route('/api/database/backups/<filename>/download', methods=['GET'])
 @admin_only

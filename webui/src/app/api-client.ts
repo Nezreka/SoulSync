@@ -67,3 +67,25 @@ function getHttpErrorMessage(data: unknown, fallback: string): string {
 
   return fallback;
 }
+
+/** the words a refused request carries (ky reads the body into error.data
+ * before our code sees it, so the response can't be read a second time) */
+export async function refusalText(e: unknown, fallback: string): Promise<string> {
+  if (e instanceof HTTPError) {
+    let data: unknown = e.data;
+    if (data === undefined) {
+      try {
+        data = await e.response.clone().json();
+      } catch {
+        data = undefined;
+      }
+    }
+    if (data && typeof data === 'object') {
+      const payload = data as JsonErrorPayload;
+      const words = nonEmptyString(payload.message) ?? nonEmptyString(payload.error);
+      if (words) return words;
+    }
+    return nonEmptyString(data) ?? fallback;
+  }
+  return fallback;
+}

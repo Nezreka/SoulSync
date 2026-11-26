@@ -417,14 +417,19 @@ def _make_organizer(db):
         except Exception:   # noqa: BLE001 - a probe crash must not block the import
             probe_info = None
         dl = _with_episode_title(db, dl)
-        owned_dir = _owned_library_dir(db, dl, settings)
-        ids = template_ids(db, dl, settings)
+        # an anime show's episode is named (and its show folder found) by the
+        # anime episode template when one is set
+        series_type = naming_series_type(db, dl, settings)
+        named = organization.for_series_type(settings, series_type)
+        owned_dir = _owned_library_dir(db, dl, named)
+        ids = template_ids(db, dl, named)
         plan = plan_import(dl, src, list_dir=fs.list_dir, probe=probe_info,
-                           settings=settings, library_dir=owned_dir,
+                           settings=named, library_dir=owned_dir,
                            expected_duration_sec=_expected_duration_sec(db, dl),
                            ids=ids,
-                           series_name=_series_name(db, dl, settings, ids, owned_dir),
-                           locked=title_locked(db, dl))
+                           series_name=_series_name(db, dl, named, ids, owned_dir),
+                           locked=title_locked(db, dl),
+                           absolute_of=absolute_lookup(db, ids, named, dl))
         if _pre_persist_dest and plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
                 db.update_video_download(dl["id"], dest_path=plan["dest"]["path"])
@@ -516,6 +521,7 @@ def _record_pack_episode(db, ep_dl, patch):
                                  progress=100.0, completed_at=_now(),
                                  quality_label=patch.get("quality_label") or ep_dl.get("quality_label"))
         row = {**ep_dl, "id": child}
+        _own_landed(db, row, patch)
         _archive_history(db, row, patch)
         _publish_terminal(row, patch, _owners(db, row))
         return child
@@ -711,6 +717,55 @@ def template_ids(db, dl, settings, *, tmdb_lookup=None):
     except Exception:   # noqa: BLE001 - an id is a naming nicety, never a blocker
         logger.debug("template id resolution failed", exc_info=True)
     return out
+
+
+def naming_series_type(db, dl, settings):
+    """the routing series type of the show a download belongs to, when it
+    decides the name: only while an anime episode template is set, so a
+    library without one asks nothing. None for a movie or an unknown show."""
+    if not str((settings or {}).get("anime_episode_template") or "").strip():
+        return None
+    dl = dl or {}
+    if str(dl.get("kind") or "").lower() in ("movie", "youtube"):
+        return None
+    try:
+        tmdb_id, _imdb = _media_ids(db, dl)
+        if tmdb_id is not None:
+            return db.routing_series_type(tmdb_id=tmdb_id)
+        if str(dl.get("media_source") or "").lower() == "library" and dl.get("media_id"):
+            return db.routing_series_type(library_id=dl.get("media_id"))
+    except Exception:   # noqa: BLE001 - a name is never a reason to fail an import
+        logger.debug("naming series type failed", exc_info=True)
+    return None
+
+
+def absolute_lookup(db, ids, settings, dl=None):
+    """``absolute_of`` for plan_import: an episode's absolute number from the
+    show's episode list, by the show's TMDB id in ``ids`` (template_ids).
+    None when the episode template has no $absolute, or there's no id to
+    look it up by, so a library that doesn't name by it asks nothing.
+
+    it counts on the show row the file is named by (a library re-grab's own
+    row, else episode_naming_show_id), the row mass rename and the naming
+    check count on, so a show on two servers gets one number either way."""
+    tmpl = str((settings or {}).get("episode_template") or "")
+    tmdb_id = (ids or {}).get("tmdb_id")
+    if not tmdb_id or ("$absolute" not in tmpl and "${absolute}" not in tmpl):
+        return None
+    dl = dl or {}
+    own_row = None
+    if str(dl.get("media_source") or "").lower() == "library" \
+            and str(dl.get("kind") or "").lower() != "movie":
+        try:
+            own_row = int(dl.get("media_id"))
+        except (TypeError, ValueError):
+            own_row = None
+
+    def look(season, episode):
+        row = own_row if own_row is not None else \
+            db.episode_naming_show_id(tmdb_id, season, episode)
+        return db.episode_absolute_number(tmdb_id, season, episode, show_id=row)
+    return look
 
 
 def write_sidecars(db, dl, dest_path, settings, fs):
@@ -1325,6 +1380,14 @@ def _search_again_now(db, dl, *, wait: bool = False) -> bool:
             handled = True
             break
     return handled if wait else True
+
+
+def _own_landed(db, dl, upd) -> None:
+    """the placed file is in the library now, not at the server's next scan
+    (core/video/library_ingest.py). best effort."""
+    if upd.get("dest_path"):
+        from core.video.library_ingest import ingest_landed
+        ingest_landed(db, dl, upd["dest_path"], replaced=upd.get("_replaced"))
 
 
 def _archive_history(db, dl, upd) -> None:
@@ -2094,6 +2157,7 @@ def settle_outcome(db, dl, upd) -> None:
     # whose it is, read before the wishlist lets go of it
     owners = _owners(db, dl) if upd.get("status") in _TERMINAL else []
     if upd.get("status") == "completed":
+        _own_landed(db, dl, upd)
         _wishlist_obtained(db, dl, upd)
     # Snapshot terminal outcomes into the permanent history (survives the
     # queue cleanup; powers the History modal + smart post-download scan).

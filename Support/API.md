@@ -218,6 +218,16 @@ How much of the media server's music SoulSync can read directly, folder by folde
 
 An override renames a folder: "the server's `/data/music` is `/music` here". It never gives SoulSync access to a drive. Every server path SoulSync turns into its own asks the overrides first (the longest matching server folder wins, Windows paths compare without case), then the mounts it learned itself, then the trailing-folder match against its library folders. An override whose folder is missing is skipped, so it never hides a file.
 
+### AcoustID account linking (web UI routes, admins only)
+
+From 1 January 2027 an AcoustID lookup needs the person's own AcoustID key with SoulSync's application key (error 21 without it). These link that key. No answer ever carries a key.
+
+- `GET /api/acoustid/account`: `{has_user_key, source: ""|"linked"|"pasted", state: ""|"pending"|"approved"|"declined"|"expired"|"revoked"|"unknown", code, url, expires, has_app_key, builtin_app_key, can_link, link_unavailable_message, required_from, required_now, needs_link, message}`. `?check=1` first asks AcoustID about a pending link; a declined, expired, revoked or unknown key is discarded.
+- `POST /api/acoustid/link` `{return_url?}`: asks AcoustID for a link (`/v2/user/request_link`), stores the user key at once and answers as above with `state: "pending"`, the `code` and the `url` to open. `return_url` (http or https) is where AcoustID sends the person after they approve or decline. Linking needs SoulSync's own application key (built in, or the `ACOUSTID_APP_KEY` env var), as a link only works with the key that asked for it; without one it answers `409` with "Linking with one click arrives in a coming update; paste your key from acoustid.org for now." and `can_link` is false.
+- `POST /api/acoustid/unlink`: forgets the user key.
+
+Settings: `acoustid.user_key` (a secret, redacted like the others), `acoustid.api_key` (an application key the install registered itself; SoulSync's own is used when it has one, or the `ACOUSTID_APP_KEY` env var). Every lookup sends the user key in the `Acoustid-User-Key` header.
+
 ### Paired devices: listen anywhere (web UI and app routes)
 
 Settings > Devices pairs music apps with this server. A device gets its own token, never an API key. The admin routes are `@admin_only`; the device's own routes take the token in `X-Device-Token: sdt_...` (or `Authorization: Bearer sdt_...`) and no cookie. A request may carry a device token or an API key, not both (`400 device_one_credential`).
@@ -248,6 +258,8 @@ The device itself:
 - `GET /api/devices/me`: `{device, server}`: its name, `state`, profile and how long it has left to pick.
 - `GET /api/devices/me/profiles`: `{profiles: [{id, name, avatar_color, avatar_url, needs}]}`, the profiles it may pick. `needs` is `password` in login mode, `pin` for a profile with a PIN, else null. A music app only sees profiles with **Use music apps** (`music.apps`). `409` once it has picked.
 - `POST /api/devices/me/profile` `{profile_id, pin?, password?}`: the pick, once. The same checks as `POST /api/profiles/select` (wrong tries throttled the same way); a profile with a PIN always asks for it here. `404` for a profile that isn't on its list, `409` once picked or past its 15 minutes.
+
+Import Plex users (#2319) is Settings > People > Import from Plex, admin only. `GET /api/profiles/plex-import` lists everyone the Plex server is shared with (friends and home users who can see this server): `{users: [{id, username, title, name, email, thumb, home, managed, profile, match}], signin_enabled, signup_template_id}`. `match` is `linked` for the profile already linked to that Plex account, `home` or `name` for one that only looks like them, else null. `POST /api/profiles/plex-import` takes `{users: [{id, profile_id?}], template_id?}`: each `id` gets a new profile linked to the Plex account on that template (the sign-up template when left out), or with `profile_id` that profile gets the link (never an admin, never one linked to another Plex account). Users are read from Plex again, so nothing but the ids is taken from the request. It answers `{results: [{plex_id, name, status, profile_id, message}]}`, `status` one of `created`, `linked`, `exists`, `skipped`, `failed`; importing again answers `exists`. `503` when Plex can't be reached, `404` for a missing template. Sign in with Plex then lands on that profile, and the Seerr API lists profiles linked to Plex with `userType` 1 and their `plexUsername`.
 
 Person invites are the same as Settings > People > Invites: `GET/POST /api/profiles/invites` (admin, or an admin API key). `POST` takes `{preset: {template_id}, note?, expires_hours?}`; a new one lasts a week (168 hours, 1 to 720) unless `expires_hours` says otherwise, works once, and whoever opens it makes their own profile following that template.
 
@@ -406,6 +418,8 @@ These routes use the signed-in session (the player's own), not an API key. Each 
 - `billboard`: the big rotating banner of what's new at the top.
 - `rows`: drawn top to bottom. Skip a row that's `on: false`, one your app doesn't know, or one with nothing to show.
 - `id`: a row from the catalog, or `genre:<movie|show>:<genre name>` for a genre row someone added.
+- Library rows: `lib-recent:<library id>` ("Recently added in Movies 4K", posters, newest first, that library's titles only) and `lib-continue:<library id>` ("Continue in Movies 4K", what the profile started whose title is in that library) for each movie and TV library the profile can see, and `home-memories` ("On this day", the profile's home videos filmed on this day in earlier years, from `GET /api/player/home/memories`; skip it when there are none). A library's rows come at the end, off; "On this day" comes in on, after continue, once there is a home library. A row for a library that's gone or hidden from the profile is dropped. Titles use the library's name as it is now.
+- One card per title: the rows built from every title (recently added, top 10, because you have, top rated, rediscover, genre rows) show a title once when it is in two libraries (same tmdb id, else same title and year). The card opens the copy in the main library and wears a small 4K chip when another copy is in a 4K library (`uhd` on the library). Library rows and library pages show their own copy.
 - `style`: one of the four below. A row only takes the styles the catalog lists for it.
 
 | Style | Draw it as |
@@ -424,6 +438,33 @@ Every row on home is from the profile's own library.
 - `DELETE /api/player/home-layout?device=<id>`: this screen goes back to the shared layout. Without `device`, every screen of the profile goes back to the default.
 
 `device` is an id your app makes once and keeps: 8 to 64 letters, numbers, `-` or `_`.
+
+The Movies, TV, Music and YouTube pages have the same contract, one layout per page:
+
+- `GET /api/player/page-layout/<page>?device=<id>`: `{layout, scope, inherited, catalog}`. `<page>` is `movies`, `tv`, `music` or `youtube`, or one library's page `movies:lib:<id>` / `tv:lib:<id>`. `layout.rows` is `[{id, style, on}]` in order. `catalog.rows` lists every row the page can show with its `label`, `hint`, the `styles` it takes and whether it is `on` by default; the rows that are off by default are the extra ones a person can switch on. `catalog.genre_row` is the pattern for a genre row (`genre:movie:<name>`, `genre:show:<name>`), or `null` where the page has none. A library's page with no layout of its own follows its page's (`inherited: true`).
+- `PUT /api/player/page-layout/<page>` with `{layout, device}` and `DELETE /api/player/page-layout/<page>?device=<id>`: as for home. A row that isn't the page's, or a style that isn't one, is `400`.
+- Draw the rows that are on, in order, in their style. Skip a row you don't know or have nothing to show for.
+- `GET /api/player/music/listening`: the Music page's listening rows, `{recent, heavy_rotation, top_albums, top_tracks, all_time_artists}`. Plays that matched a library track, as that library's albums (`album_id`), artists (`artist_id`) and tracks (`track_id`), each with `image_url`. Only what the profile may see.
+
+Libraries:
+
+- `GET /api/player/libraries`: the video libraries this profile can see, `[{id, kind, name, own_page, main, in_guide}]`. `kind` is `movie`, `show` or `home` (home videos). A library with `own_page` gets its own entry and page in the player; the rest are part of Movies / TV. Every home library has its own page. `in_guide` says whether the guide schedules its titles (home libraries start off). A library an admin hid from the profile is never sent, and its titles are refused everywhere the video API answers.
+- `GET /api/player/video-catalog` also carries `libraries`, and every movie and show row ends with `library_id` (read it by name from `fields`). A title in no library folder is in its kind's main library.
+- `GET /api/player/admin/libraries` (admin): `{libraries: [{id, kind, name, main, own_page, titles, hidden_from}], profiles}`.
+- `PUT /api/player/admin/libraries/<id>` (admin) with `{own_page?: bool, hidden_from?: [profile id]}`. The main library can't have a second page, and an admin profile is dropped from `hidden_from` (admins see every library).
+
+Home videos (clips from a camera or a phone, never looked up on TMDB; `scrap/HOME_VIDEOS_CONTRACT.md`). Every route takes the player session or a paired device's token, and answers only for home libraries the profile can see (a hidden one is `404`, like a clip that isn't there):
+
+- `GET /api/player/home/overview?library=<id>`: `{library: {id, name, in_guide}, counts: {videos, first_year, last_year}, on_this_day: [Video], albums: [{key, name, path, count, first, last, covers: [video id]}], months: [{month: "2026-11", count}], sources, can_edit, scanning}`. No `library` is the first home library.
+- `GET /api/player/home/memories?date=YYYY-MM-DD`: `{videos: [Video + library]}`, the clips filmed on this month and day in earlier years across every home library the profile can see, newest first, each with the home library it is in. `date` is the viewer's day (the server's when left out). No home library, or nothing that day: an empty list.
+- `GET /api/player/home/videos?library=<id>&month=YYYY-MM | album=<key> | q=<text>&offset=&limit=`: `{videos: [Video], total}`. The timeline is newest first, an album oldest first; `limit` is at most 200. A missing clip stays in its album (`missing: true`) and leaves the timeline.
+- `GET /api/player/home/video/<id>`: a Video plus `{frames: [{at_s, url}], file_name, auto_title, auto_filmed_at, filmed_source, notes, thumb_at_s, edited, library, can_edit}`.
+- `PUT /api/player/home/video/<id>` with any of `{title, filmed_at, thumb_at_s, notes}`; `null` puts a field back to automatic. Admins, or everyone who can see the clip when player setup's `home_editors` is `everyone`. Edits survive every rescan.
+- `GET /api/player/home/thumb/<id>`: the clip's picture (jpeg). `GET /api/player/home/frame/<id>?at=<seconds>`: a frame to pick from.
+- Admin: `GET /api/player/home/sources` (`{server, libraries: [{title, count, on, root, videos}], folders: [{path, root, videos}], scan}`), `PUT /api/player/home/sources` with `{home_more?: [library name], folders?: [path]}` (saved, then what's new is read at once), `GET` / `POST /api/player/home/scan` (`{root?}`), `POST /api/player/home/folder-check` with `{path}`.
+- A Video is `{id, title, filmed_at, duration_s, width, height, album, album_key, thumb_url, progress: {position_s, watched}, missing}`. It plays through the playback routes as item type `home`, and downloads as `home` or a whole album as `home_album`.
+
+The sidebar's order is two of the profile's player settings (`GET` / `PUT /api/player/settings`): `sidebar_order` and `sidebar_hidden`, each a list of places, a page (`/player/movies`) or a library with its own page (`lib:<id>`). Places stay in their section; one the order doesn't name keeps its usual spot after the ones it does. Home can't be hidden.
 
 ### Playback
 
@@ -447,6 +488,17 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 - `playable` for a movie, episode or YouTube video adds, when it's converted, `transcode: {video, audio, reasons, quality, tonemap, encoder}` (`video` and `audio` are `copy` or what they become; `reasons` reads like "AC3 audio to AAC"), and `url` points at the converted stream. A file that may play (`verdict: maybe`) keeps its direct `url` and adds `fallback_url`, the converted stream to switch to if the browser can't play it. `?q=1080p|720p|480p` asks for a smaller picture, converted. `transcode_unavailable` says why a file that needs converting can't be (no ffmpeg).
 - `GET /api/player/transcode/<item_type>/<item_id>?q=&part=&t=`: the converted stream, fragmented MP4, from `t` seconds. It can't seek by `Range`: to seek, start a new one at the new `t`. A few run at once; past that it answers `503 busy`.
 - `GET /api/player/transcode/<item_type>/<item_id>/start?t=`: where a stream asked to start at `t` really starts, `{start, seek}`. Copied video can only start at a keyframe, so request `t=seek` and count the stream's time from `start`.
+
+#### Downloads
+
+Phones, tablets and the web player keep downloads; the TV app sends things to another of the profile's devices. Every route is under `/api/player/offline/`, takes the session or a paired device's token, and only ever sees the caller's own devices. A profile the admin switched downloads off for gets `403 downloads_disabled` for anything new (admins always may). The routes:
+
+- `GET plan?type=&id=&device=`: a movie, episode, `season` (`<show_id>:<n>`), show, youtube video, track, album, artist, playlist (`user:<id>`, `mirror:<id>`, `discover:<key>`), audiobook or podcast (`count` newest, 5 by default) as `{kind, title, subtitle, artwork, items, qualities}`. Each quality has a `total_bytes` and `per_item_bytes`; original is the real size, the others an estimate. Never above the source.
+- `POST prepare` with `{item_type, item_id, quality}`: `{id, status, progress, url, size_bytes, error, filename}`. The original is `ready` at once; a smaller copy is made by the server once per file and quality (`queued`, `converting`, `ready`), kept in the player cache. `GET prepare/<id>` polls it. `GET file/<id>` is the file with `Range`, `ETag` and a clean name.
+- `POST devices/report` with the device's whole list; `GET devices` lists the profile's devices with their items, smart rules and pending adds/removes.
+- `POST wishes` with `{device_id, action: add|remove, type, id, quality}` and `POST rules` with `{device_id, type: show|playlist|podcast, id, quality, keep_next, delete_watched, follow}` (`DELETE rules/<rule_id>`). `GET devices/<device_id>/wanted` is what that device should add and remove now.
+- `POST sync` with `{device_id, events}`: positions, watched marks and plays made offline. A position only lands when it's newer than the server's; a play counts once.
+- `GET settings` (anyone) and `PUT settings` (admin): `allow_conversion_for_members`, `max_conversions`, `cache_gb`.
 
 #### Playlists (music)
 
@@ -472,6 +524,17 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 
 - `GET /api/player/settings`: this profile's player settings and what each does: `share_activity` (others see what you play on Watching now; default on), `autoplay_next` (the next episode plays on its own), `still_watching_after` (episodes in a row nobody touched before asking; 0 never asks). Kept in player.db, the same on every screen of the profile.
 - `PUT /api/player/settings` with `{key: value}`: all saved or none (an unknown key or a bad value is a 400). Turning `share_activity` off takes the profile off Watching now at once.
+
+#### Notifications
+
+What's new for this profile (new episodes of shows it watches, well-rated films, watchlist titles that arrived, requests, season premieres, invites, admin messages, new albums, memories). Made by the **Player Notifications** automation from what changed since its last run, and by event hooks (a request answered, a party scheduled, a Server Activity message). Hidden libraries and rating limits apply. A device token with playback scope may call all of these.
+
+- `GET /api/player/notifications?since=<id>&limit=50`: `{notifications: [{id, kind, title, body, image, link, created_at, read, group_key}], unread, latest_id}`, newest first. `since` returns only ids above it: a device keeps `latest_id` and asks from there. `link` is a `/player/...` path; `group_key` is stable for one subject (a later "3 new episodes of X" replaces "New episode of X" under a new id, so a phone can replace its notification by that tag). `limit` up to 200.
+- `POST /api/player/notifications/read` with `{ids: [..]}` or `{all: true}`: marks them read; `{marked}`.
+- `DELETE /api/player/notifications/<id>`: dismisses one of yours (404 for anyone else's).
+- `GET /api/player/notifications/prefs`: `{prefs, kinds}`. `prefs` is `{kinds: {<kind>: bool}, featured_not_in_library, memories_time, quiet_hours, quiet_start, quiet_end, digest, digest_time, timezone}` (times are `HH:MM` on the profile's clock; `timezone` an IANA name, empty for the server's). `kinds` is `[{id, label, help, default, locked?, device?}]`: `admin_message` is `locked` (always on), `download_ready` has `device: "phone"` (each phone can also turn it off for itself).
+- `PUT /api/player/notifications/prefs` with any of those keys: `kinds` merges (`{kinds: {new_music: true}}` leaves the rest). An unknown key, a bad time, an unknown zone or turning off `admin_message` is a 400 and nothing is saved. Quiet hours hold a notification until they end; the digest holds them for one `digest` notification a day. A held one gets its id when it goes out, so `since` never skips it.
+- `POST /api/player/notifications/test`: a test notification to the caller right away (quiet hours and the digest don't hold it). Once every 5 seconds; 429 sooner.
 
 #### Watching now
 
@@ -501,6 +564,7 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 
 #### Watched
 
+- `GET /api/player/guide/premieres`: what is new and when it airs on the Live Guide, `{now, premieres: [{key, kind, id, show_id, title, subtitle, seconds, at, homes, has_poster}]}`. `kind` is `episode` or `movie`; `at` is the slot in epoch milliseconds; `homes` lists the channel ids it could air on, best first (`network-hbo`, `genre-drama`, ..., `type-tv`). A device airs it on the first of those it has, cutting whatever was on, so every device shows the same thing. The server gives each slot once and never moves it: 8pm for an episode and 9pm for a film on the day it arrived when that is at least half an hour away, else the next top of the hour that is (up to 11pm), else the next evening. A show's new episodes air three a night in order; an evening takes at most 12 shows and 6 films. A profile only gets the kinds and ratings it may see.
 - `POST /api/player/watched` with `{item_type, item_id}`: a movie or episode is into its credits (92% of the way): it counts as watched, in SoulSync's video library and on the media server account, for the profile whose watch state it is (the same rules as the detail page's watched toggle). Returns `{watched}`: false for anything else, or a profile that keeps no watch state of its own. `POST /api/player/progress/finish` does the same for a movie or episode played to the end.
 
 #### Audio and subtitle tracks
@@ -1122,6 +1186,34 @@ GET /api/v1/library/lookup?type=track&provider=musicbrainz&id=b3e2b7e0-a147-4b3c
 ```
 
 Returns `404 NOT_FOUND` if no matching entity exists in the library.
+
+---
+
+### Library — Batch Artist Check
+
+#### `POST /api/v1/library/check`
+
+A page of artist names in one call: is each one in the library, its library id, and whether this profile watches it. Built for badge overlays (the SoulSync Companion browser extension) that would otherwise search once per artist. Exact matching only: the name as written, then the same name with case, accents and punctuation folded (`ACDC` finds `AC/DC`, `Bjork` finds `Björk`). A name that only appears inside a longer one never matches. Nothing is fetched from a metadata provider.
+
+**Body:**
+```json
+{"artists": ["Low", {"name": "Radiohead", "provider_id": "4Z8W4fKeB5YxbusRsdQVPb", "albums": true}]}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `artists` | array | Up to 200 names, each a string or `{name, provider_id?, albums?}`. Duplicates are answered once. |
+| `provider_id` | string | A provider artist id the page knows; a watch stored under it counts. |
+| `albums` | boolean | Also return the artist's albums (`[{id, title}]`). |
+
+**Response** (`data.artists`, in the order asked):
+```json
+{"name": "Low", "in_library": true, "artist_id": "1", "library_name": "Low",
+ "watching": true, "watch_id": "spotify-id-the-watch-was-stored-under",
+ "albums": [{"id": "100", "title": "Things We Lost in the Fire"}]}
+```
+
+`in_library` follows the Library page: an artist with something of their own on disk, a watch, or a wanted release. `watching` matches the watchlist by the provider id given, the provider ids the library artist carries, or the watched name; `watch_id` is the id to pass to `POST /api/watchlist/remove`. `400 BAD_REQUEST` when `artists` is missing or empty.
 
 ---
 
@@ -2715,6 +2807,10 @@ What you own of one library movie or show (`kind=movie|show`, `id` is the librar
 
 Fix match. Body: `{"tmdb_id": 841}`. Re-points the library title to that TMDB entry, fills the imdb / tvdb ids TMDB gives for it, takes TMDB's title and year when your server named it differently, and locks the ids so a scan can't switch it back. Returns the new `tmdb_id`, `title` and `year`. `409` (with nothing changed) when TMDB doesn't answer for that id.
 
+#### `POST /api/v1/video/check`
+
+Badge status for a page of titles by TMDB id, in one call. Body: `{"items": [{"kind": "movie", "tmdb_id": 603}, {"kind": "show", "tmdb_id": 95396, "season": 1, "episode": 2}]}` (up to 300). Answers `data.items` in the order asked, each `{kind, tmdb_id, in_library, on_wishlist, following}`; `following` is the show watchlist as the Watchlist page shows it (your follows plus airing library shows you haven't muted), `null` for a movie. An item with `season` and `episode` adds `episode_in_library` and `episode_on_wishlist`. A kids profile gets `null` for titles above its rating cap. No TMDB calls. `400 BAD_REQUEST` when no item is usable.
+
 #### `GET /api/v1/video/search?q=`
 
 TMDB multi-search over movies, shows and people.
@@ -2780,6 +2876,7 @@ Video downloads, active rows first then newest (the latest 100). `status` filter
 - `POST /api/video/downloads/cancel`: an admin any download, a member only one they started (`403` otherwise). An automatic grab has no owner, so it's the admin's.
 - `POST /downloads/clear`, `/downloads/remove`, `/downloads/recycle/restore`, `/downloads/recycle/purge`, `/downloads/history/clear`, `DELETE /downloads/history/{id}`, `POST /scan/request`, `/scan/stop`, `/scan/server`, and writes to `/discover/languages` and `/discover/providers-pref`: admin only.
 - `POST /youtube/follow`, `/youtube/playlist/follow`, `/youtube/subscriptions/import` and `/youtube/channel/{id}/settings`: need download rights.
+- `GET /youtube/library/{channel_id}`: a channel's downloaded files (size, folder, quality), totals, retention, and what needs attention. `POST /youtube/library/{channel_id}/delete` `{video_ids: [...] | all: true, forget?: bool}` deletes through the recycle bin (kept known, or forgotten so it downloads again) and returns undo items; `POST .../undo` `{undo: [...]}` puts them back; `POST .../clean` applies the channel's retention now. All admin only.
 - A kids profile's rating cap holds on requests, wishlist and watchlist adds, manual search and grab, and the title reads (acquisition, history, title status, posters).
 - The video request limit counts every ask made in its window, so withdrawing or clearing one doesn't hand it back.
 
@@ -2824,6 +2921,11 @@ Named movie and TV libraries, each with its own folder (#2029). The main and 4K 
 
 **Keeping a title current** (any profile that can see the title; `force` is admin only):
 
+- `GET /api/video/libraries`: the server's `movies`, `tv` and `home` libraries (`[{title}]`; `home` are plex "other videos" / jellyfin "home videos" libraries, with `count`) and `selected`: `{movies, movies_more, tv, tv_more, anime, home_more}`. `movies` / `tv` are the main picks; `movies_more` / `tv_more` the other libraries every scan reads too; `anime` the TV libraries whose shows are anime; `home_more` the home video libraries read into the player's Home videos (never matched). `POST /api/video/libraries` saves the same shape; a list left out keeps what was saved.
+- `GET /api/video/server`: `{server, plex, jellyfin}`. `server` is `plex`, `jellyfin`, `soulsync` (Standalone: SoulSync scans its own Movies and TV folders, no media server) or null. With no server configured, folders set and no server-built library in the database it is `soulsync` on its own. `POST /api/video/server` body `{server: plex|jellyfin|soulsync}` saves the pick.
+- Rows SoulSync makes itself (a download that just landed, a Standalone scan) have a `server_id` starting `ss:`, made from the file's place on disk. A media server scan that reports the same title (by TMDB, TVDB or IMDb id) takes the row over, keeping its id. `POST .../sync` on such a row the server doesn't list yet answers `waiting: true` and removes nothing while its file is on disk. A title a Standalone scan couldn't identify for sure has `tmdb_match_status` `review`: it is never auto-matched. A library file carries `edition` (`"Director's Cut"`, read off the file name) when it states one. A `poster_url` starting `local:` is a poster file in the title's own folder; `/api/video/poster/...` serves it only when it is an image inside a video library folder.
+- `GET /api/video/server/links`: Plex and Jellyfin as one library. `{enabled, server, other, movies, movies_total, shows, shows_total, last}`: `other` is the connected server that isn't the video server (null with one server), the counts are how much of the library that server has too, `last` is the last pass (`state` `idle|running|done|error`, with `movies`, `shows`, `episodes`, `unmatched` titles, `unmatched_count` and `watched: {to_library, to_other, failed}` when done). `POST /api/video/server/links` body `{enabled?, run?}` switches it and/or reads the other server now in the background (`started`). With linking on, `POST /api/video/server` answers `moved: {movies, shows, episodes, skipped}`: the linked titles that kept their rows under the new server.
+- `GET /api/video/detail/<movie|show>/<id>/library` carries `extras`: the trailers, featurettes and other extras in the title's own folder, `[{key, kind, name, filename, size_bytes}]` (`kind` is `Trailer`, `Featurette`, `Behind the Scenes`, `Deleted Scene`, `Interview`, `Scene`, `Short` or `Other`). `GET /api/video/detail/<movie|show>/<id>/extras/<key>` streams one (Range requests answered, so it seeks). Only a key that listing gave is served; a kids profile over the title's rating cap is refused.
 - `POST /api/video/detail/<movie|show>/<id>/freshen` body `{force?}`: asks the sources whose answer has gone stale and returns `{changed, asked: [source...], notes: {source: reason}, gone, moved_to, sources: {server|metadata|ratings: {age_seconds, ttl_seconds, stale}}}`. `server` re-reads that one title from the media server (files, watch state), `metadata` asks the provider for what changes after a match, `ratings` asks for the scores. `changed` is true only when something the page shows moved. `gone` means the media server no longer has the title; nothing is removed (`POST .../sync` does that). `moved_to` is the title's new row when the server re-keyed it. A second call while one is running answers `running: true` and asks nothing.
 - `GET` on the same path: `{sources}` only.
 - Clocks: the server every 10 minutes; metadata daily and ratings every 3 days for a show that has not ended or a movie within 90 days of its release, otherwise 14 and 30 days. A source that could not answer waits out its clock, unless a library scan or a spent ratings quota was in the way.
@@ -3222,3 +3324,15 @@ curl -H "Authorization: Bearer sk_..." \
 | POST | `/api-keys` | Generate new key |
 | DELETE | `/api-keys/<id>` | Revoke key |
 | POST | `/api-keys/bootstrap` | Bootstrap first key (no key, admin only) |
+
+### Public playlist search
+
+`GET /api/playlists/public-search?q=<name>&source=deezer|spotify&limit=15`
+
+Public playlists by name, from the services that can be searched without anyone's account. `source` narrows it to one. Each result has `id`, `title`, `creator`, `track_count`, `image_url`, `source` and `link`; adding one is the same as pasting its `link` into Add Playlist. A service that fails or is not set up is left out. Needs the playlist sync permission.
+
+`GET /api/playlists/public-preview?source=deezer|spotify&id=<id>` returns the first 50 songs of one of those playlists as `{songs: [{title, artist}], total}`, so you can look before adding it.
+
+### Video chapters
+
+`GET /api/player/tracks/<type>/<id>` also returns `chapters`: the file's own chapter marks as `[{start, end, title}]` in seconds (empty when the file has fewer than two). The web player lists them in its chapter menu and offers Skip intro, Skip recap or Skip credits while a chapter with that name plays.

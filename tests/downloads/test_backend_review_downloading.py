@@ -549,3 +549,95 @@ def test_l1_staging_cleanup_runs_outside_tasks_lock(monkeypatch, tmp_path):
     assert not staging.exists()
     assert held_during_cleanup == [False]
     assert monitor.stopped == ["batch1"]
+
+
+# ── the real failure: slskd's client returns None, it does not raise ────────
+
+class _QuietEngine:
+    async def get_all_downloads(self, exclude=()):
+        return []
+
+
+class _FailingSlskd:
+    """what SoulseekClient._make_request really does on a timeout or an http
+    error: logs and returns None"""
+    engine = _QuietEngine()
+    answer = None
+
+    def client(self, name):
+        return _ExplodingSoulseekClient()
+
+    async def _make_request(self, *args, **kwargs):
+        return self.answer
+
+
+def _monitor_with(monkeypatch, orchestrator):
+    monkeypatch.setattr(dm.config_manager, "get", lambda key, default=None:
+                        "soulseek" if key == "download_source.mode" else default)
+    monkeypatch.setattr(dm, "download_orchestrator", orchestrator)
+    monkeypatch.setattr(dm, "_make_context_key", _legacy_key_fn)
+    tasks, batches = {}, {}
+    monkeypatch.setattr(dm, "download_tasks", tasks)
+    monkeypatch.setattr(dm, "download_batches", batches)
+    monkeypatch.setattr(dm, "tasks_lock", threading.Lock())
+    monkeypatch.setattr(dm, "_orphaned_download_keys", set())
+    _seed_old_downloading_task(tasks, batches)
+    mon = dm.WebUIDownloadMonitor()
+    mon.monitoring = True
+    mon.monitored_batches.add("b1")
+    return mon, tasks
+
+
+def test_a_poll_that_returns_nothing_does_not_cancel_a_healthy_download(monkeypatch):
+    """one slow answer from slskd read as "no transfers at all", and every
+    download older than 90 seconds was cancelled and its peer marked used"""
+    mon, tasks = _monitor_with(monkeypatch, _FailingSlskd())
+    assert mon._get_live_transfers() is dm._LIVE_TRANSFERS_FETCH_FAILED
+    mon._check_all_downloads()
+    assert tasks["t1"]["status"] == "downloading"
+    assert "stuck_retry_count" not in tasks["t1"]
+    assert "used_sources" not in tasks["t1"]
+
+
+def test_slskd_down_for_minutes_is_not_shielded_forever(monkeypatch):
+    """busy is not down: after the grace the ordinary handling runs again, so
+    a task can time out and move to another source"""
+    mon, _tasks = _monitor_with(monkeypatch, _FailingSlskd())
+    mon._slskd_poll_failed_since = time.time() - dm.SLSKD_POLL_GRACE_SECONDS - 5
+    assert mon._get_live_transfers() is not dm._LIVE_TRANSFERS_FETCH_FAILED
+
+
+def test_an_answer_ends_the_failure_and_an_empty_one_is_still_an_answer(monkeypatch):
+    slskd = _FailingSlskd()
+    mon, _tasks = _monitor_with(monkeypatch, slskd)
+    assert mon._get_live_transfers() is dm._LIVE_TRANSFERS_FETCH_FAILED
+    slskd.answer = []
+    assert mon._get_live_transfers() is not dm._LIVE_TRANSFERS_FETCH_FAILED
+    assert mon._slskd_poll_failed_since is None
+
+
+def test_a_track_tries_more_than_three_peers_before_giving_up(monkeypatch):
+    """the cap of 3 counted peers, not attempts on one peer: a track with
+    forty copies failed after four busy peers, thirty-six never tried"""
+    slskd = _FailingSlskd()
+    slskd.answer = []                       # slskd answers: this transfer is gone
+    mon, tasks = _monitor_with(monkeypatch, slskd)
+    tasks["t1"]["stuck_retry_count"] = 3
+    tasks["t1"]["last_retry_time"] = 0
+    tasks["t1"]["batch_id"] = "b1"
+    mon._check_all_downloads()
+    assert tasks["t1"]["status"] != "failed"
+    assert tasks["t1"]["stuck_retry_count"] == 4
+    assert dm.MAX_PEER_RETRIES >= 8
+
+
+def test_and_it_does_give_up_in_the_end(monkeypatch):
+    slskd = _FailingSlskd()
+    slskd.answer = []
+    mon, tasks = _monitor_with(monkeypatch, slskd)
+    tasks["t1"]["stuck_retry_count"] = dm.MAX_PEER_RETRIES
+    tasks["t1"]["last_retry_time"] = 0
+    tasks["t1"]["batch_id"] = "b1"
+    mon._check_all_downloads()
+    assert tasks["t1"]["status"] == "failed"
+    assert str(dm.MAX_PEER_RETRIES) in tasks["t1"].get("error_message", "")

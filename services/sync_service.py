@@ -1217,6 +1217,8 @@ class PlaylistSyncService:
                         detail['server_placement'] = DUPLICATE
                     elif placement_known:
                         detail['server_placement'] = ON_PLAYLIST
+                if playlist_track_id := getattr(t, "source_track_id", None):
+                    detail["playlist_track_id"] = str(playlist_track_id)
                 _match_details.append(detail)
 
             result = SyncResult(
@@ -1387,7 +1389,9 @@ class PlaylistSyncService:
                 # Check if we have original track data with full album objects
                 original_track_data = None
                 if hasattr(self, '_original_tracks_map') and self._original_tracks_map:
-                    original_track_data = self._original_tracks_map.get(spotify_track.id)
+                    original_track_data = self._original_tracks_map.get(
+                        str(getattr(spotify_track, "source_track_id", None) or spotify_track.id)
+                    )
 
                 # Use original data if available (preserves album images), otherwise convert
                 if original_track_data:
@@ -1395,6 +1399,7 @@ class PlaylistSyncService:
                 else:
                     spotify_track_data = {
                         'id': spotify_track.id,
+                        "source_track_id": getattr(spotify_track, "source_track_id", None),
                         'name': spotify_track.name,
                         'artists': [{'name': a} if isinstance(a, str) else a for a in spotify_track.artists],
                         'album': {'name': spotify_track.album},
@@ -1805,6 +1810,23 @@ class PlaylistSyncService:
                         )
                         if _cand_conf > confidence:
                             db_track, confidence = _cand_track, _cand_conf
+
+                    # #2308: the artist's pool can miss a track the library has
+                    # (a credit spelled another way, a track filed under a
+                    # featured artist), and a pool that scores nothing is a
+                    # miss. the wishlist step then asks the library without a
+                    # pool, finds it at 1.0 and calls it owned, so the song was
+                    # neither on the playlist nor downloaded. ask the same way
+                    # here before calling it missing, so the two always agree.
+                    if confidence < 0.7:
+                        for _try_title, _try_artist in _attempts:
+                            _cand_track, _cand_conf = db.check_track_exists(
+                                _try_title, _try_artist,
+                                confidence_threshold=0.7, server_source=active_server,
+                                album=getattr(spotify_track, 'album', None) or None,
+                            )
+                            if _cand_conf > confidence:
+                                db_track, confidence = _cand_track, _cand_conf
 
                     if db_track and confidence >= 0.7 and self._match_was_rejected(
                             spotify_track, active_server, db_track.id):

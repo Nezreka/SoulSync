@@ -43,6 +43,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { MirroredPlaylistDetail } from '../-sync.api';
+import type { BulkMode } from '../-sync.bulk-run';
 import type { ExportMode } from '../-sync.export';
 import type { LibraryFilter, LibrarySort } from '../-sync.library';
 import type { MirroredPlaylistRow } from '../-sync.mirrored';
@@ -69,6 +70,7 @@ import { autoSyncCanSchedulePlaylist } from '../-sync.autosync';
 import { autoSyncPipelineCoversPlaylist } from '../-sync.autosync';
 import { autoSyncPlaylistHealth, detectBrowserTimezone } from '../-sync.autosync';
 import { autoSyncNextRunLabel } from '../-sync.autosync';
+import { startBulkRun, useBulkRun } from '../-sync.bulk-store';
 import { cardScheduleLabel, useCardSchedules } from '../-sync.card-schedule';
 import { exportNotConnectedStatus } from '../-sync.export';
 import {
@@ -95,6 +97,7 @@ import { fetchRotationPreview, rotationConfirmMessage } from '../-sync.rotation'
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
+import { restoreOriginalCover } from '../../../features/playlists/cover-art';
 import { playPlaylist } from '../../../features/playlists/play-playlist';
 import {
   copyMirrorToUserPlaylist,
@@ -104,6 +107,7 @@ import {
   pinLikedFirst,
   removeFromUserPlaylist,
   reorderUserPlaylist,
+  uploadPlaylistCover,
 } from '../../../features/playlists/user-playlists';
 import { AutoSyncWeeklyEditor } from './autosync-weekly';
 import { CoverArtSheet } from './cover-art-sheet';
@@ -1061,6 +1065,17 @@ export function MirroredTab({
   // the selection, as rows that still exist. a refetch can drop a card from
   // under a selected id; the count and the delete both read this, never the set.
   const selectedRows = selecting ? allRows.filter((r) => selected.has(r.id)) : [];
+
+  // #2309: the selection synced by hand, one playlist after another. the run
+  // lives in its store (#2320), so it outlives this tab; the page shows its
+  // pill and panel and reloads the list when it ends.
+  const bulkRunning = Boolean(useBulkRun().run?.running);
+  const startBulk = (mode: BulkMode) => {
+    startBulkRun(
+      mode,
+      selectedRows.map((r) => ({ id: r.id, name: r.display_name || r.name || 'Playlist' })),
+    );
+  };
   const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((r) => selected.has(r.id));
 
   // the summary the page header reads. primitives only, so the effect fires
@@ -1591,6 +1606,24 @@ export function MirroredTab({
           )}
           <button
             type="button"
+            className={`${styles.sb}`}
+            disabled={selectedRows.length === 0 || bulkRunning}
+            title="Put these playlists on your server with the songs you already have. Nothing is added to the wishlist or downloaded."
+            onClick={() => startBulk('sync')}
+          >
+            Sync
+          </button>
+          <button
+            type="button"
+            className={`${styles.sb}`}
+            disabled={selectedRows.length === 0 || bulkRunning}
+            title="Put these playlists on your server, and get the songs you don't have: they go on the wishlist and download under your usual rules."
+            onClick={() => startBulk('download')}
+          >
+            Sync & download
+          </button>
+          <button
+            type="button"
             className={`pl-selection-delete ${styles.sb} ${styles.sbDanger}`}
             disabled={selectedRows.length === 0}
             onClick={() => void onDeleteSelected(selectedRows)}
@@ -1727,6 +1760,32 @@ export function MirroredTab({
             setEditingRef(settingsRow);
           }}
           onGenerateCover={() => setCoverArtFor(settingsRow)}
+          onUploadCover={(file) => {
+            uploadPlaylistCover(settingsRow.id, file)
+              .then(() => {
+                window.showToast?.('Cover updated', 'success');
+                reload();
+              })
+              .catch((err: unknown) =>
+                window.showToast?.(
+                  err instanceof Error ? err.message : 'Could not use that image',
+                  'error',
+                ),
+              );
+          }}
+          onRestoreCover={() => {
+            restoreOriginalCover(settingsRow.id)
+              .then(() => {
+                window.showToast?.('Cover restored', 'success');
+                reload();
+              })
+              .catch((err: unknown) =>
+                window.showToast?.(
+                  err instanceof Error ? err.message : 'Could not restore the cover',
+                  'error',
+                ),
+              );
+          }}
           onClear={
             (settingsRow.discovered_count || 0) > 0 && !isUserPlaylist(settingsRow)
               ? () => {
@@ -1813,6 +1872,10 @@ export function MirroredTab({
           onRunPipeline={() => {
             setDetail(null);
             void pipeline.run(detail.playlistId, detail.data.name ?? '');
+          }}
+          onSyncOnly={() => {
+            setDetail(null);
+            void pipeline.run(detail.playlistId, detail.data.name ?? '', { skipWishlist: true });
           }}
           onRefreshFromSource={() => {
             setDetail(null);

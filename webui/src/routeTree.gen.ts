@@ -41,7 +41,11 @@ import { Route as PodcastsPodcastIdRouteImport } from './routes/podcasts/$podcas
 import { Route as PlayerWatchlistRouteImport } from './routes/player/watchlist'
 import { Route as PlayerWatchingRouteImport } from './routes/player/watching'
 import { Route as PlayerSettingsRouteImport } from './routes/player/settings'
+import { Route as PlayerHomeVideosRouteImport } from './routes/player/home-videos'
 import { Route as PlayerGuideRouteImport } from './routes/player/guide'
+import { Route as PlayerDownloadsRouteImport } from './routes/player/downloads'
+import { Route as PlayerCalendarRouteImport } from './routes/player/calendar'
+import { Route as PlayerAdminUsersRouteImport } from './routes/player/admin-users'
 import { Route as LabelDetailIdRouteImport } from './routes/label-detail/$id'
 import { Route as ImportSinglesRouteImport } from './routes/import/singles'
 import { Route as ImportAutoRouteImport } from './routes/import/auto'
@@ -78,6 +82,7 @@ import { Route as PlayerMusicArtistArtistIdRouteImport } from './routes/player/m
 import { Route as PlayerMusicAlbumAlbumIdRouteImport } from './routes/player/music/album.$albumId'
 import { Route as PlayerMoviesStudioNameRouteImport } from './routes/player/movies/studio.$name'
 import { Route as PlayerMoviesCollectionCollectionIdRouteImport } from './routes/player/movies/collection.$collectionId'
+import { Route as PlayerTvShowIdEpisodeEpisodeIdRouteImport } from './routes/player/tv/$showId_.episode.$episodeId'
 
 const LibraryV2Route = LibraryV2RouteImport.update({
   id: '/library-v2',
@@ -239,9 +244,29 @@ const PlayerSettingsRoute = PlayerSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => PlayerRouteRoute,
 } as any)
+const PlayerHomeVideosRoute = PlayerHomeVideosRouteImport.update({
+  id: '/home-videos',
+  path: '/home-videos',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
 const PlayerGuideRoute = PlayerGuideRouteImport.update({
   id: '/guide',
   path: '/guide',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerDownloadsRoute = PlayerDownloadsRouteImport.update({
+  id: '/downloads',
+  path: '/downloads',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerCalendarRoute = PlayerCalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerAdminUsersRoute = PlayerAdminUsersRouteImport.update({
+  id: '/admin-users',
+  path: '/admin-users',
   getParentRoute: () => PlayerRouteRoute,
 } as any)
 const LabelDetailIdRoute = LabelDetailIdRouteImport.update({
@@ -428,6 +453,12 @@ const PlayerMoviesCollectionCollectionIdRoute =
     path: '/movies/collection/$collectionId',
     getParentRoute: () => PlayerRouteRoute,
   } as any)
+const PlayerTvShowIdEpisodeEpisodeIdRoute =
+  PlayerTvShowIdEpisodeEpisodeIdRouteImport.update({
+    id: '/tv/$showId_/episode/$episodeId',
+    path: '/tv/$showId/episode/$episodeId',
+    getParentRoute: () => PlayerRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -461,7 +492,11 @@ export interface FileRoutesByFullPath {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/player/admin-users': typeof PlayerAdminUsersRoute
+  '/player/calendar': typeof PlayerCalendarRoute
+  '/player/downloads': typeof PlayerDownloadsRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/home-videos': typeof PlayerHomeVideosRoute
   '/player/settings': typeof PlayerSettingsRoute
   '/player/watching': typeof PlayerWatchingRoute
   '/player/watchlist': typeof PlayerWatchlistRoute
@@ -499,6 +534,7 @@ export interface FileRoutesByFullPath {
   '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
   '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
+  '/player/tv/$showId/episode/$episodeId': typeof PlayerTvShowIdEpisodeEpisodeIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -528,7 +564,11 @@ export interface FileRoutesByTo {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/player/admin-users': typeof PlayerAdminUsersRoute
+  '/player/calendar': typeof PlayerCalendarRoute
+  '/player/downloads': typeof PlayerDownloadsRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/home-videos': typeof PlayerHomeVideosRoute
   '/player/settings': typeof PlayerSettingsRoute
   '/player/watching': typeof PlayerWatchingRoute
   '/player/watchlist': typeof PlayerWatchlistRoute
@@ -566,6 +606,7 @@ export interface FileRoutesByTo {
   '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
   '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
+  '/player/tv/$showId/episode/$episodeId': typeof PlayerTvShowIdEpisodeEpisodeIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -600,7 +641,11 @@ export interface FileRoutesById {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/player/admin-users': typeof PlayerAdminUsersRoute
+  '/player/calendar': typeof PlayerCalendarRoute
+  '/player/downloads': typeof PlayerDownloadsRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/home-videos': typeof PlayerHomeVideosRoute
   '/player/settings': typeof PlayerSettingsRoute
   '/player/watching': typeof PlayerWatchingRoute
   '/player/watchlist': typeof PlayerWatchlistRoute
@@ -638,6 +683,7 @@ export interface FileRoutesById {
   '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
   '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
+  '/player/tv/$showId_/episode/$episodeId': typeof PlayerTvShowIdEpisodeEpisodeIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -673,7 +719,11 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/player/admin-users'
+    | '/player/calendar'
+    | '/player/downloads'
     | '/player/guide'
+    | '/player/home-videos'
     | '/player/settings'
     | '/player/watching'
     | '/player/watchlist'
@@ -711,6 +761,7 @@ export interface FileRouteTypes {
     | '/player/music/playlist/$playlistId'
     | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
+    | '/player/tv/$showId/episode/$episodeId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -740,7 +791,11 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/player/admin-users'
+    | '/player/calendar'
+    | '/player/downloads'
     | '/player/guide'
+    | '/player/home-videos'
     | '/player/settings'
     | '/player/watching'
     | '/player/watchlist'
@@ -778,6 +833,7 @@ export interface FileRouteTypes {
     | '/player/music/playlist/$playlistId'
     | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
+    | '/player/tv/$showId/episode/$episodeId'
   id:
     | '__root__'
     | '/'
@@ -811,7 +867,11 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/player/admin-users'
+    | '/player/calendar'
+    | '/player/downloads'
     | '/player/guide'
+    | '/player/home-videos'
     | '/player/settings'
     | '/player/watching'
     | '/player/watchlist'
@@ -849,6 +909,7 @@ export interface FileRouteTypes {
     | '/player/music/playlist/$playlistId'
     | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
+    | '/player/tv/$showId_/episode/$episodeId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1106,11 +1167,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlayerSettingsRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
+    '/player/home-videos': {
+      id: '/player/home-videos'
+      path: '/home-videos'
+      fullPath: '/player/home-videos'
+      preLoaderRoute: typeof PlayerHomeVideosRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
     '/player/guide': {
       id: '/player/guide'
       path: '/guide'
       fullPath: '/player/guide'
       preLoaderRoute: typeof PlayerGuideRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/downloads': {
+      id: '/player/downloads'
+      path: '/downloads'
+      fullPath: '/player/downloads'
+      preLoaderRoute: typeof PlayerDownloadsRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/calendar': {
+      id: '/player/calendar'
+      path: '/calendar'
+      fullPath: '/player/calendar'
+      preLoaderRoute: typeof PlayerCalendarRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/admin-users': {
+      id: '/player/admin-users'
+      path: '/admin-users'
+      fullPath: '/player/admin-users'
+      preLoaderRoute: typeof PlayerAdminUsersRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
     '/label-detail/$id': {
@@ -1365,6 +1454,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlayerMoviesCollectionCollectionIdRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
+    '/player/tv/$showId_/episode/$episodeId': {
+      id: '/player/tv/$showId_/episode/$episodeId'
+      path: '/tv/$showId/episode/$episodeId'
+      fullPath: '/player/tv/$showId/episode/$episodeId'
+      preLoaderRoute: typeof PlayerTvShowIdEpisodeEpisodeIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
   }
 }
 
@@ -1411,7 +1507,11 @@ const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(
 )
 
 interface PlayerRouteRouteChildren {
+  PlayerAdminUsersRoute: typeof PlayerAdminUsersRoute
+  PlayerCalendarRoute: typeof PlayerCalendarRoute
+  PlayerDownloadsRoute: typeof PlayerDownloadsRoute
   PlayerGuideRoute: typeof PlayerGuideRoute
+  PlayerHomeVideosRoute: typeof PlayerHomeVideosRoute
   PlayerSettingsRoute: typeof PlayerSettingsRoute
   PlayerWatchingRoute: typeof PlayerWatchingRoute
   PlayerWatchlistRoute: typeof PlayerWatchlistRoute
@@ -1441,10 +1541,15 @@ interface PlayerRouteRouteChildren {
   PlayerMusicPlaylistPlaylistIdRoute: typeof PlayerMusicPlaylistPlaylistIdRoute
   PlayerTitleKindTmdbIdRoute: typeof PlayerTitleKindTmdbIdRoute
   PlayerTvNetworkNameRoute: typeof PlayerTvNetworkNameRoute
+  PlayerTvShowIdEpisodeEpisodeIdRoute: typeof PlayerTvShowIdEpisodeEpisodeIdRoute
 }
 
 const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
+  PlayerAdminUsersRoute: PlayerAdminUsersRoute,
+  PlayerCalendarRoute: PlayerCalendarRoute,
+  PlayerDownloadsRoute: PlayerDownloadsRoute,
   PlayerGuideRoute: PlayerGuideRoute,
+  PlayerHomeVideosRoute: PlayerHomeVideosRoute,
   PlayerSettingsRoute: PlayerSettingsRoute,
   PlayerWatchingRoute: PlayerWatchingRoute,
   PlayerWatchlistRoute: PlayerWatchlistRoute,
@@ -1475,6 +1580,7 @@ const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
   PlayerMusicPlaylistPlaylistIdRoute: PlayerMusicPlaylistPlaylistIdRoute,
   PlayerTitleKindTmdbIdRoute: PlayerTitleKindTmdbIdRoute,
   PlayerTvNetworkNameRoute: PlayerTvNetworkNameRoute,
+  PlayerTvShowIdEpisodeEpisodeIdRoute: PlayerTvShowIdEpisodeEpisodeIdRoute,
 }
 
 const PlayerRouteRouteWithChildren = PlayerRouteRoute._addFileChildren(

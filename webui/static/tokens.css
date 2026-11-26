@@ -29,6 +29,7 @@
     --accent-color: var(--accent);
 
     /* ── White-alpha ramp ───────────────────────────────────────────── */
+    --white-rgb: 255, 255, 255;
     --white-a02: rgba(255, 255, 255, 0.02);
     --white-a03: rgba(255, 255, 255, 0.03);
     --white-a04: rgba(255, 255, 255, 0.04);
@@ -44,6 +45,7 @@
     --white-a16: rgba(255, 255, 255, 0.16);
     --white-a18: rgba(255, 255, 255, 0.18);
     --white-a20: rgba(255, 255, 255, 0.2);
+    --white-a24: rgba(var(--white-rgb), 0.24);
     --white-a25: rgba(255, 255, 255, 0.25);
     --white-a30: rgba(255, 255, 255, 0.3);
     --white-a35: rgba(255, 255, 255, 0.35);
@@ -60,6 +62,7 @@
     --white-a90: rgba(255, 255, 255, 0.9);
 
     /* ── Black-alpha ramp (shadows, scrims, backdrops) ──────────────── */
+    --black-rgb: 0, 0, 0;
     --black-a10: rgba(0, 0, 0, 0.1);
     --black-a15: rgba(0, 0, 0, 0.15);
     --black-a20: rgba(0, 0, 0, 0.2);
@@ -204,6 +207,106 @@
        .settings-content (settings-premier.css). The nav row and the columns
        fill it, so the tabs and the content below them always line up. */
     --settings-max-width: 1240px;
+
+    /* ── Player palette ───────────────────────────────────────────────
+       The /player surfaces' own navy, theatre and accent colours, named by
+       their hex value. Each ships an -rgb triplet so alpha variants read
+       rgba(var(--pl-<hex>-rgb), a); the solid form is rgb(var(--pl-<hex>-rgb)).
+       Values are exactly the literals the player modules used before, so
+       swapping a literal for its token is a no-op visually. */
+    --pl-06070c-rgb: 6, 7, 12;
+    --pl-06070c: rgb(var(--pl-06070c-rgb));
+    --pl-08060c-rgb: 8, 6, 12;
+    --pl-05080e-rgb: 5, 8, 14;
+    --pl-0a070c-rgb: 10, 7, 12;
+    --pl-070a10-rgb: 7, 10, 16;
+    --pl-070a10: rgb(var(--pl-070a10-rgb));
+    --pl-080a0f-rgb: 8, 10, 15;
+    --pl-080a0f: rgb(var(--pl-080a0f-rgb));
+    --pl-080a12-rgb: 8, 10, 18;
+    --pl-090b10-rgb: 9, 11, 16;
+    --pl-090b10: rgb(var(--pl-090b10-rgb));
+    --pl-080b12-rgb: 8, 11, 18;
+    --pl-080b13-rgb: 8, 11, 19;
+    --pl-0a0c12-rgb: 10, 12, 18;
+    --pl-090c14-rgb: 9, 12, 20;
+    --pl-090c14: rgb(var(--pl-090c14-rgb));
+    --pl-0c0e16-rgb: 12, 14, 22;
+    --pl-0b0f19-rgb: 11, 15, 25;
+    --pl-0b0f19: rgb(var(--pl-0b0f19-rgb));
+    --pl-0e1018-rgb: 14, 16, 24;
+    --pl-0d101a-rgb: 13, 16, 26;
+    --pl-0f111a-rgb: 15, 17, 26;
+    --pl-0d121d-rgb: 13, 18, 29;
+    --pl-0d121d: rgb(var(--pl-0d121d-rgb));
+    --pl-10121a-rgb: 16, 18, 26;
+    --pl-0f121c-rgb: 15, 18, 28;
+    --pl-10121b-rgb: 16, 18, 27;
+    --pl-10121c-rgb: 16, 18, 28;
+    --pl-0f1320-rgb: 15, 19, 32;
+    --pl-0f1320: rgb(var(--pl-0f1320-rgb));
+    --pl-131520-rgb: 19, 21, 32;
+    --pl-141620-rgb: 20, 22, 32;
+    --pl-141621-rgb: 20, 22, 33;
+    --pl-161822-rgb: 22, 24, 34;
+    --pl-161823-rgb: 22, 24, 35;
+    --pl-141826-rgb: 20, 24, 38;
+    --pl-161824-rgb: 22, 24, 36;
+    --pl-13192a-rgb: 19, 25, 42;
+    --pl-13192a: rgb(var(--pl-13192a-rgb));
+    --pl-181a26-rgb: 24, 26, 38;
+    --pl-4a030c-rgb: 74, 3, 12;
+    --pl-4a030c: rgb(var(--pl-4a030c-rgb));
+    --pl-181b28-rgb: 24, 27, 40;
+    --pl-1a1d2b-rgb: 26, 29, 43;
+    --pl-171e31-rgb: 23, 30, 49;
+    --pl-171e31: rgb(var(--pl-171e31-rgb));
+    --pl-1c1f2c-rgb: 28, 31, 44;
+    --pl-1c1f2e-rgb: 28, 31, 46;
+    --pl-560610-rgb: 86, 6, 16;
+    --pl-1b2236-rgb: 27, 34, 54;
+    --pl-1b2236: rgb(var(--pl-1b2236-rgb));
+    --pl-222636-rgb: 34, 38, 54;
+    --pl-6b0714-rgb: 107, 7, 20;
+    --pl-6b0714: rgb(var(--pl-6b0714-rgb));
+    --pl-800c1a-rgb: 128, 12, 26;
+    --pl-8e0e1e-rgb: 142, 14, 30;
+    --pl-78350f-rgb: 120, 53, 15;
+    --pl-9e0e22-rgb: 158, 14, 34;
+    --pl-9e0e22: rgb(var(--pl-9e0e22-rgb));
+    --pl-a61226-rgb: 166, 18, 38;
+    --pl-34d399-rgb: 52, 211, 153;
+    --pl-34d399: rgb(var(--pl-34d399-rgb));
+    --pl-f5c518-rgb: 245, 197, 24;
+    --pl-f5c518: rgb(var(--pl-f5c518-rgb));
+    --pl-a855f7-rgb: 168, 85, 247;
+    --pl-6ee7b7-rgb: 110, 231, 183;
+    --pl-6ee7b7: rgb(var(--pl-6ee7b7-rgb));
+    --pl-86efac-rgb: 134, 239, 172;
+    --pl-86efac: rgb(var(--pl-86efac-rgb));
+    --pl-a78bfa-rgb: 167, 139, 250;
+    --pl-a78bfa: rgb(var(--pl-a78bfa-rgb));
+    --pl-ffc66b-rgb: 255, 198, 107;
+    --pl-f6c978-rgb: 246, 201, 120;
+    --pl-f6c978: rgb(var(--pl-f6c978-rgb));
+    --pl-ffce76-rgb: 255, 206, 118;
+    --pl-ffd27d-rgb: 255, 210, 125;
+    --pl-ffd782-rgb: 255, 215, 130;
+    --pl-fde68a-rgb: 253, 230, 138;
+    --pl-fde68a: rgb(var(--pl-fde68a-rgb));
+    --pl-e2e8f0-rgb: 226, 232, 240;
+    --pl-e2e8f0: rgb(var(--pl-e2e8f0-rgb));
+    --pl-e9d5ff-rgb: 233, 213, 255;
+    --pl-e9d5ff: rgb(var(--pl-e9d5ff-rgb));
+    --pl-e9eef8-rgb: 233, 238, 248;
+    --pl-e9eef8: rgb(var(--pl-e9eef8-rgb));
+    --pl-f8fafc-rgb: 248, 250, 252;
+    --pl-f8fafc: rgb(var(--pl-f8fafc-rgb));
+    /* Semantic aliases the player components read (report-issue reads
+       --pl-accent / --pl-surface with these exact values as fallbacks). */
+    --pl-7c5cff-rgb: 124, 92, 255;
+    --pl-accent: rgb(var(--pl-7c5cff-rgb));
+    --pl-surface: rgb(var(--pl-161822-rgb));
 }
 
 /* ── Shared keyframes ─────────────────────────────────────────────────

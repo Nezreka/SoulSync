@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-export type MusicRequestKind = 'album' | 'track';
+/** 'playlist': the songs one playlist sync asked for, as one request (#2302) */
+export type MusicRequestKind = 'album' | 'track' | 'playlist';
 /** awaiting_selection: approved, held until an admin picks the release (#2199). */
 export type MusicRequestHistoryStatus =
   | 'awaiting_selection'

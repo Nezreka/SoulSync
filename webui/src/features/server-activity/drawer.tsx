@@ -9,15 +9,24 @@ import type { KeyboardEvent } from 'react';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
+import { appURL } from '@/platform/url-base';
+
 import { getSettings } from './api';
 import d from './drawer.module.css';
-import { browserZone } from './format';
+import { browserZone, serverWord } from './format';
 import { History, prefetchHistory } from './history';
 import { CloseIcon, NarrowIcon, WidenIcon } from './icons';
 import { useLiveActivity, useNow } from './live';
 import { NowPlaying } from './now-playing';
 import { RANGES, Stats, prefetchStats } from './stats';
 import { Segmented } from './ui';
+
+// each media server's own mark (the same files the settings tiles use)
+const SERVER_LOGOS: Record<string, string> = {
+  plex: '/static/img/brands/plex.png',
+  jellyfin: '/static/img/brands/jellyfin.png',
+  soulsync: '/static/soulsync-mark.png',
+};
 
 export type Tab = 'now' | 'history' | 'stats';
 export const TABS: Tab[] = ['now', 'history', 'stats'];
@@ -167,16 +176,26 @@ export function Drawer({ open, tab, onTab, onClose }: DrawerProps) {
           {servers.length ? (
             <ul className={d.servers} aria-label="Servers">
               {servers.map((srv) => {
-                const word = srv.server === 'plex' ? 'Plex' : 'Jellyfin';
+                const word = serverWord(srv.server);
                 const named =
                   srv.name && srv.name.toLowerCase() !== srv.server
                     ? `${word} · ${srv.name}`
                     : word;
+                const logo = SERVER_LOGOS[srv.server];
+                const said = `${named}${srv.reachable ? '' : ', not answering'}`;
+                // the server's own mark, its health as a dot on it, its name
+                // on hover: three names wrapped badly in the header
                 return (
-                  <li key={srv.server} data-ok={srv.reachable || undefined}>
+                  <li key={srv.server} data-ok={srv.reachable || undefined} title={said}>
+                    {logo ? (
+                      <img src={appURL(logo)} alt="" draggable={false} />
+                    ) : (
+                      <span className={d.serverLetter} aria-hidden="true">
+                        {word.charAt(0)}
+                      </span>
+                    )}
                     <i aria-hidden="true" />
-                    {named}
-                    {srv.reachable ? null : <span className={d.srOnly}> (not answering)</span>}
+                    <span className={d.srOnly}>{said}</span>
                   </li>
                 );
               })}

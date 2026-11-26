@@ -199,6 +199,13 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 600,
     },
     {
+        'name': 'Player Notifications',                # new episodes, films, requests: each profile's bell
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 5, 'unit': 'minutes'},
+        'action_type': 'player_notify_library',
+        'initial_delay': 240,
+    },
+    {
         'name': 'Clean Completed Downloads',
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 5, 'unit': 'minutes'},

@@ -38,6 +38,8 @@ export interface CatalogMovie {
   /** the franchise tmdb files it under (a box set) */
   collection_id?: number | null;
   collection?: string | null;
+  /** the library its files sit in (a title in no library folder is in the main one) */
+  library_id?: number | null;
 }
 
 /** [episode id, season, episode, seconds, title] */
@@ -59,6 +61,7 @@ export interface CatalogShow {
   /** a sample of the owned episodes, spread across the run, in airing order */
   episodes: CatalogEpisode[];
   tmdb_id: number | null;
+  library_id?: number | null;
 }
 
 export interface CatalogRecentEpisode {
@@ -87,7 +90,39 @@ export interface CatalogYoutube {
   added_at: string | null;
 }
 
+/**
+ * a video library as the player lists it (core/player/libraries.py). one
+ * with own_page has its own entry in the sidebar and its own page; the rest
+ * are part of Movies / TV. a library hidden from this profile is never sent.
+ */
+export interface PlayerLibrary {
+  id: number;
+  /** home: clips from a camera or a phone (core/video/home_videos.py) */
+  kind: 'movie' | 'show' | 'home';
+  name: string;
+  own_page: boolean;
+  main: boolean;
+  /** whether the guide schedules its titles (home libraries start off) */
+  in_guide?: boolean;
+  /** a 4K library: its name or a folder says so (home marks a 4K copy) */
+  uhd?: boolean;
+}
+
+/** a home video the guide may schedule (only home libraries switched into the guide) */
+export interface CatalogHome {
+  id: number;
+  title: string;
+  duration_s: number | null;
+  thumb_url: string | null;
+  album: string;
+  filmed_at: string | null;
+}
+
 export interface VideoCatalog {
+  /** the libraries this profile can see (none sent by an older server) */
+  libraries?: PlayerLibrary[];
+  /** home videos in the guide's pool (guide=1 only) */
+  home?: CatalogHome[];
   movies: CatalogMovie[];
   shows: CatalogShow[];
   recent_episodes: CatalogRecentEpisode[];
@@ -180,12 +215,17 @@ export interface LibTrack {
   duration?: number | null;
   explicit?: boolean;
   is_missing?: boolean;
+  file_status?: string | null;
+  file_count?: number;
+  server_track_id?: string | number | null;
   artists?: { id?: number; name: string }[] | string[];
   file?: LibTrackFile | null;
 }
 
 export interface LibAlbumDetail {
   id: number;
+  /** the release's tracklist being fetched in the background (resolve=1) */
+  tracklist_sync?: { status?: string | null } | null;
   title: string;
   album_type?: string | null;
   year?: number | null;

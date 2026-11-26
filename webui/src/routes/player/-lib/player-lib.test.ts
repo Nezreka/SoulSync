@@ -217,6 +217,27 @@ const catalog: VideoCatalog = {
   youtube: [],
 };
 
+describe('channels with names that make the same id', () => {
+  it('keeps one channel per id, the first (Disney+ and Disney are both network-disney)', () => {
+    const twin = (id: number, network: string) => ({
+      ...catalog.shows[0],
+      id,
+      network,
+      episodes: [
+        [id * 10, 1, 1, 3000, 'a'],
+        [id * 10 + 1, 1, 2, 3000, 'b'],
+      ] as (typeof catalog.shows)[0]['episodes'],
+    });
+    const twins = {
+      ...catalog,
+      shows: [twin(50, 'Disney+'), twin(51, 'Disney+'), twin(52, 'Disney'), twin(53, 'Disney')],
+    };
+    const ids = autoChannels(twins).map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.filter((id) => id === 'network-disney')).toHaveLength(1);
+  });
+});
+
 describe('channels', () => {
   const channels = autoChannels(catalog);
   const byId = new Map(channels.map((c) => [c.id, c]));
@@ -591,8 +612,8 @@ describe('the guide, round two', () => {
     ]);
     expect(numbered.map((c) => [c.id, c.number])).toEqual([
       ['type-movies', 101],
-      ['music-vibe-chill', 102],
-      ['genre-drama', 103],
+      ['genre-drama', 102],
+      ['music-vibe-chill', 103],
     ]);
     const favs = new Set(['genre-drama']);
     expect(numbered.filter((c) => matchesFilter(c, 'music', favs)).map((c) => c.id)).toEqual([

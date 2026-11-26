@@ -100,6 +100,12 @@ export function scoreHit(
 ): number {
   let best = scoreText(main, q);
   for (const other of others) best = Math.max(best, scoreText(other, q) * 0.7);
+  // Multi-word cross-field queries (e.g. "aether virtual mage" or "virtual mage aether"):
+  // match when all words appear across title + artist/album/channel combined.
+  if (q.words.length > 1 && others.length > 0) {
+    const combined = [main, ...others].filter(Boolean).join(' ');
+    best = Math.max(best, scoreText(combined, q) * 0.85);
+  }
   if (!best) return 0;
   // among equals, the shorter title is the closer one ("Alien" before "Alien Nation")
   best -= Math.min(fold(main).length / 200, 0.9);

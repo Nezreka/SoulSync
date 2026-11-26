@@ -83,7 +83,17 @@ _checked_out: "weakref.WeakSet[PooledConnection]" = weakref.WeakSet()
 
 # plain counters for diagnostics and tests; not locked on purpose, approximate is fine
 stats = {"hits": 0, "misses": 0, "discarded": 0, "kept_by_cursor": 0, "overflow_closed": 0,
-         "deferred": 0}
+         "deferred": 0, "gate_reused": 0}
+
+# how many new connections may be set up at once, across every file. a slow
+# opener (a locked file, a stuck mount) must not stall everyone else, so a
+# thread that waits longer than OPEN_GATE_WAIT seconds opens anyway.
+try:
+    MAX_OPENING = max(1, int(os.environ.get("SOULSYNC_DB_POOL_OPENING", "2")))
+except ValueError:
+    MAX_OPENING = 2
+OPEN_GATE_WAIT = 0.5
+_open_gate = threading.BoundedSemaphore(MAX_OPENING)
 
 # connections their proxies' finalizers dropped, waiting to be put back outside
 # the lock. deque.append/popleft are atomic, so a finalizer can push here from
@@ -386,6 +396,22 @@ def _drain_deferred() -> None:
             _close_quietly(slot.raw)
 
 
+def _take_idle(p: str, ident: Optional[tuple]) -> "Optional[_Slot]":
+    """An idle connection for ``p`` that is still the same file, or None."""
+    while True:
+        with _lock:
+            bucket = _idle.get(p)
+            slot = bucket.pop() if bucket else None
+            if bucket is not None and not bucket:
+                del _idle[p]
+        if slot is None:
+            return None
+        if slot.ident is not None and slot.ident == ident:
+            return slot
+        stats["discarded"] += 1
+        _close_quietly(slot.raw)
+
+
 def acquire(path: Any, opener: Callable[[bool], sqlite3.Connection]):
     """A connection for ``path``: an idle one when it is still valid, else a new
     one from ``opener(check_same_thread)``. Paths that are not poolable get the
@@ -395,21 +421,29 @@ def acquire(path: Any, opener: Callable[[bool], sqlite3.Connection]):
         return opener(True)
     _drain_deferred()
     ident = _file_ident(p)
-    while True:
-        with _lock:
-            bucket = _idle.get(p)
-            slot = bucket.pop() if bucket else None
-            if bucket is not None and not bucket:
-                del _idle[p]
-        if slot is None:
-            break
-        if slot.ident is not None and slot.ident == ident:
-            stats["hits"] += 1
-            return PooledConnection(slot, p)
-        stats["discarded"] += 1
-        _close_quietly(slot.raw)
-    stats["misses"] += 1
-    raw = opener(False)
+    slot = _take_idle(p, ident)
+    if slot is not None:
+        stats["hits"] += 1
+        return PooledConnection(slot, p)
+    # a new connection parses the whole schema (~700 objects, ~8 ms alone).
+    # opened all at once they slow each other down: 32 threads opening
+    # together took 660 ms each on average and managed half the opens a
+    # second of two at a time (#2253). so only a few open at once, and a
+    # thread that waited takes a connection someone gave back meanwhile.
+    gated = _open_gate.acquire(timeout=OPEN_GATE_WAIT)
+    try:
+        if gated:
+            _drain_deferred()
+            slot = _take_idle(p, ident)
+            if slot is not None:
+                stats["hits"] += 1
+                stats["gate_reused"] += 1
+                return PooledConnection(slot, p)
+        stats["misses"] += 1
+        raw = opener(False)
+    finally:
+        if gated:
+            _open_gate.release()
     return PooledConnection(_Slot(raw, ident), p)
 
 

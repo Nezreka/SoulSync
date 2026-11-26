@@ -4,6 +4,7 @@
  * what the phone and tv apps copy.
  */
 
+import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 
@@ -11,7 +12,19 @@ import type { RailCard } from '../-lib/rails';
 import type { PlayVerdict } from '../-player.types';
 
 import { canRetryArt, retryArt } from '../-lib/images';
-import { BackIcon, CheckIcon, ChevronIcon, GridIcon, ListIcon, MoreIcon, PlayIcon } from './icons';
+import { playerSettingsQuery } from '../-player.api';
+import { inferContextTargetFromCard, openContextMenu } from './context-menu';
+import {
+  BackIcon,
+  CheckIcon,
+  ChevronIcon,
+  GridIcon,
+  ListIcon,
+  MoreIcon,
+  PlayIcon,
+  PlusIcon,
+} from './icons';
+import { longPress } from './long-press';
 import { usePlayCard } from './playback/play-card';
 import s from './player.module.css';
 import { usePreview } from './preview';
@@ -176,6 +189,31 @@ export function Card({
   }, [menuOpen]);
 
   const { handlers, panel } = usePreview(card.preview, card.title, card.href);
+  const settingsQ = useQuery({ ...playerSettingsQuery(), enabled: !!card.preview });
+  const prefs = settingsQ.data?.settings;
+  const showMovieRatings = prefs?.show_movie_ratings ?? false;
+  const showTvEpisodeCount = prefs?.show_tv_episode_count ?? true;
+  const showYearOnCards = prefs?.show_year_on_cards ?? true;
+
+  const visibleBadge = (() => {
+    if (!card.badge) return undefined;
+    if (card.preview?.kind === 'movie' && card.badge.startsWith('★') && !showMovieRatings) {
+      return undefined;
+    }
+    if (card.preview?.kind === 'show' && /\bep\b/i.test(card.badge) && !showTvEpisodeCount) {
+      return undefined;
+    }
+    return card.badge;
+  })();
+
+  const visibleSubtitle = (() => {
+    if (!card.subtitle) return undefined;
+    if (!showYearOnCards && card.preview) {
+      const cleaned = card.subtitle.replace(/^\d{4}(\s*·\s*)?/, '').trim();
+      return cleaned || undefined;
+    }
+    return card.subtitle;
+  })();
 
   const body = (
     <>
@@ -185,8 +223,17 @@ export function Card({
           <span className={s.cardHave} title={card.have} aria-label={card.have}>
             <CheckIcon />
           </span>
+        ) : card.muted ? (
+          <span className={s.cardMissing} title={card.muted} aria-label={card.muted}>
+            <PlusIcon />
+          </span>
         ) : null}
-        {card.badge ? <span className={s.cardBadge}>{card.badge}</span> : null}
+        {visibleBadge ? <span className={s.cardBadge}>{visibleBadge}</span> : null}
+        {card.chip ? (
+          <span className={s.cardChip} title={`Also in ${card.chip}`}>
+            {card.chip}
+          </span>
+        ) : null}
         {card.progress !== undefined ? (
           <div
             className={s.progress}
@@ -204,10 +251,21 @@ export function Card({
         <div className={s.cardTitle} title={card.title}>
           {card.title}
         </div>
-        {card.subtitle ? <div className={s.cardSub}>{card.subtitle}</div> : null}
+        {visibleSubtitle ? <div className={s.cardSub}>{visibleSubtitle}</div> : null}
       </div>
     </>
   );
+
+  const openCardMenu = (e: { clientX: number; clientY: number }) => {
+    const isOwned = !card.muted && !/\/tmdb\//.test(card.href ?? '');
+    openContextMenu({
+      ...inferContextTargetFromCard(e, card, {
+        onOpen: isOwned && onOpen ? () => onOpen(card) : undefined,
+        extraActions: actions?.map((a) => ({ label: a.label, onSelect: a.onSelect })),
+      }),
+      owned: isOwned,
+    });
+  };
 
   return (
     <div
@@ -217,6 +275,11 @@ export function Card({
       data-shape={card.shape}
       data-round={round ? 'true' : undefined}
       ref={menuRef}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        openCardMenu(e);
+      }}
+      {...longPress(openCardMenu)}
     >
       {onOpen ? (
         <div
@@ -332,18 +395,27 @@ export function HScroll({ className, children }: { className: string; children: 
   useEffect(() => {
     update();
     const el = ref.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    for (const child of Array.from(el.children).slice(0, 1)) observer.observe(child);
-    return () => observer.disconnect();
-  });
+    if (!el) return;
+    const raf = window.requestAnimationFrame(update);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    ro?.observe(el);
+    for (const child of Array.from(el.children).slice(0, 1)) ro?.observe(child);
+    const mo = typeof MutationObserver !== 'undefined' ? new MutationObserver(update) : null;
+    mo?.observe(el, { childList: true });
+    window.addEventListener('resize', update);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      ro?.disconnect();
+      mo?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [children]);
   const page = (dir: 1 | -1) => {
     const el = ref.current;
     if (el) el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: 'smooth' });
   };
   return (
-    <div className={s.hscroll}>
+    <div className={s.hscroll} onMouseEnter={update}>
       <div ref={ref} className={className} onScroll={update}>
         {children}
       </div>
@@ -766,10 +838,6 @@ export function PlayButton({
       {label}
     </button>
   );
-}
-
-export function NotYetNote({ children }: { children?: ReactNode }) {
-  return <span className={s.notYet}>{children ?? 'Playback comes in the next stage'}</span>;
 }
 
 // ── badges ─────────────────────────────────────────────────────────────

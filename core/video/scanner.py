@@ -124,6 +124,25 @@ class VideoLibraryScanner:
         self._run(source_factory, mode, media_type)
         return self.get_status()
 
+    def scan_library_sync(self, source_factory, media_type: str, library: str) -> dict:
+        """read ONE server library inline (core/video/library_scan.py): every
+        item upserted, enrichment kept, nothing pruned, so the rest of the
+        library is never touched. ``source_factory()`` returns a source
+        restricted to that library."""
+        media_type = self._norm_media_type(media_type)
+        if media_type == "all":
+            raise ValueError("a one-library scan reads movies or shows, not both")
+        with self._lock:
+            if self._status.get("state") == "scanning":
+                return {"state": "in_progress", "phase": "a video scan is already running"}
+            self._cancel = False
+            self._status = {"state": "scanning", "phase": "starting", "mode": "full",
+                            "media_type": media_type, "library": library,
+                            "started_at": time.time(), "percent": None,
+                            "movies": 0, "shows": 0, "episodes": 0}
+        self._run(source_factory, "full", media_type, one_library=True)
+        return self.get_status()
+
     def _finish_cancelled(self, movies, shows, episodes) -> None:
         self._set(state="cancelled", phase="cancelled", finished_at=time.time(),
                   movies=movies, shows=shows, episodes=episodes)
@@ -149,15 +168,17 @@ class VideoLibraryScanner:
         except Exception:
             logger.debug("video scan: resuming enrichment workers failed", exc_info=True)
 
-    def _run(self, source_factory, mode: str = "full", media_type: str = "all") -> None:
+    def _run(self, source_factory, mode: str = "full", media_type: str = "all",
+             one_library: bool = False) -> None:
         # Enrichment steps aside for the scan (all modes, both entry points), and
         # the finally guarantees it resumes on success, cancel, or error.
         paused = self._pause_for_scan()
         try:
             source = source_factory()
             if source is None:
-                self._set(state="error", phase="no video server",
-                          error="No connected Plex/Jellyfin video server")
+                self._set(state="error", phase="no video library",
+                          error="No video library to scan: connect Plex or Jellyfin, or set your "
+                                "Movies and TV folders")
                 return
             server = source.server_name
             problem = getattr(source, "scan_problem", None)
@@ -167,7 +188,20 @@ class VideoLibraryScanner:
                 self._set(state="error", phase="no library", error=problem)
                 return
             incremental = mode == "incremental"
-            do_prune = mode == "deep"
+            # soulsync's own folders (core/video/disk_source.py) are not a
+            # server: there is no "recently added" list to read newest first
+            # and stop early on, and no dates worth trusting. its quick scan
+            # walks every folder and reads the titles whose listing changed,
+            # and what the walk no longer finds is gone, so every mode prunes
+            # (a row only goes when its files really are gone from disk, and an
+            # unreachable folder stopped the scan above).
+            disk = server == "soulsync"
+            if one_library and disk:
+                self._set(state="error", phase="no library",
+                          error="Standalone has no server libraries to read one at a time")
+                return
+            # one library read on its own never prunes: the others weren't read
+            do_prune = (mode == "deep" or disk) and not one_library
             # Movies and TV are independent libraries — scan only the requested
             # kind(s) so a TV scan never pulls in (or prunes) movies, and vice-versa.
             do_movies = media_type in ("all", "movie")
@@ -175,11 +209,17 @@ class VideoLibraryScanner:
             # FULL = a clean reset (clobber enrichment-owned fields). Incremental/deep
             # PRESERVE them, so a routine re-scan never wipes the TMDB-backfilled
             # `status` the airing watchlist relies on. (Only an explicit full resets.)
-            preserve = mode != "full"
+            # (one library added on its own keeps it too: its titles may
+            # already be in the library from another one)
+            preserve = mode != "full" or one_library
 
             # Incremental on a near-empty library is pointless — fall back to a
             # full pass so the first scan actually populates (music does this).
-            if incremental and (self.db.table_count("movies") + self.db.table_count("shows")) < INCREMENTAL_MIN_LIBRARY:
+            # (this server's own rows: another server's library says nothing
+            # about how much of this one has been read)
+            if incremental and not disk and (
+                    len(self.db.server_ids("movies", server)) + len(self.db.server_ids("shows", server))
+            ) < INCREMENTAL_MIN_LIBRARY:
                 incremental = False
 
             # Modified-since delta: on incremental, ask the server for only what it
@@ -187,7 +227,7 @@ class VideoLibraryScanner:
             # item propagates, not just brand-new adds. No baseline yet → the source
             # uses its recent-window fallback (and the movie loop keeps the early-stop).
             since = None
-            if incremental:
+            if incremental and not disk:
                 ts = self.db.get_setting("video_last_scan_at")
                 if ts:
                     try:
@@ -210,9 +250,12 @@ class VideoLibraryScanner:
             def pct():
                 return round(processed / total * 100) if total else None
 
-            known_movies = self.db.server_ids("movies", server) if (incremental and do_movies) else set()
-            known_shows = self.db.server_ids("shows", server) if (incremental and do_shows) else set()
-            known_eps = self.db.server_ids("episodes", server) if (incremental and do_shows) else set()
+            # the server shortcuts below (re-upsert a known id, stop after a run
+            # of known ones) are for a newest-first server read, never the disk
+            quick = incremental and not disk
+            known_movies = self.db.server_ids("movies", server) if (quick and do_movies) else set()
+            known_shows = self.db.server_ids("shows", server) if (quick and do_shows) else set()
+            known_eps = self.db.server_ids("episodes", server) if (quick and do_shows) else set()
 
             # ── Movies ── (skipped entirely on a TV-only scan)
             seen_movies: set[str] = set()
@@ -231,7 +274,7 @@ class VideoLibraryScanner:
                     # returned only what changed since last scan, so process them all. In
                     # the recent-window fallback (no baseline) we keep the count-based
                     # early-stop. Either way a re-upsert isn't tallied as a NEW movie.
-                    if incremental and sid in known_movies:
+                    if quick and sid in known_movies:
                         try:
                             self.db.upsert_movie(server, item, preserve_enrichment=preserve)
                         except Exception:
@@ -253,6 +296,8 @@ class VideoLibraryScanner:
                     if movies % 10 == 0:
                         self._set(movies=movies, percent=pct())
                 self._set(movies=movies, percent=pct())
+                # the disk walk passed every title, read or not: none of them is gone
+                seen_movies |= {str(i) for i in getattr(source, "walked", lambda _t: set())("movies")}
                 # Prune ONLY on a deep scan, and only when we actually saw items —
                 # so a transient empty response can never wipe the library. The prune
                 # runs AFTER the bar fills, and a big cleanup (many orphaned rows +
@@ -279,7 +324,7 @@ class VideoLibraryScanner:
                     # last scan, so re-upsert every one (apply the change). Only the
                     # recent-window fallback uses the 'skip fully-present + early-stop'
                     # optimisation below.
-                    if incremental and since is None:
+                    if quick and since is None:
                         # A known show is 'complete' only when we already have EVERY
                         # episode. Skip only fully-present shows, and stop after a run.
                         ep_ids = [str(e.get("server_id")) for s in show.get("seasons", [])
@@ -301,6 +346,7 @@ class VideoLibraryScanner:
                     episodes += sum(len(s.get("episodes", [])) for s in show.get("seasons", []))
                     processed += 1
                     self._set(shows=shows, episodes=episodes, percent=pct())
+                seen_shows |= {str(i) for i in getattr(source, "walked", lambda _t: set())("shows")}
                 # Final prune (the one that delays "done" on a deep scan) — show it.
                 if do_prune and seen_shows:
                     self._set(phase="cleaning up removed shows", percent=100)
@@ -338,6 +384,26 @@ class VideoLibraryScanner:
             except Exception:   # noqa: BLE001 - never fails the scan itself
                 logger.exception("video scan: library attribution failed")
 
+            # home videos (core/video/home_videos.py) are read on their own
+            # thread after a whole-library scan: never matched, so never in
+            # the rows above
+            if media_type == "all":
+                try:
+                    from core.video import home_videos
+                    home_videos.scan_async(self.db)
+                except Exception:   # noqa: BLE001 - never fails the scan itself
+                    logger.debug("video scan: home videos not started", exc_info=True)
+
+            # plex and jellyfin as one library (core/video/server_links.py):
+            # the other server is read on its own thread once this scan's rows
+            # are in. off unless linking is switched on.
+            try:
+                if not one_library:   # the next whole scan links what one library added
+                    from core.video import server_links
+                    server_links.run_async(self.db, incremental=incremental, since=since)
+            except Exception:   # noqa: BLE001 - never fails the scan itself
+                logger.debug("video scan: server link pass not started", exc_info=True)
+
             self._set(state="done", phase="complete", finished_at=time.time(),
                       movies=movies, shows=shows, episodes=episodes, percent=100,
                       removed=removed_m + removed_s)
@@ -356,6 +422,13 @@ class VideoLibraryScanner:
                 library_manager.expire()
             except Exception:   # noqa: BLE001 - a stale page is not a failed scan
                 logger.debug("library manager not told about the scan", exc_info=True)
+            # your library's folders: a library just read can bring a new
+            # folder and new files to count, so the next look asks again
+            try:
+                from core.video import drive_map
+                drive_map.forget_server_folders()
+            except Exception:   # noqa: BLE001
+                logger.debug("drive map folders not cleared", exc_info=True)
             if paused:
                 self._resume_after_scan()
 

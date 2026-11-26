@@ -234,10 +234,14 @@ def top_tracks(conn, artist_id: int, *, scope: Any, hide_explicit: bool,
             f"al.id, al.title, t.play_count, t.explicit FROM lib2_tracks t "
             f"JOIN lib2_albums al ON al.id = t.album_id "
             f"LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
-            f"WHERE (al.primary_artist_id = ? OR t.track_artist LIKE '%' || ? || '%') "
+            # their own albums, and the songs they're credited on (track credits,
+            # indexed). a LIKE on the track artist string scanned every track
+            # and matched "U2" inside other names
+            f"WHERE (al.primary_artist_id = ? OR t.id IN "
+            f"(SELECT ta.track_id FROM lib2_track_artists ta WHERE ta.artist_id = ?)) "
             f"AND {owned_sql('track', 't')}{hidden} "
             f"ORDER BY t.play_count DESC, COALESCE(al.year, 0) DESC, t.id DESC LIMIT ?",
-            (int(artist_id), _artist_name(conn, artist_id), max(1, min(int(limit), 50)) * 3)).fetchall()
+            (int(artist_id), int(artist_id), max(1, min(int(limit), 50)) * 3)).fetchall()
     seen, out = set(), []
     for r in rows:
         # the same song on two releases (an album and its deluxe) shows once, its most played copy
@@ -250,7 +254,3 @@ def top_tracks(conn, artist_id: int, *, scope: Any, hide_explicit: bool,
     return out[:max(1, min(int(limit), 50))]
 
 
-def _artist_name(conn, artist_id: int) -> str:
-    row = conn.execute("SELECT name FROM lib2_artists WHERE id = ?", (int(artist_id),)).fetchone()
-    # a name that matches nothing when there's no artist, so only their own albums count
-    return (row[0] if row and row[0] else "\x00").replace("%", "").replace("_", "")

@@ -277,11 +277,14 @@ def test_stations_put_the_artist_you_want_more_from_first(library):
 
     assert [s['name'] for s in build_stations(library, 1)] == ['Daft Punk', 'Air', 'Justice']
     # more like something Justice brought counts Justice up (x1.5), less of
-    # Daft Punk counts it down (x0.4): 30/20/10 plays become 12/20/15
+    # Daft Punk counts it down (x0.4). a seed's weight grows with the square
+    # root of its plays, so 30/20/10 plays weigh 100/82/58 and become
+    # 40/82/87: what you asked for more of leads, ahead of the artist you
+    # merely play more.
     record(library, 1, 'more', {'type': 'artist', 'name': 'SebastiAn'},
            explanation('listened', ['Justice']))
     record(library, 1, 'less', {'type': 'artist', 'name': 'Daft Punk'})
-    assert [s['name'] for s in build_stations(library, 1)] == ['Air', 'Justice', 'Daft Punk']
+    assert [s['name'] for s in build_stations(library, 1)] == ['Justice', 'Air', 'Daft Punk']
 
 
 def test_the_listening_recs_scan_ranks_with_it(library, monkeypatch):
@@ -320,4 +323,4 @@ def test_more_on_a_station_counts_its_own_artist_up_as_a_seed(library):
     record(library, 1, 'more', {'type': 'artist', 'name': 'Justice'}, justice['explanation'])
     assert _taste(library).seed_weight('Justice') == 1.5     # the same answer twice is one
     record(library, 1, 'less', {'type': 'artist', 'name': 'Daft Punk'})
-    assert [s['name'] for s in build_stations(library, 1)] == ['Air', 'Justice', 'Daft Punk']
+    assert [s['name'] for s in build_stations(library, 1)] == ['Justice', 'Air', 'Daft Punk']

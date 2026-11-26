@@ -79,6 +79,7 @@ class SpotifyPlaylistSource(PlaylistSource):
             name=playlist.name,
             owner=playlist.owner,
             description=playlist.description,
+            image_url=getattr(playlist, "image_url", None) or None,
             track_count=int(getattr(playlist, "total_tracks", 0) or 0),
             extra={
                 "public": bool(getattr(playlist, "public", False)),

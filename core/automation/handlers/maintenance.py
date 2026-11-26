@@ -110,26 +110,37 @@ def _backup_db_at(db_path: str, deps: AutomationDeps, automation_id) -> Dict[str
     # safe_backup verifies source + result integrity, so an automated backup
     # can never silently snapshot a corrupt DB (the incident where every
     # rolling backup faithfully copied the corruption).
-    from core.db_integrity import DBIntegrityError, safe_backup, prune_backups
+    from core.db_integrity import DBIntegrityError, backup_lock, room_for, rotate_backups, safe_backup
+    short = room_for(db_path, os.path.getsize(db_path))
+    if short:
+        deps.update_progress(automation_id, log_line=f'Backup SKIPPED: {short}', log_type='error')
+        return {'status': 'error', 'reason': short}
     try:
-        safe_backup(db_path, backup_path)
+        # one backup or restore at a time; a restore in progress is waited for
+        with backup_lock:
+            safe_backup(db_path, backup_path)
     except DBIntegrityError as integ:
         deps.logger.error("Auto-backup refused — DB integrity check failed: %s", integ)
+        # said where an admin will see it, not only in the log: a damaged
+        # database stopped every backup for two weeks before anyone knew
+        _database_damaged(str(integ))
         deps.update_progress(
             automation_id,
             log_line=f'Backup SKIPPED — database failed integrity check: {integ}',
             log_type='error',
         )
         return {'status': 'error', 'reason': f'Database integrity check failed: {integ}'}
+    try:
+        from core import db_repair
+        db_repair.remember(True)
+    except Exception as e:  # noqa: BLE001
+        deps.logger.debug("database health not remembered: %s", e)
     size_mb = round(os.path.getsize(backup_path) / (1024 * 1024), 1)
 
     # Rolling cleanup — never evict the most-recent verified-healthy backup.
-    existing = list(_glob.glob(f"{db_path}.backup_*"))
-    for removed in prune_backups(existing, _MAX_BACKUPS):
-        try:
-            os.remove(removed)
-        except Exception as e:  # noqa: BLE001 — best-effort cleanup
-            deps.logger.debug("rolling backup cleanup failed: %s", e)
+    # counted in backups: the glob this used also matched each backup's -wal,
+    # -shm and .meta.json, so "keep 5" kept one
+    rotate_backups(db_path, _MAX_BACKUPS)
     deps.update_progress(
         automation_id,
         log_line=f'Backup created: {size_mb}MB ({os.path.basename(backup_path)})',
@@ -141,7 +152,19 @@ def _backup_db_at(db_path: str, deps: AutomationDeps, automation_id) -> Dict[str
 def auto_backup_database(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
     """Hot SQLite backup of the MUSIC database (``DATABASE_PATH``)."""
     db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
-    return _backup_db_at(db_path, deps, config.get('_automation_id'))
+    result = _backup_db_at(db_path, deps, config.get('_automation_id'))
+    if result.get('status') == 'completed':
+        # the player's and the audiobooks' databases ride along with it
+        from core.backup_companions import backup_companions
+        stamp = os.path.basename(result['backup_path']).rsplit('.backup_', 1)[-1]
+        for also in backup_companions(stamp, _MAX_BACKUPS):
+            deps.update_progress(
+                config.get('_automation_id'),
+                log_line=(f"Also backed up the {also['name']} database ({also['file']})" if also['ok']
+                          else f"The {also['name']} database was NOT backed up: {also['error']}"),
+                log_type='success' if also['ok'] else 'error',
+            )
+    return result
 
 
 def auto_backup_video_database(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
@@ -225,3 +248,26 @@ def auto_refresh_beatport_cache(config: Dict[str, Any], deps: AutomationDeps) ->
         'errors': str(len(errors)),
         '_manages_own_progress': True,
     }
+
+
+def _database_damaged(detail: str) -> None:
+    """remember it, and tell every admin once a day: the bell and the
+    Backups page both say so, with the way to repair it"""
+    try:
+        from core import db_repair
+        before = db_repair.last_health()
+        db_repair.remember(False, detail)
+        if before.get("healthy") is False and before.get("notified_day") == time.strftime("%Y-%m-%d"):
+            return
+        from core.profile_notify import notify_profile
+        from database.music_database import get_database
+        for p in get_database().get_all_profiles() or []:
+            if p.get("is_admin"):
+                notify_profile(p["id"], "Your database is damaged, so backups have stopped. "
+                               "Open Settings, System, Backups to repair it.", "error",
+                               link="/settings?tab=advanced&view=backups")
+        with db_repair._health_lock:
+            db_repair._health["notified_day"] = time.strftime("%Y-%m-%d")
+    except Exception as e:  # noqa: BLE001 - the backup's own error is already logged
+        import logging
+        logging.getLogger(__name__).debug("damaged-database warning not sent: %s", e)

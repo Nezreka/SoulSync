@@ -615,4 +615,13 @@ describe('Lidarr', () => {
       },
     });
   });
+
+  it('saves "Lidarr imports every download", off by default', async () => {
+    act(() => store.hydrate({ lidarr_download: { url: 'http://l:8686' } }));
+    render(<LidarrPanel store={store} />);
+    expect(input('lidarr-import-through-lidarr').checked).toBe(false);
+    fireEvent.click(input('lidarr-import-through-lidarr'));
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved()).toEqual({ lidarr_download: { import_through_lidarr: true } });
+  });
 });

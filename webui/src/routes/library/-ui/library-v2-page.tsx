@@ -2944,6 +2944,13 @@ type AlbumDetailTab = 'quality' | 'metadata';
 
 function AlbumDetailModal({ album, onClose }: { album: AlbumDetailTarget; onClose: () => void }) {
   const [tab, setTab] = useState<AlbumDetailTab>('quality');
+  // #2316: a profile change keeps the window open (to go on to the metadata),
+  // so the profile shown is the album's own, read fresh after each save
+  const fresh = useQuery(libraryV2AlbumQueryOptions(album.id, { resolve: true })).data;
+  const profileId = fresh?.quality_profile?.id ?? album.quality_profile_id;
+  const profileSource = fresh?.quality_profile_source ?? album.quality_profile_source;
+  const profileExplicit = fresh?.quality_profile_explicit ?? album.quality_profile_explicit;
+  const [savedNote, setSavedNote] = useState(false);
   // #2210: a member reads the album's details; changing them is the admin's
   const canWrite = useLibraryV2CanWrite();
   return (
@@ -2969,15 +2976,22 @@ function AlbumDetailModal({ album, onClose }: { album: AlbumDetailTarget; onClos
       </div>
       <div className={styles.tabBody}>
         {tab === 'quality' ? (
-          <QualityProfilePicker
-            entity="albums"
-            id={album.id}
-            currentProfileId={album.quality_profile_id}
-            currentProfileSource={album.quality_profile_source}
-            currentProfileExplicit={album.quality_profile_explicit}
-            onSaved={onClose}
-            readOnly={!canWrite}
-          />
+          <>
+            <QualityProfilePicker
+              entity="albums"
+              id={album.id}
+              currentProfileId={profileId}
+              currentProfileSource={profileSource}
+              currentProfileExplicit={profileExplicit}
+              onSaved={() => setSavedNote(true)}
+              readOnly={!canWrite}
+            />
+            {savedNote ? (
+              <p className={styles.muted} role="status">
+                Saved. The window stays open so you can check the metadata too.
+              </p>
+            ) : null}
+          </>
         ) : null}
         {tab === 'metadata' ? (
           canWrite ? (
@@ -6764,6 +6778,11 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                       void navigate({ search: (previous) => ({ ...previous, album: next }) })
                     }
                   />
+                ) : null}
+                {/* #2287: the album's files below their quality profile, from
+                    the album's own page too */}
+                {album.tracks_present > 0 ? (
+                  <AlbumUpgradeButton albumId={album.id} albumTitle={album.title} />
                 ) : null}
                 <AlbumOverflowMenu
                   album={{

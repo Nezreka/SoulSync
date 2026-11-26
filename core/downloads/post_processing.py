@@ -53,6 +53,31 @@ _AUDIO_EXTENSIONS = {
 }
 
 
+def context_track_number(original_search: dict, found_file: Optional[str]) -> int:
+    """the track number a download's context carries, else the one its file
+    name shows. 0 when neither says.
+
+    the context's number used to default to 1 and then `== 1` was read as
+    "missing", so a REAL track 1 had its number taken from its file name: the
+    first track of an album, saved as "21 Guns.flac", became track 21. only a
+    number that is absent (or not a real one) sends this to the file name."""
+    raw = (original_search or {}).get('track_number')
+    if isinstance(raw, bool):
+        raw = None
+    try:
+        number = int(raw) if raw is not None else 0
+    except (TypeError, ValueError):
+        number = 0
+    if number >= 1:
+        return number
+    if found_file:
+        number = extract_track_number_from_filename(found_file)
+        logger.warning("[Verification] missing track_number; extracted from filename=%r -> %s",
+                       os.path.basename(found_file), number)
+        return number if isinstance(number, int) and number >= 1 else 0
+    return 0
+
+
 def _is_audio_file(path: str) -> bool:
     return Path(str(path or '')).suffix.lower() in _AUDIO_EXTENSIONS
 
@@ -111,6 +136,28 @@ def _copy_release_audio_to_transfer(source_path: str, transfer_dir: str) -> Opti
     except Exception as exc:
         logger.warning("[Post-Processing] Could not copy release audio to the music library folder: %s", exc)
         return None
+
+
+def _discard_unused_release_copy(copy_path: Optional[str]) -> bool:
+    """Remove the copy of a torrent/usenet track the import did not take.
+
+    The requested track is COPIED out of the release into the music library
+    folder's root and handed to the import, which moves it into place. When
+    the import does not move it (the library's own file was kept, the
+    existing file could not be measured, the artist context was missing, the
+    import raised), the copy stayed where it was: a loose file in the library
+    root, picked up by the media server, and a requeue added ``_release_1``,
+    ``_release_2`` beside it. The release folder still has the original, so
+    the copy is ours to remove. True when one was removed."""
+    try:
+        if copy_path and os.path.isfile(copy_path):
+            os.remove(copy_path)
+            logger.info("[Post-Processing] Removed the release copy the import did not use: %s",
+                        os.path.basename(copy_path))
+            return True
+    except OSError as exc:
+        logger.warning("[Post-Processing] Could not remove unused release copy %s: %s", copy_path, exc)
+    return False
 
 
 def _remove_imported_usenet_job(download_id: str) -> None:
@@ -521,22 +568,12 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                             # CRITICAL FIX: Create album_info dict with proper structure for metadata enhancement
                             # This must match the format used in main stream processor to ensure consistency
 
-                            # Extract track number from context (should be available from fuzzy match)
-                            track_number = original_search.get('track_number', 1)
-
-                            # If no track number in context, extract from filename
-                            if track_number == 1 and found_file:
-                                track_number = extract_track_number_from_filename(found_file)
-                                logger.warning(
-                                    "[Verification] missing track_number; extracted from filename=%r -> %s",
-                                    os.path.basename(found_file),
-                                    track_number,
-                                )
-
-                            # Ensure track_number is valid
-                            if not isinstance(track_number, int) or track_number < 1:
-                                logger.warning(f"[Verification] Unknown track number ({track_number})")
-                                track_number = 0
+                            # the context's own number, the file name's only when
+                            # the context has none (context_track_number)
+                            track_number = context_track_number(original_search, found_file)
+                            if track_number < 1:
+                                logger.warning("[Verification] Unknown track number for %r",
+                                               os.path.basename(found_file) if found_file else None)
 
                             # Get clean track name
                             clean_track_name = get_import_clean_title(context, default=original_search.get('title', 'Unknown Track'))
@@ -664,6 +701,10 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                     context.pop('_pipeline_import_succeeded', None)  # this attempt's outcome only
                 # Run the existing post-processing logic with verification
                 deps.post_process_with_verification(context_key, context, found_file, task_id, batch_id)
+                if release_album and not context.get('_pipeline_import_succeeded'):
+                    # (only an import that did not succeed: one that did may
+                    # have filed the track right where the copy was)
+                    _discard_unused_release_copy(found_file)
                 album_tracks_ok = True
                 if release_album and context.get('_pipeline_import_succeeded') and deps.process_release_file:
                     # The requested track is done and its task completed. The

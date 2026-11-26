@@ -1,33 +1,71 @@
 /**
- * watching now: what others on this server are playing right now (the
- * ones who share; it's on by default and off in player settings), and
- * what you and they have both started lately. join them where they are,
- * start it yourself, or open its page.
+ * Watching now & Watch Parties (Watch Together):
+ * - Cinema-grade live screen cards for everyone sharing on this server
+ * - Theater Waiting Room Watch Parties with synced SoulSync library lobby music,
+ *   Ready checkmarks, live chat & reactions, and scheduled premieres
+ * - Poster-first "Watching the same thing" rail with one-click Watch Party launch
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+import { appURL } from '@/platform/url-base';
 
 import type { PlayItem } from './-engine/types';
-import type { TogetherTitle, WatchingSession } from './-player.api';
+import type { TogetherTitle, WatchParty, WatchingSession } from './-player.api';
 import type { ProgressMeta } from './-player.types';
 
 import { clock } from './-engine/timeline';
 import { MEDIA_KIND, type ItemType } from './-engine/types';
 import { remoteImage } from './-lib/images';
-import { playerSettingsQuery, togetherQuery, watchingNowQuery } from './-player.api';
+import {
+  playerSettingsQuery,
+  togetherQuery,
+  videoCatalogQuery,
+  watchPartiesQuery,
+  watchPartyApi,
+  watchPartyQuery,
+  watchingNowQuery,
+} from './-player.api';
 import { Avatar, nameOf } from './-ui/channel-viewers';
 import { PlayIcon } from './-ui/icons';
 import { Empty, PageTitle, PlayerLink, styles as k } from './-ui/kit';
+import { setActiveWatchPartyId } from './-ui/playback/party-reactions';
 import { channelByIdTune } from './-ui/playback/tuner';
 import { playItems } from './-ui/playback/use-player';
 import s from './-ui/social.module.css';
+import wp from './-ui/watch-party.module.css';
 
 export const Route = createFileRoute('/player/watching')({
+  validateSearch: (
+    raw: Record<string, unknown>,
+  ): {
+    party?: string;
+    start?: string;
+    title?: string;
+    artwork?: string;
+    backdrop?: string;
+  } => ({
+    party: typeof raw.party === 'string' && raw.party.trim() ? raw.party.trim() : undefined,
+    start: typeof raw.start === 'string' && raw.start.trim() ? raw.start.trim() : undefined,
+    title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : undefined,
+    artwork: typeof raw.artwork === 'string' && raw.artwork.trim() ? raw.artwork.trim() : undefined,
+    backdrop:
+      typeof raw.backdrop === 'string' && raw.backdrop.trim() ? raw.backdrop.trim() : undefined,
+  }),
   component: WatchingPage,
 });
 
-const PLAYABLE = new Set<ItemType>(['track', 'movie', 'episode', 'youtube', 'audiobook']);
+const PLAYABLE = new Set<ItemType>([
+  'track',
+  'movie',
+  'episode',
+  'youtube',
+  'audiobook',
+  'podcast_episode',
+]);
+const QUICK_EMOJIS = ['🍿', '🔥', '😂', '😮', '👏', '❤️'];
 
 function itemOf(type: string, id: string, meta: ProgressMeta): PlayItem | null {
   if (!PLAYABLE.has(type as ItemType)) return null;
@@ -45,10 +83,46 @@ function itemOf(type: string, id: string, meta: ProgressMeta): PlayItem | null {
 }
 
 function verb(type: string) {
-  return MEDIA_KIND[type as ItemType] === 'audio' ? 'Listening' : 'Watching';
+  return MEDIA_KIND[type as ItemType] === 'audio' ? 'LISTENING' : 'WATCHING';
 }
 
-function NowCard({ x }: { x: WatchingSession }) {
+function countdownText(epochSec: number | null, nowSec: number): string {
+  if (!epochSec) return '';
+  const diff = Math.max(0, Math.round(epochSec - nowSec));
+  if (diff < 60) return 'Starting now';
+  const mins = Math.floor(diff / 60);
+  if (mins < 60) return `In ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const remM = mins % 60;
+  if (hrs < 24) return remM > 0 ? `In ${hrs}h ${remM}m` : `In ${hrs}h`;
+  return new Date(epochSec * 1000).toLocaleString([], {
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function place(p: {
+  position: number;
+  duration: number | null;
+  finished: boolean;
+  meta: ProgressMeta;
+}) {
+  if (p.finished) return 'Finished';
+  const where = p.meta.subtitle && p.meta.parent_id ? p.meta.subtitle.split(' · ').pop() : null;
+  const pct = p.duration ? ` · ${Math.round((p.position / p.duration) * 100)}%` : '';
+  return `${where ?? clock(p.position)}${pct}`;
+}
+
+// ── Cinema-Grade Watching Now Card ──────────────────────────────────────────
+
+function CinemaNowCard({
+  x,
+  onStartParty,
+}: {
+  x: WatchingSession;
+  onStartParty?: (seed: PartySeed) => void;
+}) {
   const item = itemOf(x.item_type, x.item_id, x.meta);
   const art = remoteImage(x.meta.backdrop) ?? remoteImage(x.meta.artwork);
   const part = x.duration ? Math.min(1, x.position / x.duration) : null;
@@ -56,45 +130,89 @@ function NowCard({ x }: { x: WatchingSession }) {
     if (x.live && x.channel && channelByIdTune(x.channel.id)) return;
     if (item) playItems([item], 0, { startAt: x.position });
   };
+  const detailsHref =
+    x.meta.href ||
+    (x.item_type === 'movie'
+      ? `/player/movies/${x.item_id}`
+      : x.item_type === 'episode' && x.meta.parent_id
+        ? `/player/tv/${x.meta.parent_id}`
+        : x.item_type === 'audiobook'
+          ? `/player/audiobooks/${x.item_id}`
+          : x.item_type === 'youtube'
+            ? '/player/youtube'
+            : null);
+
   return (
-    <article className={s.card} data-playing={x.playing ? 'true' : undefined}>
-      <div className={s.cardArt}>
-        {art ? <img src={art} alt="" loading="lazy" /> : null}
-        <span className={s.cardState}>
-          <span className={s.dot} aria-hidden="true" />
+    <article className={wp.cinemaCard}>
+      {art ? <img className={wp.cinemaBg} src={art} alt="" loading="lazy" /> : null}
+      <div className={wp.cinemaScrim} />
+
+      <div className={wp.cinemaTop}>
+        <span className={wp.livePill}>
+          <span
+            className={`${wp.liveDot} ${x.playing ? wp.liveDotActive : ''}`}
+            aria-hidden="true"
+          />
           {x.live && x.channel
-            ? `Channel ${x.channel.number ?? ''} · ${x.channel.name}`
+            ? `CH ${x.channel.number ?? ''} · ${x.channel.name}`
             : x.playing
               ? verb(x.item_type)
-              : 'Paused'}
+              : 'PAUSED'}
         </span>
-        {part !== null ? (
-          <span className={s.cardBar}>
-            <span style={{ width: `${part * 100}%` }} />
-          </span>
-        ) : null}
-      </div>
-      <div className={s.cardBody}>
-        <div className={s.who}>
+
+        <span className={wp.whoChip}>
           <Avatar profile={x.profile} />
-          <span className={s.whoName}>{nameOf(x)}</span>
-        </div>
-        <h3 className={s.cardTitle}>{x.meta.title ?? 'Something'}</h3>
-        {x.meta.subtitle ? <p className={s.cardSub}>{x.meta.subtitle}</p> : null}
-        <div className={s.actions}>
+          <span>{nameOf(x)}</span>
+        </span>
+      </div>
+
+      <div className={wp.cinemaBody}>
+        <h3 className={wp.cinemaTitle}>{x.meta.title ?? 'Something'}</h3>
+        {x.meta.subtitle ? <p className={wp.cinemaSub}>{x.meta.subtitle}</p> : null}
+
+        {part !== null ? (
+          <div className={wp.progressWrap}>
+            <div className={wp.progressTrack}>
+              <div className={wp.progressFill} style={{ width: `${Math.round(part * 100)}%` }} />
+            </div>
+            <span className={wp.progressTime}>
+              {clock(x.position)} / {clock(x.duration ?? 0)}
+            </span>
+          </div>
+        ) : null}
+
+        <div className={wp.cardActions}>
           {item && !x.you ? (
-            <button type="button" className={k.btnPrimary} onClick={join} data-nav>
+            <button
+              type="button"
+              className={`${wp.glassBtn} ${wp.glassBtnPrimary}`}
+              onClick={join}
+              data-nav
+            >
               <PlayIcon />
               {x.live && x.channel ? 'Tune in' : `Join at ${clock(x.position)}`}
             </button>
           ) : null}
-          {item && !x.live && !x.you ? (
-            <button type="button" className={k.btn} onClick={() => playItems([item])} data-nav>
-              Start it
+          {onStartParty &&
+          (x.item_type === 'movie' || x.item_type === 'episode' || x.item_type === 'youtube') ? (
+            <button
+              type="button"
+              className={wp.glassBtn}
+              onClick={() =>
+                onStartParty({
+                  item_type: x.item_type as 'movie' | 'episode' | 'youtube',
+                  item_id: x.item_id,
+                  title: x.meta.title ?? 'Untitled',
+                  meta: x.meta,
+                })
+              }
+              data-nav
+            >
+              🍿 Watch Party
             </button>
           ) : null}
-          {x.meta.href ? (
-            <PlayerLink href={x.meta.href} className={k.btn} data-nav>
+          {detailsHref ? (
+            <PlayerLink href={detailsHref} className={wp.glassBtn} data-nav>
               Details
             </PlayerLink>
           ) : null}
@@ -104,35 +222,127 @@ function NowCard({ x }: { x: WatchingSession }) {
   );
 }
 
-function place(p: {
-  position: number;
-  duration: number | null;
-  finished: boolean;
-  meta: ProgressMeta;
+// ── Watch Party Card (Active Lobby / Playing / Scheduled Premiere) ──────────
+
+function WatchPartyCard({
+  party,
+  nowSec,
+  onOpen,
+}: {
+  party: WatchParty;
+  nowSec: number;
+  onOpen: (id: string) => void;
 }) {
-  if (p.finished) return 'finished';
-  const where = p.meta.subtitle && p.meta.parent_id ? p.meta.subtitle.split(' · ').pop() : null;
-  const pct = p.duration ? ` · ${Math.round((p.position / p.duration) * 100)}%` : '';
-  return `${where ?? clock(p.position)}${pct}`;
+  const art = remoteImage(party.meta.backdrop) ?? remoteImage(party.meta.artwork);
+  const statusLabel =
+    party.status === 'playing'
+      ? `LIVE · ${clock(party.live_position)}`
+      : party.status === 'paused'
+        ? `PAUSED · ${clock(party.live_position)}`
+        : party.status === 'scheduled'
+          ? `SCHEDULED · ${countdownText(party.scheduled_for, nowSec)}`
+          : `LOBBY OPEN · ${party.ready_count}/${party.member_count} READY`;
+
+  return (
+    <article
+      className={wp.cinemaCard}
+      style={{ cursor: 'pointer' }}
+      onClick={() => onOpen(party.id)}
+    >
+      {art ? <img className={wp.cinemaBg} src={art} alt="" loading="lazy" /> : null}
+      <div className={wp.cinemaScrim} />
+
+      <div className={wp.cinemaTop}>
+        <span className={wp.livePill}>
+          <span
+            className={`${wp.liveDot} ${party.status === 'playing' ? wp.liveDotActive : wp.liveDotLobby}`}
+            aria-hidden="true"
+          />
+          {statusLabel}
+        </span>
+
+        <span className={wp.whoChip}>
+          <Avatar profile={party.host_profile} />
+          <span>
+            {party.member_count} {party.member_count === 1 ? 'viewer' : 'viewers'}
+          </span>
+        </span>
+      </div>
+
+      <div className={wp.cinemaBody}>
+        <h3 className={wp.cinemaTitle}>{party.title}</h3>
+        <p className={wp.cinemaSub}>
+          Hosted by {party.host_profile?.name ?? 'Host'}
+          {party.meta.subtitle ? ` · ${party.meta.subtitle}` : ''}
+        </p>
+
+        {party.lobby_track && (party.status === 'lobby' || party.status === 'scheduled') ? (
+          <div className={wp.musicTicker}>
+            <span>♪</span>
+            <span>
+              Lobby music: {party.lobby_track.title}
+              {party.lobby_track.artist ? ` — ${party.lobby_track.artist}` : ''}
+            </span>
+          </div>
+        ) : null}
+
+        <div className={wp.cardActions}>
+          <button
+            type="button"
+            className={`${wp.glassBtn} ${wp.glassBtnPrimary}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen(party.id);
+            }}
+          >
+            <PlayIcon />
+            {party.status === 'playing'
+              ? 'Join & Sync'
+              : party.status === 'scheduled'
+                ? party.is_member
+                  ? 'Open Room'
+                  : 'RSVP / Enter'
+                : 'Enter Theater Lobby'}
+          </button>
+        </div>
+      </div>
+    </article>
+  );
 }
 
-function TogetherRow({ t }: { t: TogetherTitle }) {
+// ── Shared Title Card ("Watching the Same Thing") ───────────────────────────
+
+function SharedTitleCard({
+  t,
+  onStartParty,
+}: {
+  t: TogetherTitle;
+  onStartParty: (seed: {
+    item_type: 'movie' | 'episode' | 'youtube';
+    item_id: string;
+    title: string;
+    meta: ProgressMeta;
+  }) => void;
+}) {
   const me = t.mine;
   const art = remoteImage(me.meta.artwork) ?? remoteImage(me.meta.backdrop);
   const title = me.meta.parent_title ?? me.meta.title ?? 'Something';
   const item = itemOf(me.item_type, me.item_id, me.meta);
+  const canParty =
+    me.item_type === 'movie' || me.item_type === 'episode' || me.item_type === 'youtube';
+
   return (
-    <li className={s.together}>
-      <span className={s.togetherArt}>{art ? <img src={art} alt="" loading="lazy" /> : null}</span>
-      <span className={s.togetherText}>
+    <article className={wp.sharedCard}>
+      <div className={wp.sharedPoster}>{art ? <img src={art} alt="" loading="lazy" /> : null}</div>
+      <div className={wp.sharedInfo}>
         {me.meta.href ? (
-          <PlayerLink href={me.meta.href} className={s.togetherTitle} data-nav>
+          <PlayerLink href={me.meta.href} className={wp.sharedTitle} data-nav>
             {title}
           </PlayerLink>
         ) : (
-          <span className={s.togetherTitle}>{title}</span>
+          <span className={wp.sharedTitle}>{title}</span>
         )}
-        <span className={s.togetherWho}>
+        <div className={wp.sharedMeta}>
           <span>You: {place(me)}</span>
           {t.others.map((o) => (
             <span key={o.profile_id} className={s.togetherOther}>
@@ -140,34 +350,1323 @@ function TogetherRow({ t }: { t: TogetherTitle }) {
               {o.profile.name}: {place(o)}
             </span>
           ))}
-        </span>
-      </span>
-      {item && !me.finished ? (
-        <button
-          type="button"
-          className={s.round}
-          aria-label={`Keep going with ${title}`}
-          title="Keep going"
-          onClick={() => playItems([item])}
-          data-nav
-        >
-          <PlayIcon />
-        </button>
-      ) : null}
-    </li>
+        </div>
+        <div className={wp.cardActions} style={{ marginTop: 4 }}>
+          {item && !me.finished ? (
+            <button
+              type="button"
+              className={`${wp.glassBtn} ${wp.glassBtnPrimary}`}
+              onClick={() => playItems([item])}
+            >
+              <PlayIcon />
+              Resume
+            </button>
+          ) : null}
+          {canParty ? (
+            <button
+              type="button"
+              className={wp.glassBtn}
+              onClick={() =>
+                onStartParty({
+                  item_type: me.item_type as 'movie' | 'episode' | 'youtube',
+                  item_id: me.item_id,
+                  title,
+                  meta: me.meta,
+                })
+              }
+            >
+              🍿 Watch Party
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </article>
   );
 }
 
+// ── Create Watch Party Modal ────────────────────────────────────────────────
+
+interface PartySeed {
+  item_type: 'movie' | 'episode' | 'youtube';
+  item_id: string;
+  title: string;
+  meta: ProgressMeta;
+  show_id?: number | null;
+}
+
+/**
+ * a modal's manners, as the player's Sheet has them: focus goes in, escape
+ * closes it, focus comes back where it was
+ */
+function useDialog(onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    ref.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      close.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      before?.focus?.();
+    };
+  }, []);
+  return ref;
+}
+
+function CreatePartyModal({
+  initialSeed,
+  onClose,
+  onCreated,
+}: {
+  initialSeed: PartySeed | null;
+  onClose: () => void;
+  onCreated: (party: WatchParty) => void;
+}) {
+  const dialogRef = useDialog(onClose);
+  const catalog = useQuery(videoCatalogQuery());
+  const [search, setSearch] = useState('');
+  const [kindFilter, setKindFilter] = useState<'all' | 'movie' | 'episode'>('all');
+  const [picked, setPicked] = useState<PartySeed | null>(initialSeed);
+  const [roomTitle, setRoomTitle] = useState(initialSeed?.title ?? '');
+  const [mode, setMode] = useState<'now' | 'schedule'>('now');
+  const [scheduleInput, setScheduleInput] = useState(() => {
+    const d = new Date(Date.now() + 60 * 60 * 1000);
+    d.setMinutes(0, 0, 0);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  });
+  const [controlMode, setControlMode] = useState<'host' | 'everyone'>('host');
+  const [lobbyMusic, setLobbyMusic] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const candidates = useMemo(() => {
+    const cat = catalog.data;
+    if (!cat) return [] as PartySeed[];
+    const q = search.trim().toLowerCase();
+    const out: PartySeed[] = [];
+
+    if (kindFilter === 'all' || kindFilter === 'movie') {
+      for (const m of cat.movies) {
+        if (q && !m.title.toLowerCase().includes(q)) continue;
+        out.push({
+          item_type: 'movie',
+          item_id: String(m.id),
+          title: m.title,
+          meta: {
+            title: m.title,
+            subtitle:
+              [m.year, m.content_rating, m.genres?.[0]].filter(Boolean).join(' · ') || 'Movie',
+            artwork: m.has_poster ? `/api/video/poster/movie/${m.id}?w=342` : undefined,
+            backdrop: m.has_backdrop ? `/api/video/backdrop/movie/${m.id}?w=1280` : undefined,
+            href: `/player/movies/${m.id}`,
+          },
+        });
+        if (out.length >= (kindFilter === 'movie' ? 36 : 20)) break;
+      }
+    }
+
+    if (kindFilter === 'all' || kindFilter === 'episode') {
+      for (const sh of cat.shows) {
+        if (q && !sh.title.toLowerCase().includes(q)) continue;
+        const latest = sh.episodes?.[sh.episodes.length - 1];
+        if (!latest) continue;
+        const [epId, season, epNum, , epTitle] = latest;
+        out.push({
+          item_type: 'episode',
+          item_id: String(epId),
+          show_id: sh.id,
+          title: `${sh.title} · S${season} E${epNum}`,
+          meta: {
+            title: sh.title,
+            subtitle: `S${season} E${epNum}${epTitle ? ` · ${epTitle}` : ''}`,
+            artwork: sh.has_poster ? `/api/video/poster/show/${sh.id}?w=342` : undefined,
+            backdrop: sh.has_backdrop ? `/api/video/backdrop/show/${sh.id}?w=1280` : undefined,
+            href: `/player/tv/${sh.id}`,
+            parent_id: String(sh.id),
+            parent_title: sh.title,
+          },
+        });
+        if (out.length >= 40) break;
+      }
+    }
+
+    return out;
+  }, [catalog.data, search, kindFilter]);
+
+  const createMut = useMutation({
+    mutationFn: () => {
+      if (!picked) throw new Error('Pick a movie or show first');
+      let scheduled_for: number | null = null;
+      if (mode === 'schedule') {
+        const ms = Date.parse(scheduleInput);
+        if (!Number.isFinite(ms)) throw new Error('Pick a valid schedule date & time');
+        scheduled_for = Math.floor(ms / 1000);
+      }
+      return watchPartyApi.create({
+        title: roomTitle.trim() || picked.title,
+        item_type: picked.item_type,
+        item_id: picked.item_id,
+        meta: picked.meta,
+        show_id: picked.show_id ?? null,
+        scheduled_for,
+        control_mode: controlMode,
+        lobby_music: lobbyMusic,
+      });
+    },
+    onSuccess: (party) => onCreated(party),
+    onError: (err: Error) => setError(err.message || 'Could not create watch party'),
+  });
+
+  const pickedArt = remoteImage(picked?.meta.backdrop) ?? remoteImage(picked?.meta.artwork);
+  const pickedPoster = remoteImage(picked?.meta.artwork);
+
+  return (
+    <div className={wp.backdrop} onClick={onClose}>
+      <div
+        ref={dialogRef}
+        className={wp.modal}
+        style={{ maxWidth: 760 }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Start a watch party"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={wp.modalHero}>
+          {pickedArt ? <img className={wp.modalHeroBg} src={pickedArt} alt="" /> : null}
+          <div className={wp.modalHeroInner}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+              {pickedPoster ? (
+                <img
+                  src={pickedPoster}
+                  alt=""
+                  style={{
+                    width: 56,
+                    height: 82,
+                    borderRadius: 10,
+                    objectFit: 'cover',
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    boxShadow: '0 12px 28px rgba(0,0,0,0.55)',
+                    flexShrink: 0,
+                  }}
+                />
+              ) : null}
+              <div style={{ minWidth: 0 }}>
+                <span className={wp.livePill} style={{ marginBottom: 6 }}>
+                  <span className={`${wp.liveDot} ${wp.liveDotLobby}`} />
+                  THEATER PREMIERE SETUP
+                </span>
+                <h2 className={wp.modalTitle}>
+                  {picked ? (picked.meta.title ?? picked.title) : 'Start a Watch Party'}
+                </h2>
+                <p className={wp.modalSub}>
+                  {picked
+                    ? `${picked.item_type === 'movie' ? 'Movie' : 'TV Episode'}${picked.meta.subtitle ? ` · ${picked.meta.subtitle}` : ''}`
+                    : 'Choose a movie or show to open a synchronized theater lobby with library music.'}
+                </p>
+              </div>
+            </div>
+            <button type="button" className={wp.glassBtn} onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className={wp.roomMain} style={{ borderRight: 'none', gap: 14 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <input
+              className={wp.input}
+              style={{ flex: '1 1 260px' }}
+              placeholder="Search your movies & shows…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <div className={wp.pillToggleRow}>
+              {(
+                [
+                  ['all', 'All'],
+                  ['movie', 'Movies'],
+                  ['episode', 'TV Shows'],
+                ] as const
+              ).map(([k, label]) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={`${wp.pillToggle} ${kindFilter === k ? wp.pillToggleOn : ''}`}
+                  onClick={() => setKindFilter(k)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className={wp.pickerList}>
+            {candidates.map((c) => {
+              const selected = picked?.item_type === c.item_type && picked?.item_id === c.item_id;
+              const thumb = remoteImage(c.meta.artwork);
+              return (
+                <button
+                  key={`${c.item_type}:${c.item_id}`}
+                  type="button"
+                  className={`${wp.pickerItem} ${selected ? wp.pickerItemActive : ''}`}
+                  onClick={() => {
+                    setPicked(c);
+                    setRoomTitle(c.title);
+                  }}
+                >
+                  <div className={wp.pickerPosterWrap}>
+                    {thumb ? (
+                      <img
+                        className={wp.pickerThumb}
+                        src={thumb}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <div className={wp.pickerFallback}>{c.title.charAt(0).toUpperCase()}</div>
+                    )}
+                    <span className={wp.pickerBadge}>
+                      {c.item_type === 'movie' ? 'FILM' : 'TV'}
+                    </span>
+                    {selected ? <span className={wp.pickerCheck}>✓</span> : null}
+                  </div>
+                  <div className={wp.pickerMeta}>
+                    <div className={wp.pickerTitle}>{c.meta.title ?? c.title}</div>
+                    <div className={wp.pickerSub}>
+                      {c.meta.subtitle ?? (c.item_type === 'movie' ? 'Movie' : 'Latest Episode')}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: 10,
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: '0.07em',
+                  color: 'var(--pl-text-3)',
+                  marginBottom: 6,
+                }}
+              >
+                ROOM TITLE
+              </div>
+              <input
+                className={wp.input}
+                placeholder="Party name (e.g. Friday Night Movie)"
+                value={roomTitle}
+                onChange={(e) => setRoomTitle(e.target.value)}
+              />
+            </div>
+            <div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: '0.07em',
+                  color: 'var(--pl-text-3)',
+                  marginBottom: 6,
+                }}
+              >
+                SHOWTIME
+              </div>
+              <div className={wp.pillToggleRow}>
+                <button
+                  type="button"
+                  className={`${wp.pillToggle} ${mode === 'now' ? wp.pillToggleOn : ''}`}
+                  onClick={() => setMode('now')}
+                >
+                  🍿 Open Lobby Now
+                </button>
+                <button
+                  type="button"
+                  className={`${wp.pillToggle} ${mode === 'schedule' ? wp.pillToggleOn : ''}`}
+                  onClick={() => setMode('schedule')}
+                >
+                  🗓 Schedule Premiere
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {mode === 'schedule' ? (
+            <input
+              type="datetime-local"
+              className={wp.input}
+              value={scheduleInput}
+              onChange={(e) => setScheduleInput(e.target.value)}
+            />
+          ) : null}
+
+          <div>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: '0.07em',
+                color: 'var(--pl-text-3)',
+                marginBottom: 6,
+              }}
+            >
+              THEATER OPTIONS
+            </div>
+            <div className={wp.pillToggleRow}>
+              <button
+                type="button"
+                className={`${wp.pillToggle} ${controlMode === 'host' ? wp.pillToggleOn : ''}`}
+                onClick={() => setControlMode('host')}
+              >
+                ★ Host controls playback
+              </button>
+              <button
+                type="button"
+                className={`${wp.pillToggle} ${controlMode === 'everyone' ? wp.pillToggleOn : ''}`}
+                onClick={() => setControlMode('everyone')}
+              >
+                Everyone can pause / seek
+              </button>
+              <button
+                type="button"
+                className={`${wp.pillToggle} ${lobbyMusic ? wp.pillToggleOn : ''}`}
+                onClick={() => setLobbyMusic((v) => !v)}
+              >
+                ♪ Lobby music: {lobbyMusic ? 'On' : 'Off'}
+              </button>
+            </div>
+          </div>
+
+          {error ? <p style={{ color: '#f87171', fontSize: 12.5, margin: 0 }}>{error}</p> : null}
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 10,
+              paddingTop: 4,
+            }}
+          >
+            <span style={{ fontSize: 12, color: 'var(--pl-text-3)' }}>
+              {picked ? `Selected: ${picked.title}` : 'Select a movie or show above to continue'}
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className={wp.glassBtn} onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={wp.startPartyBtn}
+                disabled={!picked || createMut.isPending}
+                onClick={() => {
+                  setError(null);
+                  createMut.mutate();
+                }}
+              >
+                {createMut.isPending
+                  ? 'Creating…'
+                  : mode === 'schedule'
+                    ? 'Schedule Watch Party'
+                    : 'Open Theater Lobby'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Watch Party Room Modal (Theater Waiting Room + Synced Lobby Music + Chat)
+
+interface RoomFloatingBubble {
+  uid: string;
+  emoji: string;
+  sender: string;
+  side: 'left' | 'right';
+  edgePx: number;
+  swayPx: number;
+}
+
+function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: () => void }) {
+  const dialogRef = useDialog(onClose);
+  const qc = useQueryClient();
+  const roomQ = useQuery(watchPartyQuery(partyId));
+  const party = roomQ.data;
+  const [chatText, setChatText] = useState('');
+  const [lobbyMuted, setLobbyMuted] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [floatingBubbles, setFloatingBubbles] = useState<RoomFloatingBubble[]>([]);
+  const [rateLimitedUntil, setRateLimitedUntil] = useState(0);
+  const [roomError, setRoomError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const autoJoined = useRef(false);
+  const seenMsgIds = useRef<Set<number>>(new Set());
+  const msgInitialized = useRef(false);
+  const prevStatusRef = useRef<string | null>(null);
+  const reactionTimestampsRef = useRef<number[]>([]);
+
+  const spawnRoomBubble = (uid: string, emoji: string, sender: string, seed: number) => {
+    const side: 'left' | 'right' = seed % 2 === 0 ? 'left' : 'right';
+    const edgePx = 10 + ((seed * 19) % 44);
+    const swayPx = (seed % 3 === 0 ? 1 : -1) * (10 + (seed % 14));
+    const bubble: RoomFloatingBubble = { uid, emoji, sender, side, edgePx, swayPx };
+    setFloatingBubbles((prev) => [...prev.slice(-16), bubble]);
+    window.setTimeout(() => {
+      setFloatingBubbles((prev) => prev.filter((x) => x.uid !== uid));
+    }, 2800);
+  };
+
+  // Float incoming emoji reactions up both the left and right sides of the room modal
+  useEffect(() => {
+    if (!party) return;
+    const msgs = party.messages ?? [];
+    // the room as it was when it opened is history; anything after floats.
+    // an empty room counts as opened too, or its first reaction never showed
+    if (!msgInitialized.current) {
+      msgInitialized.current = true;
+      seenMsgIds.current = new Set(msgs.map((m) => m.id));
+      return;
+    }
+    for (const m of msgs) {
+      if (seenMsgIds.current.has(m.id)) continue;
+      seenMsgIds.current.add(m.id);
+      const em = m.body.trim();
+      if (m.kind === 'reaction' || QUICK_EMOJIS.includes(em) || em.startsWith('🚽')) {
+        spawnRoomBubble(`room-srv-${m.id}`, em, m.profile?.name ?? '', m.id);
+      }
+    }
+  }, [party, party?.messages]);
+
+  const launchSyncedVideo = (p: WatchParty, opts?: { withCurtain?: boolean }) => {
+    const item = itemOf(p.item_type, p.item_id, p.meta);
+    if (!item) return;
+    const el = audioRef.current;
+    if (el && !el.paused) {
+      // Smooth 480ms theater fade-out as velvet curtains part
+      const startVol = el.volume || 1;
+      const steps = 8;
+      let step = 0;
+      const fade = window.setInterval(() => {
+        step += 1;
+        el.volume = Math.max(0, startVol * (1 - step / steps));
+        if (step >= steps) {
+          window.clearInterval(fade);
+          el.pause();
+          el.volume = startVol;
+        }
+      }, 60);
+    }
+    setActiveWatchPartyId(p.id, { triggerCurtain: opts?.withCurtain ?? true });
+    playItems([item], 0, { startAt: p.live_position });
+    onClose();
+  };
+
+  // When the party transitions from lobby/scheduled -> playing, auto-launch everyone into the fullscreen video player with the full-screen velvet curtain unfurl!
+  useEffect(() => {
+    if (!party) return;
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = party.status;
+    if ((prev === 'lobby' || prev === 'scheduled') && party.status === 'playing' && !starting) {
+      launchSyncedVideo(party, { withCurtain: true });
+    }
+  }, [party?.status, party, starting]);
+
+  const startShowtime = async (p: WatchParty) => {
+    if (starting) return;
+    setStarting(true);
+    setRoomError(null);
+    try {
+      const updated = await watchPartyApi.state(p.id, { action: 'start' });
+      refresh();
+      launchSyncedVideo(updated, { withCurtain: true });
+    } catch (e) {
+      setRoomError(e instanceof Error ? e.message : 'Could not start stream');
+      setStarting(false);
+    }
+  };
+
+  // Auto-join room on open
+  useEffect(() => {
+    if (!party || autoJoined.current) return;
+    autoJoined.current = true;
+    if (!party.is_member) {
+      void watchPartyApi
+        .join(partyId, { rsvp: party.status === 'scheduled' })
+        .then(() => qc.invalidateQueries({ queryKey: ['player', 'party', partyId] }))
+        .catch((e: unknown) =>
+          setRoomError(e instanceof Error && e.message ? e.message : "Couldn't join this party"),
+        );
+    }
+  }, [party, partyId, qc]);
+
+  // Synced SoulSync library lobby music while in the waiting room
+  const [audioBlocked, setAudioBlocked] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const lobbyTrack = party?.lobby_track ?? null;
+  const playLobbyAudio =
+    !lobbyMuted && !!lobbyTrack && (party?.status === 'lobby' || party?.status === 'scheduled');
+
+  const tryPlayLobbyAudio = () => {
+    const el = audioRef.current;
+    if (!el || !playLobbyAudio || !lobbyTrack) return;
+    el.volume = 0.55;
+    void el
+      .play()
+      .then(() => setAudioBlocked(false))
+      .catch(() => setAudioBlocked(true));
+  };
+
+  // the poll hands back a new lobby_track object every 2.5s: the effect keys
+  // on the song itself, or it re-ran play() (and reset the blocked state) each poll
+  const lobbyKey = lobbyTrack ? `${lobbyTrack.track_id}:${lobbyTrack.started_at}` : null;
+  const lobbyTrackRef = useRef(lobbyTrack);
+  lobbyTrackRef.current = lobbyTrack;
+  useEffect(() => {
+    const el = audioRef.current;
+    const lobbyTrack = lobbyTrackRef.current;
+    if (!el) return;
+    if (!playLobbyAudio || !lobbyTrack) {
+      el.pause();
+      setAudioBlocked(false);
+      return;
+    }
+    const url = appURL(`/api/player/stream/track/${encodeURIComponent(lobbyTrack.track_id)}`);
+    if (el.src !== new URL(url, window.location.origin).href) {
+      el.src = url;
+    }
+    if (
+      typeof lobbyTrack.live_position === 'number' &&
+      Math.abs(el.currentTime - lobbyTrack.live_position) > 3
+    ) {
+      el.currentTime = lobbyTrack.live_position;
+    }
+    el.volume = 0.55;
+    void el
+      .play()
+      .then(() => setAudioBlocked(false))
+      .catch(() => {
+        setAudioBlocked(true);
+      });
+  }, [playLobbyAudio, lobbyKey]);
+
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['player', 'party', partyId] });
+    void qc.invalidateQueries({ queryKey: ['player', 'parties'] });
+  };
+
+  if (!party) {
+    // a dead or mistyped invite link: say so, don't spin forever
+    const gone = roomQ.isError;
+    return (
+      <div className={wp.backdrop} onClick={onClose}>
+        <div
+          className={wp.modal}
+          style={{ padding: 32, textAlign: 'center' }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Watch party"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {gone ? (
+            <>
+              <p>This watch party has ended, or the link isn't right.</p>
+              <button type="button" className={wp.glassBtn} onClick={onClose}>
+                Close
+              </button>
+            </>
+          ) : (
+            'Loading theater room…'
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const me = party.members.find((m) => m.you);
+  const poster = remoteImage(party.meta.artwork) ?? remoteImage(party.meta.backdrop);
+  const bg = remoteImage(party.meta.backdrop) ?? poster;
+  const majorityReady =
+    party.majority_ready ?? (party.member_count > 0 && party.ready_count * 2 > party.member_count);
+  const canStartFromLobby =
+    party.is_host || (party.member_count > 1 && majorityReady) || party.can_control;
+  const isRateLimited = Date.now() < rateLimitedUntil;
+  const peeBreak = party.pee_break ?? null;
+  const isMyPeeBreak = !!peeBreak && me?.profile_id === peeBreak.profile_id;
+  const peeCooldownSec = party.pee_cooldown_remaining ?? 0;
+  // what the server lets this viewer do: anyone in the room pauses; play,
+  // resume, seek and the lobby music are the host's, or everyone's in
+  // "everyone" mode (core/player/parties.py update_state)
+  const canSteer = party.is_host || party.control_mode === 'everyone';
+  /** a room action: a refusal or a dropped request says so, never an unhandled rejection */
+  const act = async (fn: () => Promise<unknown>, fallback: string) => {
+    setRoomError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setRoomError(e instanceof Error && e.message ? e.message : fallback);
+    }
+  };
+
+  const handleSendRoomReaction = async (em: string) => {
+    const now = Date.now();
+    const recent = reactionTimestampsRef.current.filter((t) => now - t < 4000);
+    if (recent.length >= 5) {
+      setRateLimitedUntil(now + 2800);
+      setRoomError('Emoji cooldown (max 5 reactions per 4s)…');
+      window.setTimeout(() => setRoomError(null), 2600);
+      return;
+    }
+    recent.push(now);
+    reactionTimestampsRef.current = recent;
+    if (recent.length >= 5) {
+      setRateLimitedUntil(now + 2500);
+    }
+    const seed = now + recent.length * 13;
+    spawnRoomBubble(`room-local-${now}-${Math.random()}`, em, 'You', seed);
+    try {
+      const msg = await watchPartyApi.chat(party.id, 'reaction', em);
+      if (msg?.id) seenMsgIds.current.add(msg.id);
+      refresh();
+    } catch (e) {
+      setRoomError(e instanceof Error ? e.message : 'Slow down on emoji reactions!');
+    }
+  };
+
+  return (
+    <div className={wp.backdrop} onClick={onClose}>
+      <audio ref={audioRef} loop />
+      <div
+        ref={dialogRef}
+        className={wp.modal}
+        role="dialog"
+        aria-modal="true"
+        aria-label={party.title}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Dual-Side (Left + Right) Floating Emoji Reaction Lanes inside the Room Modal */}
+        <div className={wp.roomSideLaneLeft} aria-hidden="true">
+          {floatingBubbles
+            .filter((b) => b.side === 'left')
+            .map((b) => (
+              <div
+                key={b.uid}
+                className={wp.roomFloatingBubble}
+                style={{
+                  left: b.edgePx,
+                  ['--sway-px' as string]: `${b.swayPx}px`,
+                }}
+              >
+                <span className={wp.roomFloatingEmoji}>{b.emoji}</span>
+                {b.sender ? <span className={wp.roomFloatingSender}>{b.sender}</span> : null}
+              </div>
+            ))}
+        </div>
+        <div className={wp.roomSideLaneRight} aria-hidden="true">
+          {floatingBubbles
+            .filter((b) => b.side === 'right')
+            .map((b) => (
+              <div
+                key={b.uid}
+                className={wp.roomFloatingBubble}
+                style={{
+                  right: b.edgePx,
+                  ['--sway-px' as string]: `${b.swayPx}px`,
+                }}
+              >
+                <span className={wp.roomFloatingEmoji}>{b.emoji}</span>
+                {b.sender ? <span className={wp.roomFloatingSender}>{b.sender}</span> : null}
+              </div>
+            ))}
+        </div>
+
+        <div className={wp.modalHero}>
+          {bg ? <img className={wp.modalHeroBg} src={bg} alt="" /> : null}
+          <div className={wp.modalHeroInner}>
+            <div>
+              <span className={wp.livePill} style={{ marginBottom: 8 }}>
+                <span
+                  className={`${wp.liveDot} ${party.status === 'playing' ? wp.liveDotActive : wp.liveDotLobby}`}
+                />
+                {party.status === 'playing'
+                  ? `PLAYING · ${clock(party.live_position)}`
+                  : party.status === 'paused'
+                    ? peeBreak
+                      ? `🚽 PEE BREAK · ${clock(party.live_position)}`
+                      : `PAUSED · ${clock(party.live_position)}`
+                    : party.status === 'scheduled'
+                      ? `SCHEDULED · ${countdownText(party.scheduled_for, Date.now() / 1000)}`
+                      : 'THEATER WAITING ROOM'}
+              </span>
+              <h2 className={wp.modalTitle}>{party.title}</h2>
+              <p className={wp.modalSub}>
+                Hosted by {party.host_profile?.name ?? 'Host'} · Room #{party.id}
+                {party.meta.subtitle ? ` · ${party.meta.subtitle}` : ''}
+              </p>
+            </div>
+            <div className={wp.premierBar}>
+              <button
+                type="button"
+                className={wp.glassBtn}
+                onClick={() => {
+                  // behind a reverse proxy the app lives under a base path: appURL keeps it
+                  const link = new URL(
+                    appURL(`/player/watching?party=${encodeURIComponent(party.id)}`),
+                    window.location.origin,
+                  ).href;
+                  // "copied" only when it was (no clipboard on plain-http lan)
+                  if (!navigator.clipboard) {
+                    window.prompt('Copy this invite link', link);
+                    return;
+                  }
+                  void navigator.clipboard
+                    .writeText(link)
+                    .then(() => {
+                      setCopiedLink(true);
+                      window.setTimeout(() => setCopiedLink(false), 2000);
+                    })
+                    .catch(() => window.prompt('Copy this invite link', link));
+                }}
+                title="Copy direct invite link to this Watch Party"
+              >
+                {copiedLink ? '✓ Copied' : 'Share'}
+              </button>
+              {party.is_member ? (
+                <button
+                  type="button"
+                  className={wp.glassBtn}
+                  title="Leave this Watch Party room"
+                  onClick={() =>
+                    void act(async () => {
+                      await watchPartyApi.leave(party.id);
+                      setActiveWatchPartyId(null);
+                      refresh();
+                      onClose();
+                    }, "Couldn't leave the party")
+                  }
+                >
+                  Leave Party
+                </button>
+              ) : null}
+              {party.is_host ? (
+                <button
+                  type="button"
+                  className={wp.glassBtn}
+                  title="End this Watch Party for everyone"
+                  onClick={() =>
+                    void act(async () => {
+                      await watchPartyApi.remove(party.id);
+                      setActiveWatchPartyId(null);
+                      refresh();
+                      onClose();
+                    }, "Couldn't end the party")
+                  }
+                >
+                  End Party
+                </button>
+              ) : null}
+              <button type="button" className={wp.glassBtn} onClick={onClose}>
+                Minimize
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className={wp.roomGrid}>
+          <div className={wp.roomMain}>
+            {/* Sleek Cinema Feature Presentation Showcase Card (Velvet curtains now unfurl full-screen over the video player!) */}
+            <div className={wp.lobbyShowcase}>
+              {bg ? <img className={wp.lobbyShowcaseBg} src={bg} alt="" /> : null}
+              <div className={wp.lobbyShowcaseScrim} />
+              <div className={wp.lobbyPosterCard}>
+                {poster ? (
+                  <img src={poster} alt="" />
+                ) : (
+                  <div className={wp.pickerFallback}>
+                    {(party.title || '?').slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <div className={wp.lobbyShowcaseInfo}>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 850,
+                    letterSpacing: '0.16em',
+                    textTransform: 'uppercase',
+                    color: '#f6c978',
+                  }}
+                >
+                  {party.status === 'playing'
+                    ? `● NOW SCREENING · ${clock(party.live_position)}`
+                    : party.status === 'paused'
+                      ? `❚❚ PAUSED AT ${clock(party.live_position)}`
+                      : '★ FEATURE PRESENTATION'}
+                </div>
+                <div style={{ fontSize: 19, fontWeight: 900, color: '#fff', lineHeight: 1.18 }}>
+                  {party.title}
+                </div>
+                {party.meta.subtitle ? (
+                  <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.72)' }}>
+                    {party.meta.subtitle}
+                  </div>
+                ) : null}
+                <div style={{ marginTop: 4 }}>
+                  {majorityReady ? (
+                    <span className={wp.majorityPill}>
+                      ✓ {party.ready_count} of {party.member_count} Ready · Majority Ready to Start!
+                    </span>
+                  ) : (
+                    <span className={wp.waitingMajorityPill}>
+                      {party.ready_count} of {party.member_count} Ready · Majority or Host starts
+                      stream
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Active 🚽 5-Minute Pee Break Intermission Banner */}
+            {peeBreak ? (
+              <div className={wp.peeBreakBanner}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 24 }}>🚽</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 850, color: '#fef3c7' }}>
+                      {peeBreak.profile?.name ?? 'Someone'} called a 5-minute pee break!
+                    </div>
+                    <div style={{ fontSize: 11.5, color: '#fcd34d' }}>
+                      Stream is paused for everyone until they return and click Resume (5s
+                      countdown).
+                    </div>
+                  </div>
+                </div>
+                {isMyPeeBreak || party.is_host ? (
+                  <button
+                    type="button"
+                    className={`${wp.glassBtn} ${wp.glassBtnPrimary}`}
+                    onClick={() =>
+                      void act(async () => {
+                        const updated = await watchPartyApi.state(party.id, { action: 'resume' });
+                        refresh();
+                        launchSyncedVideo(updated, { withCurtain: false });
+                      }, "Couldn't resume")
+                    }
+                  >
+                    ✓ I'm Back & Resume (5s)
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* Curved Theater Seating Row */}
+            {party.members.length > 0 ? (
+              <div className={wp.seatRow} aria-label="Seated audience">
+                {party.members.map((m) => (
+                  <div key={m.profile_id} className={`${wp.seat} ${m.ready ? wp.seatReady : ''}`}>
+                    <Avatar profile={m.profile} />
+                    <span className={wp.seatName}>{m.profile.name}</span>
+                    <span
+                      className={wp.seatTag}
+                      style={!m.ready ? { color: 'rgba(255,255,255,0.45)' } : undefined}
+                    >
+                      {m.is_host ? '★ Host' : m.ready ? '✓ Ready' : 'Seated'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {/* Synced SoulSync Library Lobby Music */}
+            {lobbyTrack && (party.status === 'lobby' || party.status === 'scheduled') ? (
+              <div className={wp.lobbyMusicBox}>
+                {lobbyTrack.artwork ? (
+                  <img
+                    className={wp.lobbyMusicArt}
+                    src={remoteImage(lobbyTrack.artwork) ?? ''}
+                    alt=""
+                  />
+                ) : null}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent-light)' }}>
+                    ♪ THEATER LOBBY MUSIC
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 13.5,
+                      fontWeight: 750,
+                      color: '#fff',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {lobbyTrack.title}
+                  </div>
+                  {lobbyTrack.artist ? (
+                    <div style={{ fontSize: 11.5, color: 'var(--pl-text-3)' }}>
+                      {lobbyTrack.artist}
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className={wp.glassBtn}
+                  onClick={() => {
+                    if (audioBlocked) {
+                      tryPlayLobbyAudio();
+                    } else {
+                      setLobbyMuted((m) => !m);
+                    }
+                  }}
+                >
+                  {audioBlocked ? '🔊 Play Music' : lobbyMuted ? 'Unmute' : 'Mute'}
+                </button>
+                {canSteer ? (
+                  <button
+                    type="button"
+                    className={wp.glassBtn}
+                    onClick={() =>
+                      void act(async () => {
+                        await watchPartyApi.state(party.id, { shuffle_lobby_music: true });
+                        refresh();
+                      }, "Couldn't change the music")
+                    }
+                  >
+                    Shuffle
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {roomError ? (
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24' }}>{roomError}</div>
+            ) : null}
+
+            {/* Primary Room Controls */}
+            <div className={wp.premierBar}>
+              {party.status === 'lobby' || party.status === 'scheduled' ? (
+                <>
+                  <button
+                    type="button"
+                    className={wp.startPartyBtn}
+                    disabled={!canStartFromLobby || starting}
+                    title={
+                      canStartFromLobby
+                        ? 'Launch fullscreen player & unfurl velvet theater curtains for everyone'
+                        : 'Waiting for majority ready or host to start'
+                    }
+                    onClick={() => void startShowtime(party)}
+                  >
+                    <PlayIcon />
+                    {starting ? 'Starting…' : 'Start Screening'}
+                  </button>
+                  <button
+                    type="button"
+                    className={`${wp.glassBtn} ${me?.ready ? wp.premierReadyActive : ''}`}
+                    onClick={() =>
+                      void act(async () => {
+                        await watchPartyApi.join(party.id, { ready: !(me?.ready ?? false) });
+                        refresh();
+                      }, "Couldn't mark you ready")
+                    }
+                  >
+                    {me?.ready ? '✓ Ready' : 'Mark Ready'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className={wp.startPartyBtn}
+                    onClick={() => launchSyncedVideo(party, { withCurtain: true })}
+                  >
+                    <PlayIcon />
+                    Watch & Sync ({clock(party.live_position)})
+                  </button>
+                  {/* anyone in the room pauses; resume is whoever may steer (or the pee break's caller) */}
+                  {party.status === 'playing' || canSteer || isMyPeeBreak ? (
+                    <button
+                      type="button"
+                      className={wp.glassBtn}
+                      disabled={!!peeBreak && !isMyPeeBreak && !party.is_host}
+                      onClick={() =>
+                        void act(async () => {
+                          const action = party.status === 'playing' ? 'pause' : 'resume';
+                          const updated = await watchPartyApi.state(party.id, { action });
+                          refresh();
+                          if (action === 'resume') {
+                            launchSyncedVideo(updated, { withCurtain: false });
+                          }
+                        }, "Couldn't change playback")
+                      }
+                    >
+                      {party.status === 'playing' ? '⏸ Pause Everyone' : '▶ Resume (5s Countdown)'}
+                    </button>
+                  ) : (
+                    <span className={wp.glassBtn} aria-live="polite">
+                      Paused · the host resumes
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className={wp.glassBtn}
+                    disabled={peeCooldownSec > 0 || !!peeBreak}
+                    title={
+                      peeCooldownSec > 0
+                        ? `On cooldown (${Math.ceil(peeCooldownSec / 60)}m remaining — once every 10m)`
+                        : 'Pause stream for 5 minutes so you can take a pee break'
+                    }
+                    onClick={async () => {
+                      try {
+                        await watchPartyApi.state(party.id, { action: 'pee_break' });
+                        void handleSendRoomReaction('🚽💨');
+                        refresh();
+                      } catch (e) {
+                        setRoomError(e instanceof Error ? e.message : 'Pee break on cooldown');
+                      }
+                    }}
+                  >
+                    {peeCooldownSec > 0
+                      ? `🚽 Pee Break (${Math.ceil(peeCooldownSec / 60)}m)`
+                      : '🚽 Pee Break (5m)'}
+                  </button>
+                  {party.is_host ? (
+                    <button
+                      type="button"
+                      className={wp.glassBtn}
+                      onClick={() =>
+                        void act(async () => {
+                          await watchPartyApi.state(party.id, { action: 'lobby' });
+                          refresh();
+                        }, "Couldn't go back to the lobby")
+                      }
+                    >
+                      Back to Lobby
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </div>
+
+            {/* Guest Roster */}
+            <div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: '0.08em',
+                  color: 'var(--pl-text-3)',
+                  marginBottom: 8,
+                }}
+              >
+                IN THE ROOM ({party.ready_count}/{party.member_count} READY
+                {majorityReady ? ' · MAJORITY READY' : ''})
+              </div>
+              <div className={wp.memberList}>
+                {party.members.map((m) => (
+                  <div key={m.profile_id} className={wp.memberRow}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Avatar profile={m.profile} />
+                      <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>
+                        {m.profile?.name ?? 'Guest'}
+                        {m.is_host ? ' (Host)' : m.you ? ' (You)' : ''}
+                      </span>
+                    </div>
+                    <span className={m.ready ? wp.readyBadge : wp.waitingBadge}>
+                      {m.ready ? 'Ready' : m.status === 'rsvp' ? 'RSVP' : 'Waiting'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Live Chat & Emoji Reactions */}
+          <div className={wp.chatPane}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: '0.08em',
+                color: 'var(--pl-text-3)',
+              }}
+            >
+              <span>LOUNGE CHAT</span>
+              {isRateLimited ? (
+                <span style={{ color: '#fbbf24', fontSize: 10 }}>EMOJI COOLDOWN…</span>
+              ) : null}
+            </div>
+            <div className={wp.chatLog}>
+              {party.messages.map((msg) =>
+                msg.kind === 'system' ? (
+                  <div key={msg.id} className={wp.chatSys}>
+                    {msg.profile?.name ?? 'Someone'} {msg.body.toLowerCase()}
+                  </div>
+                ) : (
+                  <div key={msg.id} className={wp.chatMsg}>
+                    <strong>{msg.profile?.name ?? 'Someone'}</strong>
+                    <span>{msg.body}</span>
+                  </div>
+                ),
+              )}
+            </div>
+
+            <div className={wp.emojiRow}>
+              {QUICK_EMOJIS.map((em) => (
+                <button
+                  key={em}
+                  type="button"
+                  disabled={isRateLimited}
+                  className={wp.emojiBtn}
+                  title={isRateLimited ? 'Cooling down…' : `Send ${em} to room`}
+                  onClick={() => void handleSendRoomReaction(em)}
+                >
+                  {em}
+                </button>
+              ))}
+            </div>
+
+            <form
+              className={wp.chatForm}
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const txt = chatText.trim();
+                if (!txt) return;
+                setChatText('');
+                try {
+                  await watchPartyApi.chat(party.id, 'chat', txt);
+                  refresh();
+                } catch (err) {
+                  // the message stays, to send again
+                  setChatText(txt);
+                  setRoomError(
+                    err instanceof Error && err.message ? err.message : "Couldn't send that",
+                  );
+                }
+              }}
+            >
+              <input
+                className={wp.input}
+                placeholder="Say something…"
+                value={chatText}
+                onChange={(e) => setChatText(e.target.value)}
+              />
+              <button type="submit" className={wp.glassBtn}>
+                Send
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Watching Now Page ──────────────────────────────────────────────────
+
 function WatchingPage() {
+  const qc = useQueryClient();
+  const search = Route.useSearch();
   const now = useQuery(watchingNowQuery());
   const together = useQuery(togetherQuery());
+  const partiesQ = useQuery(watchPartiesQuery());
   const settings = useQuery(playerSettingsQuery());
+  const [createSeed, setCreateSeed] = useState<PartySeed | null | undefined>(undefined);
+  const [activePartyId, setActivePartyId] = useState<string | null>(null);
+  const [nowSec, setNowSec] = useState(() => Date.now() / 1000);
+  const consumedSearchRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const key = `${search.party ?? ''}|${search.start ?? ''}`;
+    if (!key || key === '|' || consumedSearchRef.current === key) return;
+    consumedSearchRef.current = key;
+    if (search.party) {
+      setActivePartyId(search.party);
+    } else if (search.start) {
+      const [kind, ...rest] = search.start.split(':');
+      const itemId = rest.join(':');
+      if ((kind === 'movie' || kind === 'episode' || kind === 'youtube') && itemId) {
+        setCreateSeed({
+          item_type: kind,
+          item_id: itemId,
+          title: search.title ?? 'Watch Party',
+          meta: {
+            title: search.title,
+            artwork: search.artwork,
+            backdrop: search.backdrop,
+          },
+        });
+      }
+    }
+  }, [search.party, search.start, search.title, search.artwork, search.backdrop]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowSec(Date.now() / 1000), 15_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const jumpIntoLiveParty = async (party: WatchParty) => {
+    const item = itemOf(party.item_type, party.item_id, party.meta);
+    if (!item) {
+      setActivePartyId(party.id);
+      return;
+    }
+    try {
+      if (!party.is_member) {
+        await watchPartyApi.join(party.id, { ready: true });
+      }
+      const fresh = (await watchPartyApi.get(party.id)) ?? party;
+      setActiveWatchPartyId(fresh.id, { triggerCurtain: true });
+      playItems([item], 0, { startAt: fresh.live_position });
+    } catch {
+      setActivePartyId(party.id);
+    }
+  };
+
   const sessions = now.data?.sessions ?? [];
+  const parties = partiesQ.data ?? [];
+  const featuredParty = parties[0] ?? null;
+  const extraParties = parties.slice(1);
   const sharing = settings.data?.settings.share_activity ?? true;
 
   return (
     <>
-      <PageTitle>Watching now</PageTitle>
+      <div className={wp.pageHead}>
+        <PageTitle>Watching now</PageTitle>
+        <div className={wp.headActions}>
+          <button
+            type="button"
+            className={wp.startPartyBtn}
+            onClick={() => setCreateSeed(null)}
+            data-nav
+          >
+            🍿 Start a Watch Party
+          </button>
+        </div>
+      </div>
+
       {!sharing ? (
         <p className={s.note}>
           You aren’t sharing what you play, so others don’t see you here.{' '}
@@ -177,9 +1676,141 @@ function WatchingPage() {
         </p>
       ) : null}
 
-      <section className={k.rail} aria-label="Right now">
+      {/* Section 1: Cinema Lounge Spotlight / Active Watch Parties */}
+      {featuredParty ? (
+        <section className={k.rail} aria-label="Featured Watch Party">
+          {(() => {
+            const art =
+              remoteImage(featuredParty.meta.backdrop) ?? remoteImage(featuredParty.meta.artwork);
+            const isLive = featuredParty.status === 'playing' || featuredParty.status === 'paused';
+            const statusLabel =
+              featuredParty.status === 'playing'
+                ? `LIVE NOW · ${clock(featuredParty.live_position)}`
+                : featuredParty.status === 'paused'
+                  ? `PAUSED · ${clock(featuredParty.live_position)}`
+                  : featuredParty.status === 'scheduled'
+                    ? `SCHEDULED · ${countdownText(featuredParty.scheduled_for, nowSec)}`
+                    : `THEATER LOBBY OPEN · ${featuredParty.ready_count}/${featuredParty.member_count} READY`;
+            return (
+              <article className={wp.theaterHero}>
+                {art ? <img className={wp.theaterHeroBg} src={art} alt="" /> : null}
+                <div className={wp.theaterHeroScrim} />
+                <div className={wp.theaterHeroContent}>
+                  <div className={wp.theaterHeroEyebrow}>
+                    <span className={wp.livePill}>
+                      <span
+                        className={`${wp.liveDot} ${isLive ? wp.liveDotActive : wp.liveDotLobby}`}
+                        aria-hidden="true"
+                      />
+                      {statusLabel}
+                    </span>
+                    <span className={wp.whoChip}>
+                      <Avatar profile={featuredParty.host_profile} />
+                      <span>
+                        {featuredParty.member_count}{' '}
+                        {featuredParty.member_count === 1 ? 'viewer' : 'viewers'}
+                      </span>
+                    </span>
+                  </div>
+
+                  <h2 className={wp.theaterHeroTitle}>{featuredParty.title}</h2>
+                  <p className={wp.theaterHeroSub}>
+                    Hosted by {featuredParty.host_profile?.name ?? 'Host'}
+                    {featuredParty.meta.subtitle ? ` · ${featuredParty.meta.subtitle}` : ''}
+                  </p>
+
+                  {featuredParty.lobby_track && !isLive ? (
+                    <div className={wp.musicTicker}>
+                      <span>♪</span>
+                      <span>
+                        Lobby music: {featuredParty.lobby_track.title}
+                        {featuredParty.lobby_track.artist
+                          ? ` — ${featuredParty.lobby_track.artist}`
+                          : ''}
+                      </span>
+                    </div>
+                  ) : null}
+
+                  <div className={wp.cardActions} style={{ marginTop: 6 }}>
+                    {isLive ? (
+                      <>
+                        <button
+                          type="button"
+                          className={`${wp.glassBtn} ${wp.glassBtnPrimary}`}
+                          onClick={() => void jumpIntoLiveParty(featuredParty)}
+                          data-nav
+                        >
+                          <PlayIcon />
+                          Jump Straight In ({clock(featuredParty.live_position)})
+                        </button>
+                        <button
+                          type="button"
+                          className={wp.glassBtn}
+                          onClick={() => setActivePartyId(featuredParty.id)}
+                          data-nav
+                        >
+                          Open Lounge &amp; Chat
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className={`${wp.glassBtn} ${wp.glassBtnPrimary}`}
+                        onClick={() => setActivePartyId(featuredParty.id)}
+                        data-nav
+                      >
+                        <PlayIcon />
+                        {featuredParty.status === 'scheduled'
+                          ? featuredParty.is_member
+                            ? 'Open Theater Room'
+                            : 'RSVP & Enter Lobby'
+                          : 'Enter Theater Lobby'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </article>
+            );
+          })()}
+
+          {extraParties.length ? (
+            <div className={wp.cinemaGrid}>
+              {extraParties.map((p) => (
+                <WatchPartyCard
+                  key={p.id}
+                  party={p}
+                  nowSec={nowSec}
+                  onOpen={(id) => setActivePartyId(id)}
+                />
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : (
+        <section className={wp.loungeBanner} aria-label="Theater Lounge">
+          <div className={wp.loungeBannerText}>
+            <span className={wp.loungeBannerKicker}>★ SoulSync Theater Lounge</span>
+            <h2 className={wp.loungeBannerTitle}>Watch movies &amp; shows together in sync</h2>
+            <p className={wp.loungeBannerSub}>
+              Open a waiting room with music from your library, unfurl the velvet curtains when
+              everyone is ready, and react live with floating emojis, chat, and pee-break pauses.
+            </p>
+          </div>
+          <button
+            type="button"
+            className={wp.startPartyBtn}
+            onClick={() => setCreateSeed(null)}
+            data-nav
+          >
+            🍿 Open a Theater Room
+          </button>
+        </section>
+      )}
+
+      {/* Section 2: On Air Right Now (Live Screens) */}
+      <section className={k.rail} aria-label="On air right now">
         <div className={k.railHead}>
-          <h2 className={k.sectionTitle}>Right now</h2>
+          <h2 className={k.sectionTitle}>On air right now</h2>
           {sessions.length ? (
             <span className={k.railMore}>
               {sessions.length} {sessions.length === 1 ? 'screen' : 'screens'}
@@ -189,34 +1820,51 @@ function WatchingPage() {
         {now.isLoading ? (
           <div className={k.skeleton} style={{ height: '14rem' }} />
         ) : sessions.length ? (
-          <div className={s.grid}>
+          <div className={wp.cinemaGrid}>
             {sessions.map((x) => (
-              <NowCard key={`${x.profile_id}:${x.item_type}:${x.item_id}:${x.started}`} x={x} />
+              <CinemaNowCard
+                key={`${x.profile_id}:${x.item_type}:${x.item_id}:${x.started}`}
+                x={x}
+                onStartParty={(seed) => setCreateSeed(seed)}
+              />
             ))}
           </div>
-        ) : null}
-        {!now.isLoading && sessions.length && sessions.every((x) => x.you) ? (
-          <p className={s.note}>Nobody else is playing anything right now.</p>
-        ) : null}
-        {now.isLoading || sessions.length ? null : (
-          <Empty title="Nobody else is playing anything">
-            When someone on this server watches or listens, it shows up here, live.
+        ) : (
+          <Empty title="All screens are quiet">
+            When someone on this server watches or listens, their live screen appears here.
           </Empty>
         )}
       </section>
 
+      {/* Section 3: Finish Together (60-Day Shared Watch History) */}
       {together.data?.length ? (
-        <section className={k.rail} aria-label="You both started">
+        <section className={k.rail} aria-label="Finish together">
           <div className={k.railHead}>
-            <h2 className={k.sectionTitle}>You both started</h2>
-            <span className={k.railMore}>the last two months</span>
+            <h2 className={k.sectionTitle}>Finish together</h2>
+            <span className={k.railMore}>Shared watch history · last 60 days</span>
           </div>
-          <ul className={s.togetherList}>
+          <div className={wp.sharedStrip}>
             {together.data.map((t) => (
-              <TogetherRow key={t.key} t={t} />
+              <SharedTitleCard key={t.key} t={t} onStartParty={(seed) => setCreateSeed(seed)} />
             ))}
-          </ul>
+          </div>
         </section>
+      ) : null}
+
+      {createSeed !== undefined ? (
+        <CreatePartyModal
+          initialSeed={createSeed}
+          onClose={() => setCreateSeed(undefined)}
+          onCreated={(party) => {
+            setCreateSeed(undefined);
+            setActivePartyId(party.id);
+            void qc.invalidateQueries({ queryKey: ['player', 'parties'] });
+          }}
+        />
+      ) : null}
+
+      {activePartyId ? (
+        <WatchPartyRoomModal partyId={activePartyId} onClose={() => setActivePartyId(null)} />
       ) : null}
     </>
   );

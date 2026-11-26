@@ -24,7 +24,7 @@ logger = get_logger("video.repair.media_info")
 class MediaInfoJob(VideoRepairJob):
     job_id = "media_info"
     display_name = "Media Info"
-    description = "Reads each file's audio and subtitle languages with ffprobe."
+    description = "Reads each file's languages, and the resolution and HDR its name doesn't say, with ffprobe."
     help_text = ("Reads the audio and embedded subtitle languages of library files the "
                  "media server didn't report them for (Plex never does in a library "
                  "listing), so every file shows its languages and the $audiolangs / "

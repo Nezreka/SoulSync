@@ -15,6 +15,7 @@ import {
   type CoverageResult,
   folderVerdict,
   ServerFoldersSection,
+  unusedWords,
 } from './library-coverage';
 
 function folder(over: Partial<CoverageFolder>): CoverageFolder {
@@ -135,6 +136,26 @@ describe('your media server folders', () => {
     expect(screen.getByText(/has to be mounted into SoulSync first/)).toBeInTheDocument();
     // docker: the compose line for the folder it can't see
     expect(screen.getByText('- /where/kids/is/on/the/host:/kids')).toBeInTheDocument();
+  });
+
+  it("the server's other libraries are a quiet note, not a missing drive", async () => {
+    serve({
+      ...RESULT,
+      unused_folders: [
+        { library: 'Audiobook', folder: '/mnt/books' },
+        { library: 'Podcasts', folder: '/mnt/pods' },
+      ],
+    });
+    render(<ServerFoldersSection />);
+    expect(
+      await screen.findByText(
+        /Plex also has Audiobook and Podcasts libraries\. SoulSync holds no music from them/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('/mnt/books')).toBeNull();
+    expect(unusedWords([{ library: 'Audiobook', folder: '/a' }])).toBe('an Audiobook library');
+    expect(unusedWords([{ library: 'Kids', folder: '/a' }])).toBe('a Kids library');
+    expect(unusedWords([{ library: '', folder: '/a' }])).toBe('1 other folder');
   });
 
   it('adds a folder SoulSync sees but does not scan, in one click', async () => {

@@ -1870,9 +1870,13 @@ button.chip:hover:not(:disabled) {
   letter-spacing: 0.12em;
 }
 
-/* the video side's two servers: the same tiles, not stretched over five places */
+/* the video side's servers: the same tiles, not stretched over five places */
 .servers[data-count='2'] {
   grid-template-columns: repeat(2, minmax(0, 200px));
+}
+
+.servers[data-count='3'] {
+  grid-template-columns: repeat(3, minmax(0, 200px));
 }
 
 /* rows under something else in a card (the video libraries under the servers) */
@@ -3676,4 +3680,57 @@ button.chip:hover:not(:disabled) {
   .ntHead > :first-child {
     grid-column: 1 / -1;
   }
+}
+
+/* the library tab, made easier to read: section titles in plain words that
+   stand out, their hint on its own line, rows a little brighter, and the
+   notes under a card set apart from the settings */
+.readable .eyebrow {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 40px 2px 12px;
+}
+
+.readable .eyebrowLabel {
+  color: var(--text-bright);
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  text-transform: none;
+}
+
+.readable .eyebrowHint {
+  order: 3;
+  flex-basis: 100%;
+  color: var(--white-a55);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.readable .card {
+  border-color: var(--white-a08);
+  background: var(--white-a04);
+}
+
+.readable .rowLabel {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.readable .rowHelp {
+  color: var(--white-a60);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.readable .cardFoot {
+  margin: 0 12px 12px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--white-a03);
+  color: var(--white-a60);
+  font-size: 13px;
+  line-height: 1.55;
 }

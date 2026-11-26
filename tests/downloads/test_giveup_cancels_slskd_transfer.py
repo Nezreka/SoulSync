@@ -23,6 +23,8 @@ gone from slskd — and is pinned here so it stays that way.
 
 from __future__ import annotations
 
+from core.downloads.monitor import MAX_PEER_RETRIES  # the cap is peers tried, and it moved from 3
+
 import time
 
 import pytest
@@ -85,7 +87,7 @@ def test_queued_giveup_cancels_the_transfer(mon):
     exhausted, zero bytes. SoulSync burns its 3 retries, gives up — and used
     to leave the enqueue alive in slskd for hours."""
     now = time.time()
-    task = _task(stuck_retry_count=3, queued_start_time=now - 200)
+    task = _task(stuck_retry_count=MAX_PEER_RETRIES, queued_start_time=now - 200)
     ops = _run(mon, task, _live('Queued, Locally'), now)
 
     assert task['status'] == 'failed', 'precondition: this is the give-up branch'
@@ -98,7 +100,7 @@ def test_queued_remotely_giveup_cancels_too(mon):
     """The originally-reported wording was 'Queued, Remotely' — same branch,
     since the check is a substring match on 'Queued'."""
     now = time.time()
-    task = _task(stuck_retry_count=3, queued_start_time=now - 200)
+    task = _task(stuck_retry_count=MAX_PEER_RETRIES, queued_start_time=now - 200)
     ops = _run(mon, task, _live('Queued, Remotely'), now)
     assert task['status'] == 'failed'
     assert _cancels(ops)
@@ -108,7 +110,7 @@ def test_queued_remotely_giveup_cancels_too(mon):
 
 def test_errored_giveup_cancels_the_transfer(mon):
     now = time.time()
-    task = _task(error_retry_count=3, last_error_retry_time=now - 100)
+    task = _task(error_retry_count=MAX_PEER_RETRIES, last_error_retry_time=now - 100)
     ops = _run(mon, task, _live('Completed, Errored'), now)
     assert task['status'] == 'failed'
     assert _cancels(ops)
@@ -116,7 +118,7 @@ def test_errored_giveup_cancels_the_transfer(mon):
 
 def test_zero_progress_giveup_cancels_the_transfer(mon):
     now = time.time()
-    task = _task(stuck_retry_count=3, downloading_start_time=now - 200)
+    task = _task(stuck_retry_count=MAX_PEER_RETRIES, downloading_start_time=now - 200)
     ops = _run(mon, task, _live('InProgress', progress=0), now)
     assert task['status'] == 'failed'
     assert _cancels(ops)
@@ -124,7 +126,7 @@ def test_zero_progress_giveup_cancels_the_transfer(mon):
 
 def test_unknown_state_giveup_cancels_the_transfer(mon):
     now = time.time()
-    task = _task(stuck_retry_count=3, downloading_start_time=now - 200)
+    task = _task(stuck_retry_count=MAX_PEER_RETRIES, downloading_start_time=now - 200)
     ops = _run(mon, task, _live('Requested'), now)
     assert task['status'] == 'failed'
     assert _cancels(ops)
@@ -136,7 +138,7 @@ def test_not_in_live_transfers_giveup_has_nothing_to_cancel(mon):
     """The transfer already vanished from slskd — there is no id to act on,
     and inventing a cancel here would just log noise."""
     now = time.time()
-    task = _task(stuck_retry_count=3, status_change_time=now - 200)
+    task = _task(stuck_retry_count=MAX_PEER_RETRIES, status_change_time=now - 200)
     ops = _run(mon, task, {}, now)
     assert task['status'] == 'failed'
     assert not _cancels(ops)
@@ -145,7 +147,7 @@ def test_not_in_live_transfers_giveup_has_nothing_to_cancel(mon):
 def test_healthy_transfer_is_never_cancelled(mon):
     """A transfer making real progress must not be touched by any of this."""
     now = time.time()
-    task = _task(stuck_retry_count=3, downloading_start_time=now - 200)
+    task = _task(stuck_retry_count=MAX_PEER_RETRIES, downloading_start_time=now - 200)
     ops = _run(mon, task, _live('InProgress', progress=42, transferred=99), now)
     assert task['status'] != 'failed'
     assert not _cancels(ops)
@@ -164,7 +166,7 @@ def test_giveup_without_a_download_id_does_not_crash(mon):
     """Nothing to cancel and no id to cancel it with — must still fail the
     task cleanly rather than raising inside the monitor loop."""
     now = time.time()
-    task = _task(download_id=None, stuck_retry_count=3, queued_start_time=now - 200)
+    task = _task(download_id=None, stuck_retry_count=MAX_PEER_RETRIES, queued_start_time=now - 200)
     ops = _run(mon, task, _live('Queued, Locally'), now)
     assert task['status'] == 'failed'
     assert not _cancels(ops)

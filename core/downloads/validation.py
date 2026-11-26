@@ -302,6 +302,70 @@ def _count_version_kw(text, kw) -> int:
 _VERSION_MARKER_SEPARATORS = '-–—:|/'
 
 
+# a title that says it is the clean cut. bracket- or dash-bound and whole
+# phrases only: a song called "Mr. Clean" or "Clean" must never match. the
+# same marks the soulseek scorer reads (matching_engine.detect_version_type).
+_CLEAN_MARKS = (r'\(\s*clean[^)]*\)', r'\[\s*clean[^\]]*\]', r'[-–—]\s*clean\b',
+                r'\bclean\s+(?:version|edit)\b', r'\bcensored\b', r'\bedited\s+version\b')
+
+
+def _marked_clean(title_lower: str) -> bool:
+    return any(re.search(mark, title_lower or '') for mark in _CLEAN_MARKS)
+
+
+def _never_clean_versions() -> bool:
+    try:
+        return bool(matching_engine._exclude_clean_enabled())
+    except Exception:  # noqa: BLE001 - a setting that can't be read is a setting that is off
+        return False
+
+
+# words a folder may leave out or spell another way without it being another
+# artist: "Beatles/" for The Beatles, "Peter, Paul & Mary/" for Peter, Paul
+# and Mary (the "&" is a space once normalised, so the word "and" is simply
+# not there). the check wanted every word of the artist's name in one folder
+# and turned both away.
+_ARTIST_FILLER_WORDS = frozenset({'the', 'and'})
+
+
+def _artist_word_sets(artists, alias_words=()):
+    """each artist name (and alias) as the set of words a path segment must
+    hold to name them. filler words are not required, unless the name is
+    nothing else ("The The")."""
+    sets = []
+    for artist_name in artists or ():
+        words = set(matching_engine.normalize_string(artist_name).split())
+        if words:
+            sets.append((words - _ARTIST_FILLER_WORDS) or words)
+    for words in alias_words or ():
+        words = set(words)
+        if words:
+            sets.append((words - _ARTIST_FILLER_WORDS) or words)
+    return sets
+
+
+def _path_names_an_artist(filename, artist_word_sets) -> bool:
+    """one folder or the file name holds every word of one artist's name.
+    per segment, not the whole path: a short name like "Sia" must not be
+    found inside a folder called "Enthusiastic"."""
+    for segment in re.split(r'[/\\]', filename or ''):
+        if not segment:
+            continue
+        seg_words = set(matching_engine.normalize_string(segment).split())
+        if seg_words and any(words.issubset(seg_words) for words in artist_word_sets):
+            return True
+    return False
+
+
+def _results_naming_the_artist(candidates, spotify_track, alias_words=()):
+    """the results whose path names the artist, or [] when there is no artist
+    to look for"""
+    sets = _artist_word_sets(getattr(spotify_track, 'artists', None) or [], alias_words)
+    if not sets:
+        return []
+    return [c for c in candidates if _path_names_an_artist(getattr(c, 'filename', ''), sets)]
+
+
 def _has_version_marker(text, kw) -> bool:
     """A version keyword that actually QUALIFIES the title.
 
@@ -752,6 +816,21 @@ def _score_streaming_candidates(results, spotify_track, why=None):
                     version_detail = f"asked for the {kw} version, this isn't marked {kw}"
                     break
 
+        # "Never download clean versions" (#2081) was only ever checked on
+        # Soulseek: on every other source a "Song (Clean)" scored like the
+        # original, because the title cleaner strips the bracket before the
+        # titles are compared. a clean cut is another version here too,
+        # unless the clean cut is what was asked for.
+        # (a wanted title with the word in it at all is left alone: on a
+        # source that puts the artist in the title, Taylor Swift's song is
+        # "Taylor Swift - Clean")
+        if (not is_wrong_version and _marked_clean(r_title_lower)
+                and not re.search(r'\bclean\b', expected_title_lower)
+                and _never_clean_versions()):
+            confidence *= 0.4
+            is_wrong_version = True
+            version_detail = "clean version, and clean versions are switched off"
+
         # Artist gate — streaming APIs (Tidal/Qobuz/HiFi/Deezer) have reliable metadata,
         # so "My Will" by "B. Starr" should never match expected "B小町".
         # Torrent/usenet must also pass this gate so title-only matches
@@ -787,6 +866,41 @@ def _score_streaming_candidates(results, spotify_track, why=None):
             if _best_artist < 0.5 and _credited_in_title(
                     expected_artists, _cand_artist_raw, r.title):
                 _best_artist = 1.0
+            # a tribute or karaoke act is not the artist it is named after.
+            # "queen" is found as a word inside "queen tribute band", which
+            # made the artist a perfect match on every source but torrents:
+            # same title, same length, accepted. the soulseek scorer turns
+            # these away by the folder name; this is the same rule for a
+            # source that states the artist.
+            _is_derivative = getattr(matching_engine, '_segment_is_derivative_act', None)
+            if callable(_is_derivative) and any(
+                    _is_derivative(matching_engine.normalize_string(_ea), _cand_artist)
+                    for _ea in expected_artists if _ea):
+                logger.info(
+                    "[%s] Rejecting a tribute/karaoke act: expected=%s candidate=%r title=%r",
+                    source_label, list(expected_artists), _cand_artist_raw, r.title or '')
+                if why is not None:
+                    _note(why, r, 'artist_mismatch',
+                          f"{_cand_artist_raw} is a tribute or karaoke act, not "
+                          f"{', '.join(expected_artists) or '?'}", confidence)
+                continue
+            # #2249: YouTube Topic channels often use romanized artist names (e.g.
+            # "Saishinonana - Topic" for "彩糸乃七"). Check MusicBrainz/known aliases
+            # before rejecting YouTube results on artist score.
+            if r.username == 'youtube' and _best_artist < 0.5 and expected_artists:
+                try:
+                    _yt_aliases = list(_artist_aliases(expected_artists[0]) or [])
+                except Exception:
+                    _yt_aliases = []
+                for _al in _yt_aliases:
+                    _al_norm = matching_engine.normalize_string(str(_al or ''))
+                    if not _al_norm:
+                        continue
+                    if _al_norm == _cand_artist or (
+                        len(_al_norm) > 2 and _re.search(r'\b' + _re.escape(_al_norm) + r'\b', _cand_artist)
+                    ) or _fuzzy_artist_similarity(_al_norm, _cand_artist) >= 0.5:
+                        _best_artist = 1.0
+                        break
             # Raised from 0.4 → 0.5 to close a fencepost bug: SequenceMatcher
             # returns exactly 0.400 for "maduk" vs "tom walker" (5 chars vs
             # 10 chars with 2 coincidental char matches), which bypassed the
@@ -836,7 +950,14 @@ def _score_streaming_candidates(results, spotify_track, why=None):
                           f"{_cand_artist_raw or 'no artist'} vs {', '.join(expected_artists) or '?'}",
                           confidence)
                 continue
-            elif _best_artist < 0.5 and confidence < 0.85:
+            # a near-perfect match may carry an artist spelled its own way
+            # (confidence >= 0.85 waives a middling artist score). it must
+            # not carry a DIFFERENT artist: the confidence is the engine's,
+            # whose artist part still counts a shared first word, so "Lil Jon"
+            # scored 0.87 for Lil Yee's song and walked through, undoing the
+            # prefix fix above. an artist that is nothing alike (< 0.25 once
+            # the common first word is set aside) is refused at any confidence.
+            elif _best_artist < 0.5 and (confidence < 0.85 or _best_artist < 0.25):
                 if why is not None:
                     _note(why, r, 'artist_mismatch',
                           f"{_cand_artist_raw or 'no artist'} vs {', '.join(expected_artists) or '?'}",
@@ -1104,11 +1225,30 @@ def _match_filename_candidates(results, spotify_track, profile_id=None, why=None
         # Filter by user's quality profile before artist verification (Soulseek only)
         # Use existing download_orchestrator to avoid re-initializing (which accesses download_path filesystem)
         soulseek = download_orchestrator.client('soulseek')
+        # the artist first, then the quality. the quality filter keeps only
+        # the best tier present, and it ran before anyone asked whose files
+        # they were: FLAC copies in folders that never name the artist
+        # ("Album (2010)/01 - Song.flac") won the tier, were then dropped for
+        # not naming the artist, and the MP3 320 copies filed properly under
+        # "Artist/..." had already been thrown away. "none passed", not found,
+        # with the right file in the results. when at least one result names
+        # the artist only those are ranked; when none does, nothing changes
+        # (the check below turns them away and says why).
+        _named = _results_naming_the_artist(initial_candidates, spotify_track, alias_words)
+        _pool = _named or initial_candidates
         quality_filtered_candidates = soulseek.filter_results_by_quality_preference(
-            initial_candidates, profile_id=profile_id)
+            _pool, profile_id=profile_id)
         if why is not None:
             _note_soulseek_quality_drops(
-                initial_candidates, quality_filtered_candidates, soulseek, why)
+                _pool, quality_filtered_candidates, soulseek, why)
+            if _named:
+                _named_ids = {id(c) for c in _named}
+                for _c in initial_candidates:
+                    if id(_c) not in _named_ids:
+                        _note(why, _c, 'artist_mismatch',
+                              f"no folder or filename names "
+                              f"{', '.join(map(str, spotify_track.artists or []))}",
+                              getattr(_c, 'confidence', None))
 
         # IMPORTANT: Respect empty results from quality filter
         # If user has strict quality requirements (e.g., FLAC-only with fallback disabled),
@@ -1123,13 +1263,7 @@ def _match_filename_candidates(results, spotify_track, profile_id=None, why=None
 
     # Pre-normalize all artist names into word sets using the matching engine
     # This handles Cyrillic, accents, special chars ($), separators, etc.
-    artist_word_sets = []
-    for artist_name in spotify_artists:
-        normalized = matching_engine.normalize_string(artist_name)
-        words = set(normalized.split())
-        if words:
-            artist_word_sets.append(words)
-    artist_word_sets.extend(alias_words)
+    artist_word_sets = _artist_word_sets(spotify_artists, alias_words)
 
     for candidate in quality_filtered_candidates:
         # Streaming results: the matching engine already scored the title.
@@ -1179,24 +1313,7 @@ def _match_filename_candidates(results, spotify_track, profile_id=None, why=None
         # This prevents false positives where a short artist name like "Sia" accidentally
         # matches inside a folder name like "Enthusiastic" — by checking words within
         # individual segments rather than a flat substring of the entire path.
-        path_segments = re.split(r'[/\\]', candidate.filename)
-
-        artist_found = False
-        for segment in path_segments:
-            if not segment:
-                continue
-            seg_words = set(matching_engine.normalize_string(segment).split())
-            if not seg_words:
-                continue
-
-            # Check if ANY artist's words are ALL present in this segment
-            for artist_words in artist_word_sets:
-                if artist_words.issubset(seg_words):
-                    artist_found = True
-                    break
-
-            if artist_found:
-                break
+        artist_found = _path_names_an_artist(candidate.filename, artist_word_sets)
 
         if artist_found:
             verified_candidates.append(candidate)

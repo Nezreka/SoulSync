@@ -1,274 +1,274 @@
 /**
- * player settings. two kinds, said plainly on the page:
- *   * yours, on every screen (kept on the server): sharing what you play,
- *     the next episode playing on its own, when to ask if you're still there
- *   * this screen's (kept in this browser): video quality, how subtitles
- *     look, brightness, the picture's shape, the music visuals
- * every change saves at once.
+ * player settings: a list of sections on the left, one section at a time on
+ * the right. "you" holds your own things, each saying where it is kept (every
+ * screen with the profile, or just this screen). "this server" is for admins
+ * only. the open section is ?section=, so links and back work; on a phone
+ * the list is the first screen and a section opens on its own.
+ * every change saves at once, exactly where it always did.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { createFileRoute, Link, useRouteContext } from '@tanstack/react-router';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 
-import { THEMES } from '@/lib/visualizer';
-
-import type { PlayerSettings } from './-player.api';
-
-import { QUALITIES, type Quality } from './-engine/engine';
-import { playerSettingsQuery, savePlayerSettings } from './-player.api';
-import { PageTitle, PlayerLink } from './-ui/kit';
-import { QUALITY_LABELS } from './-ui/playback/controls';
+import { commercialsConfigQuery, playerIssuesQuery } from './-player.api';
+import { BackIcon, CheckIcon, ChevronIcon } from './-ui/icons';
+import { PageTitle } from './-ui/kit';
 import {
-  BRIGHTNESS_STEPS,
-  FITS,
-  setBrightness,
-  setFit,
-  useBrightness,
-  useFit,
-} from './-ui/playback/use-picture';
-import { getEngine, usePlayer } from './-ui/playback/use-player';
-import { setSubtitleStyle, useSubtitleStyle } from './-ui/playback/use-subtitle-style';
-import { setVisual, useVisual } from './-ui/playback/visuals';
-import s from './-ui/social.module.css';
+  isSectionId,
+  pickSection,
+  sectionsFor,
+  type SectionId,
+  type SectionInfo,
+} from './-ui/settings/catalog';
+import { SavedContext } from './-ui/settings/kit';
+import { NotificationsSection } from './-ui/settings/notifications';
+import {
+  DownloadsSection,
+  IssuesSection,
+  LiveGuideSection,
+  SetupSection,
+} from './-ui/settings/server';
+import p from './-ui/settings/settings.module.css';
+import {
+  LookSection,
+  MusicSection,
+  PictureSection,
+  PlaybackSection,
+  SubtitlesSection,
+} from './-ui/settings/you';
+import { SidebarSettings } from './-ui/sidebar-settings';
 
 export const Route = createFileRoute('/player/settings')({
+  validateSearch: (search: Record<string, unknown>): { section?: SectionId } =>
+    isSectionId(search.section) ? { section: search.section } : {},
   component: SettingsPage,
 });
 
-function Switch({
-  on,
-  label,
-  busy,
-  onChange,
+function SectionBody({ id, isAdmin }: { id: SectionId; isAdmin: boolean }) {
+  switch (id) {
+    case 'playback':
+      return <PlaybackSection />;
+    case 'picture':
+      return <PictureSection />;
+    case 'subtitles':
+      return <SubtitlesSection />;
+    case 'music':
+      return <MusicSection />;
+    case 'look':
+      return <LookSection />;
+    case 'sidebar':
+      return (
+        <div className={p.card}>
+          <SidebarSettings />
+        </div>
+      );
+    case 'notifications':
+      return <NotificationsSection />;
+    case 'setup':
+      return <SetupSection />;
+    case 'downloads':
+      return <DownloadsSection />;
+    case 'guide':
+      return <LiveGuideSection isAdmin={isAdmin} />;
+    case 'issues':
+      return <IssuesSection />;
+  }
+}
+
+/** up and down (and home, end) move through the list */
+function onListKeys(e: KeyboardEvent<HTMLElement>) {
+  const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
+  if (!keys.includes(e.key)) return;
+  const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[data-section-link]'));
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  const next =
+    e.key === 'Home'
+      ? 0
+      : e.key === 'End'
+        ? items.length - 1
+        : Math.min(items.length - 1, Math.max(0, at + (e.key === 'ArrowDown' ? 1 : -1)));
+  if (!items[next]) return;
+  e.preventDefault();
+  items[next].focus();
+}
+
+function SectionLink({
+  info,
+  current,
+  count,
 }: {
-  on: boolean;
-  label: string;
-  busy?: boolean;
-  onChange: (on: boolean) => void;
+  info: SectionInfo;
+  current: boolean;
+  count?: number;
 }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      className={s.switch}
-      disabled={busy}
-      onClick={() => onChange(!on)}
+    <Link
+      to="/player/settings"
+      search={{ section: info.id }}
+      className={p.navItem}
+      aria-current={current ? 'page' : undefined}
+      data-section-link={info.id}
       data-nav
-    />
-  );
-}
-
-function Row({
-  label,
-  help,
-  children,
-}: {
-  label: string;
-  help?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className={s.row}>
-      <span className={s.rowText}>
-        <span className={s.rowLabel}>{label}</span>
-        {help ? <span className={s.rowHelp}>{help}</span> : null}
+    >
+      <span className={p.navIcon} aria-hidden="true">
+        {info.icon}
       </span>
-      {children}
-    </div>
+      <span className={p.navText}>
+        <span className={p.navName}>{info.title}</span>
+        <span className={p.navInside}>{info.inside}</span>
+      </span>
+      {count ? (
+        <span className={p.navCount} aria-label={`${count} open`}>
+          {count}
+        </span>
+      ) : null}
+      <span className={p.navChevron} aria-hidden="true">
+        <ChevronIcon />
+      </span>
+    </Link>
   );
 }
-
-function Group({
-  title,
-  note,
-  children,
-}: {
-  title: string;
-  note?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className={s.group} aria-label={title}>
-      <div className={s.groupHead}>
-        <h2 className={s.groupTitle}>{title}</h2>
-        {note ? <p className={s.groupNote}>{note}</p> : null}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-const ASK_AFTER = [0, 2, 3, 4, 5, 8];
 
 function SettingsPage() {
-  const queryClient = useQueryClient();
-  const settings = useQuery(playerSettingsQuery());
-  const [saved, setSaved] = useState<string | null>(null);
-  const save = useMutation({
-    mutationFn: (changes: Partial<PlayerSettings>) => savePlayerSettings(changes),
-    onSuccess: (next) => {
-      queryClient.setQueryData(playerSettingsQuery().queryKey, (old) =>
-        old ? { ...old, settings: next } : old,
-      );
-      void queryClient.invalidateQueries({ queryKey: ['player', 'watching-now'] });
-      setSaved('Saved');
-      window.setTimeout(() => setSaved(null), 1800);
+  const { shell } = useRouteContext({ from: '/player' });
+  const { section: asked } = Route.useSearch();
+  const commConfig = useQuery(commercialsConfigQuery());
+  const isAdmin = Boolean(commConfig.data?.can_edit ?? shell.profile?.isAdmin);
+  const issues = useQuery(playerIssuesQuery());
+  const openIssues = issues.data?.open_count ?? 0;
+  const sections = sectionsFor(isAdmin);
+  const current = pickSection(asked, sections);
+  // a phone shows the list until a section is picked
+  const view = asked && current.id === asked ? 'section' : 'list';
+
+  const [saved, setSaved] = useState(false);
+  const timerRef = useRef<number | null>(null);
+  const flashSaved = () => {
+    setSaved(true);
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => setSaved(false), 1800);
+  };
+  useEffect(
+    () => () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
     },
-  });
-  const player = usePlayer();
-  const subs = useSubtitleStyle();
-  const brightness = useBrightness();
-  const fit = useFit();
-  const visual = useVisual();
-  const mine = settings.data?.settings;
-  const busy = save.isPending;
+    [],
+  );
+
+  // a new section starts at its top
+  const headRef = useRef<HTMLDivElement>(null);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    headRef.current?.closest('main')?.scrollTo({ top: 0 });
+  }, [asked]);
+
+  const you = sections.filter((x) => x.group === 'you');
+  const server = sections.filter((x) => x.group === 'server');
+  const name = shell.profile?.name;
 
   return (
-    <>
-      <PageTitle>Player settings</PageTitle>
-      <div className={s.settings}>
-        <Group title="You, on every screen" note={saved ?? 'Kept with your profile.'}>
-          <Row
-            label="Share what I'm playing"
-            help="Others on this server see what you watch or listen to on Watching now, and can join you there. Turn it off and you're gone from it at once."
-          >
-            <Switch
-              label="Share what I'm playing"
-              on={mine?.share_activity ?? true}
-              busy={!mine || busy}
-              onChange={(v) => save.mutate({ share_activity: v })}
-            />
-          </Row>
-          <Row
-            label="Play the next episode on its own"
-            help="Off: an episode ends and waits for you."
-          >
-            <Switch
-              label="Play the next episode on its own"
-              on={mine?.autoplay_next ?? true}
-              busy={!mine || busy}
-              onChange={(v) => save.mutate({ autoplay_next: v })}
-            />
-          </Row>
-          <Row
-            label="Ask if I'm still watching"
-            help="After this many episodes in a row with nobody touching anything."
-          >
-            <select
-              className={s.select}
-              value={mine?.still_watching_after ?? 3}
-              disabled={!mine || busy}
-              onChange={(e) => save.mutate({ still_watching_after: Number(e.target.value) })}
-              aria-label="Ask if I'm still watching"
-            >
-              {ASK_AFTER.map((n) => (
-                <option key={n} value={n}>
-                  {n ? `After ${n} episodes` : 'Never'}
-                </option>
-              ))}
-            </select>
-          </Row>
-          {save.isError ? (
-            <Row label="That didn't save" help="Try again in a moment.">
-              <span />
-            </Row>
-          ) : null}
-        </Group>
+    <SavedContext.Provider value={flashSaved}>
+      <div className={p.page} data-view={view} ref={headRef}>
+        <header className={p.header}>
+          <div>
+            <PageTitle>Settings</PageTitle>
+            <p className={p.lead}>
+              {name ? (
+                <>
+                  <span className={p.avatar} aria-hidden="true">
+                    {name.charAt(0).toUpperCase()}
+                  </span>
+                  <b>{name}</b>
+                  <span aria-hidden="true">·</span>
+                </>
+              ) : null}
+              <span>Each section says where it's saved: every screen, or just this one.</span>
+            </p>
+          </div>
+        </header>
 
-        <Group title="This screen" note="Kept in this browser, so a TV and a phone can differ.">
-          <Row
-            label="Video quality"
-            help="Lower plays smoother on a slow connection. Original never converts unless it has to."
+        <div className={p.frame}>
+          <div
+            className={p.nav}
+            role="navigation"
+            aria-label="Settings sections"
+            onKeyDown={onListKeys}
           >
-            <select
-              className={s.select}
-              value={player.quality}
-              onChange={(e) => getEngine().setQuality(e.target.value as Quality)}
-              aria-label="Video quality"
-            >
-              {QUALITIES.map((q) => (
-                <option key={q} value={q}>
-                  {QUALITY_LABELS[q].label} · {QUALITY_LABELS[q].detail}
-                </option>
+            <div className={p.navCap} id="settings-you">
+              You
+            </div>
+            <div className={p.navGroup} role="list" aria-labelledby="settings-you">
+              {you.map((info) => (
+                <div role="listitem" key={info.id}>
+                  <SectionLink
+                    info={info}
+                    current={info.id === current.id}
+                    count={info.id === 'issues' ? openIssues : undefined}
+                  />
+                </div>
               ))}
-            </select>
-          </Row>
-          <Row label="Subtitle size">
-            <select
-              className={s.select}
-              value={subs.size}
-              onChange={(e) =>
-                setSubtitleStyle({ size: e.target.value as 'small' | 'medium' | 'large' })
-              }
-              aria-label="Subtitle size"
-            >
-              <option value="small">Small</option>
-              <option value="medium">Medium</option>
-              <option value="large">Large</option>
-            </select>
-          </Row>
-          <Row label="Dark box behind subtitles" help="Easier to read over a bright picture.">
-            <Switch
-              label="Dark box behind subtitles"
-              on={subs.box}
-              onChange={(v) => setSubtitleStyle({ box: v })}
-            />
-          </Row>
-          <Row label="Brightness" help="Dims the picture, for watching in the dark.">
-            <select
-              className={s.select}
-              value={String(BRIGHTNESS_STEPS.find((v) => Math.abs(v - brightness) < 0.01) ?? 1)}
-              onChange={(e) => setBrightness(Number(e.target.value))}
-              aria-label="Brightness"
-            >
-              {BRIGHTNESS_STEPS.map((v) => (
-                <option key={v} value={String(v)}>
-                  {v === 1 ? 'Full' : `${Math.round(v * 100)}%`}
-                </option>
-              ))}
-            </select>
-          </Row>
-          <Row label="Picture shape" help={FITS.find((f) => f.key === fit)?.detail}>
-            <select
-              className={s.select}
-              value={fit}
-              onChange={(e) => setFit(e.target.value as typeof fit)}
-              aria-label="Picture shape"
-            >
-              {FITS.map((f) => (
-                <option key={f.key} value={f.key}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </Row>
-          <Row label="Music visuals" help="What moves behind the song in now playing.">
-            <select
-              className={s.select}
-              value={visual}
-              onChange={(e) => setVisual(e.target.value as typeof visual)}
-              aria-label="Music visuals"
-            >
-              {THEMES.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </Row>
-        </Group>
+            </div>
+            {server.length ? (
+              <>
+                <div className={p.navCap} id="settings-server">
+                  This server · admin
+                </div>
+                <div className={p.navGroup} role="list" aria-labelledby="settings-server">
+                  {server.map((info) => (
+                    <div role="listitem" key={info.id}>
+                      <SectionLink
+                        info={info}
+                        current={info.id === current.id}
+                        count={info.id === 'issues' ? openIssues : undefined}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </div>
 
-        <p className={s.groupNote}>
-          Your home page has its own settings:{' '}
-          <PlayerLink href="/player" data-nav>
-            customize it from Home
-          </PlayerLink>
-          .
-        </p>
+          <section className={p.pane} aria-labelledby="settings-section-title">
+            <Link to="/player/settings" search={{}} className={p.back} data-nav>
+              <BackIcon />
+              <span>All settings</span>
+            </Link>
+            <div className={p.paneHead}>
+              <div className={p.paneTitleRow}>
+                <span className={p.paneIcon} aria-hidden="true">
+                  {current.icon}
+                </span>
+                <h2 className={p.paneTitle} id="settings-section-title">
+                  {current.title}
+                </h2>
+              </div>
+              <p className={p.paneLead}>{current.description}</p>
+              <div className={p.scopeRow}>
+                <span className={p.scope} title="Where these settings are saved">
+                  <span className={p.scopeDot} aria-hidden="true" />
+                  {current.scope}
+                  {current.id === 'issues' && openIssues ? ` · ${openIssues} open` : ''}
+                </span>
+                <span
+                  className={p.savedBadge}
+                  data-visible={saved ? 'true' : undefined}
+                  role="status"
+                >
+                  <CheckIcon /> Saved
+                </span>
+              </div>
+            </div>
+            <div className={p.paneBody} key={current.id}>
+              <SectionBody id={current.id} isAdmin={isAdmin} />
+            </div>
+          </section>
+        </div>
       </div>
-    </>
+    </SavedContext.Provider>
   );
 }

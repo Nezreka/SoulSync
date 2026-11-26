@@ -16,6 +16,7 @@ from flask import g, jsonify, request
 from core.issues import service as issue_service
 from core.issues.activity import fix_action
 from core.issues.lifecycle import strip_reporter, visible_to
+from core.connect.device_access import device_playback
 
 from utils.logging_config import get_logger
 
@@ -125,6 +126,7 @@ def _snapshot(db, entity_type: str, entity_id) -> dict:
 
 def register_routes(bp):
     @bp.route("/issues", methods=["GET"])
+    @device_playback
     def video_issues_list():
         from . import get_video_db
         q = request.args
@@ -144,6 +146,7 @@ def register_routes(bp):
         return jsonify({"success": True, "issues": issues, "total": total})
 
     @bp.route("/issues", methods=["POST"])
+    @device_playback
     def video_issues_create():
         from . import get_video_db
         body = request.get_json(silent=True) or {}

@@ -29,7 +29,7 @@ import threading
 import time
 import traceback
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from core.idle_executor import IdleThreadPool
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs
 
@@ -1378,6 +1378,11 @@ def tidal_disconnect():
 def get_tidal_playlists():
     """Fetches all user playlists from Tidal with full track data (like sync.py)."""
     client = get_tidal_client_for_profile() or _tidal_client()
+    # a member who hasn't connected their own Tidal is not shown the server's (#2301)
+    from core.playlists.account_isolation import refusal_for_request
+    _blocked = refusal_for_request("tidal", own_connected=client is not _tidal_client())
+    if _blocked:
+        return jsonify(_blocked), 401
     if not client or not client.is_authenticated():
         return jsonify({"error": "Tidal not authenticated."}), 401
     try:
@@ -1569,7 +1574,7 @@ def get_tidal_playlist_tracks(playlist_id):
 
 # Global state for Tidal playlist discovery management
 tidal_discovery_states = {}  # Key: playlist_id, Value: discovery state
-tidal_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="tidal_discovery")
+tidal_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="tidal_discovery")
 
 def _ensure_tidal_mirror(playlist_id, playlist, profile_id):
     """the mirror for this tidal playlist: its skipped counts brought up to
@@ -2291,7 +2296,7 @@ def cancel_tidal_sync(playlist_id):
 
 # Global state for Deezer playlist discovery management
 deezer_discovery_states = {}  # Key: playlist_id, Value: discovery state
-deezer_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="deezer_discovery")
+deezer_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="deezer_discovery")
 deezer_playlist_load_jobs = {}
 deezer_playlist_load_lock = threading.Lock()
 
@@ -2480,6 +2485,11 @@ def get_deezer_arl_status():
 @requires("music.playlist_sync")
 def get_deezer_arl_playlists():
     """Fetch user playlists via Deezer ARL authentication (like /api/spotify/playlists)."""
+    # the ARL is the server's own account: a member only sees it when it is shared (#2301)
+    from core.playlists.account_isolation import refusal_for_request
+    _blocked = refusal_for_request("deezer")
+    if _blocked:
+        return jsonify(_blocked), 401
     try:
         deezer_dl = download_orchestrator.client("deezer_dl") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
         if not deezer_dl or not deezer_dl.is_authenticated():
@@ -2647,6 +2657,114 @@ def get_deezer_editorial_playlists():
         logger.error(f"Error getting Deezer editorial playlists: {e}")
         # a browse row that fails is an empty row, not a broken page
         return jsonify({"success": True, "playlists": [], "count": 0, "error": str(e)})
+
+
+def _spotify_public_playlists(query: str, limit: int) -> list:
+    """public spotify playlists by name, through the server's app. a search
+    reads nobody's account: it is the same catalogue anyone sees."""
+    try:
+        from core.metadata.registry import get_spotify_client
+        client = get_spotify_client()
+        if (not client or not getattr(client, "sp", None)
+                or not client.is_spotify_authenticated() or _spotify_rate_limited()):
+            return []
+        found = client.sp.search(q=query, type='playlist', limit=max(1, min(limit, 20)))
+    except Exception as exc:  # noqa: BLE001 - one source failing is an empty source
+        logger.debug("public playlist search: spotify failed: %s", exc)
+        return []
+    out = []
+    for p in (((found or {}).get('playlists') or {}).get('items') or []):
+        if not p or not p.get('id'):
+            continue
+        link = (p.get('external_urls') or {}).get('spotify') or f"https://open.spotify.com/playlist/{p['id']}"
+        images = p.get('images') or []
+        out.append({
+            'id': str(p['id']), 'title': p.get('name') or '',
+            'creator': (p.get('owner') or {}).get('display_name') or 'Spotify',
+            'track_count': int((p.get('tracks') or {}).get('total') or 0),
+            'image_url': (images[0].get('url') if images else '') or '',
+            'link': link, 'source': 'spotify',
+        })
+    return out
+
+
+@bp.route('/api/playlists/public-search', methods=['GET'])
+@requires("music.playlist_sync")
+def search_public_playlists():
+    """Public playlists by name, across the services that can be searched
+    without anyone's account (#2305): ?q=, and ?source=deezer|spotify to
+    narrow it. Each result carries its ``link``; adding one is the same as
+    pasting that link into Add Playlist, so it goes through the import that
+    already exists. A source that fails or isn't set up is left out, never
+    an error."""
+    query = (request.args.get('q') or '').strip()
+    only = (request.args.get('source') or '').strip().lower()
+    try:
+        limit = max(1, min(int(request.args.get('limit') or 15), 30))
+    except (TypeError, ValueError):
+        limit = 15
+    if len(query) < 2:
+        return jsonify({"success": True, "playlists": [], "sources": []})
+    lists = {}
+    if only in ('', 'deezer'):
+        try:
+            client = _get_deezer_client()
+            lists['deezer'] = [p for p in (client.search_playlists(query, limit=limit) if client else [])
+                               if p.get('link')]
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("public playlist search: deezer failed: %s", exc)
+            lists['deezer'] = []
+    if only in ('', 'spotify'):
+        lists['spotify'] = _spotify_public_playlists(query, limit)
+    # one from each in turn, so one service doesn't bury the other
+    merged, queues = [], [list(v) for v in lists.values()]
+    while any(queues):
+        for q in queues:
+            if q:
+                merged.append(q.pop(0))
+    return jsonify({"success": True, "playlists": merged[:limit * 2],
+                    "sources": [name for name, rows in lists.items() if rows]})
+
+
+@bp.route('/api/playlists/public-preview', methods=['GET'])
+@requires("music.playlist_sync")
+def preview_public_playlist():
+    """The first songs of a public playlist a search found, so you can look
+    before adding it (#2305): ?source=deezer|spotify&id=. ``{songs: [{title,
+    artist}], total}``; a service that can't answer gives no songs, never an
+    error the sheet has to explain."""
+    source = (request.args.get('source') or '').strip().lower()
+    pid = (request.args.get('id') or '').strip()
+    if not pid or len(pid) > 64 or not re.match(r'^[A-Za-z0-9]+$', pid):
+        return jsonify({"success": False, "error": "no such playlist"}), 400
+    songs, total = [], 0
+    try:
+        if source == 'deezer':
+            client = _get_deezer_client()
+            got = client.get_playlist(pid) if client else None
+            tracks = (got or {}).get('tracks') or []
+            total = int((got or {}).get('track_count') or len(tracks))
+            for t in tracks[:50]:
+                artists = t.get('artists') or []
+                songs.append({'title': t.get('name') or '', 'artist': str(artists[0]) if artists else ''})
+        elif source == 'spotify':
+            from core.metadata.registry import get_spotify_client
+            client = get_spotify_client()
+            if (client and getattr(client, 'sp', None) and client.is_spotify_authenticated()
+                    and not _spotify_rate_limited()):
+                page = client.sp.playlist_items(pid, limit=50, additional_types=('track',)) or {}
+                total = int(page.get('total') or 0)
+                for item in page.get('items') or []:
+                    t = (item or {}).get('track') or {}
+                    if not t.get('name'):
+                        continue
+                    artists = t.get('artists') or []
+                    songs.append({'title': t['name'], 'artist': (artists[0] or {}).get('name', '') if artists else ''})
+        else:
+            return jsonify({"success": False, "error": "no such source"}), 400
+    except Exception as exc:  # noqa: BLE001 - a preview that fails shows nothing
+        logger.debug("public playlist preview failed (%s %s): %s", source, pid, exc)
+    return jsonify({"success": True, "songs": songs, "total": max(total, len(songs))})
 
 
 @bp.route('/api/search/browse/deezer', methods=['GET'])
@@ -3016,7 +3134,7 @@ def cancel_deezer_sync(playlist_id):
 
 # Global state for Qobuz playlist discovery management
 qobuz_discovery_states = {}  # Key: playlist_id, Value: discovery state
-qobuz_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="qobuz_discovery")
+qobuz_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="qobuz_discovery")
 
 
 def _get_qobuz_client_for_sync():
@@ -3044,6 +3162,10 @@ def get_qobuz_playlists():
     matches the Tidal + Deezer behaviour so the Sync page renderer can
     treat all three services uniformly.
     """
+    from core.playlists.account_isolation import refusal_for_request
+    _blocked = refusal_for_request("qobuz")
+    if _blocked:
+        return jsonify(_blocked), 401
     qobuz = _get_qobuz_client_for_sync()
     if not qobuz or not qobuz.is_authenticated():
         return jsonify({"error": "Qobuz not authenticated."}), 401
@@ -3339,11 +3461,11 @@ def cancel_qobuz_sync(playlist_id):
 
 # Global state for Spotify Public playlist management
 spotify_public_discovery_states = {}  # Key: url_hash, Value: discovery state
-spotify_public_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="spotify_public_discovery")
+spotify_public_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="spotify_public_discovery")
 
 # Global state for iTunes/Apple Music link imports
 itunes_link_discovery_states = {}  # Key: url_hash, Value: discovery state
-itunes_link_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="itunes_link_discovery")
+itunes_link_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="itunes_link_discovery")
 
 def _build_itunes_link_state(response_data):
     return {
@@ -3417,7 +3539,9 @@ def parse_spotify_public_endpoint():
             'url': result['url'],
             'url_hash': url_hash,
             'track_count': len(spotify_tracks),
-            'tracks': spotify_tracks
+            'tracks': spotify_tracks,
+            # #2279: the playlist's own artwork (og:image), for its cover
+            'image_url': result.get('image_url') or '',
         }
 
         # Store playlist data in state for discovery (if not already there)
@@ -4058,15 +4182,15 @@ def _run_itunes_link_discovery_worker(url_hash):
 
 # Global state for YouTube playlist management (persistent across page reloads)
 youtube_playlist_states = {}  # Key: url_hash, Value: persistent playlist state
-youtube_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="youtube_discovery")
+youtube_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="youtube_discovery")
 
 # Global state for Beatport chart management (persistent across page reloads)
 beatport_chart_states = {}  # Key: url_hash, Value: persistent chart state
-beatport_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="beatport_discovery")
+beatport_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="beatport_discovery")
 
 # Global state for ListenBrainz playlist management (persistent across page reloads)
 listenbrainz_playlist_states = {}  # Key: playlist_mbid, Value: persistent playlist state
-listenbrainz_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="listenbrainz_discovery")
+listenbrainz_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="listenbrainz_discovery")
 
 @bp.route('/api/youtube/parse', methods=['POST'])
 @requires("music.playlist_sync")
@@ -4368,7 +4492,7 @@ def update_youtube_discovery_match():
         return jsonify({'error': str(e)}), 500
 
 
-def _build_discovery_wing_it_stub(track_name, artist_name, duration_ms=0, image_url=''):
+def _build_discovery_wing_it_stub(track_name, artist_name, duration_ms=0, image_url='', source_video_id=None):
     """Build stub matched_data for tracks that failed metadata discovery.
     Used as automatic Wing It fallback so tracks still flow through the download pipeline.
 
@@ -4384,6 +4508,9 @@ def _build_discovery_wing_it_stub(track_name, artist_name, duration_ms=0, image_
         'duration_ms': duration_ms,
         'image_url': image_url,
         'source': 'wing_it_fallback',
+        # a song from a YouTube playlist keeps its video, so the download can
+        # take that video when no catalogue knows the song (#2306)
+        **({'youtube_video_id': source_video_id} if source_video_id else {}),
     }
 
 
@@ -4757,7 +4884,7 @@ def convert_youtube_results_to_spotify_tracks(discovery_results):
 
 # Global state for the YouTube Music management (persistent across page reloads)
 ytmusic_discovery_states = {}  # Key: YT Music playlist id ('LM' for Liked Music), Value: persistent playlist state
-ytmusic_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="ytmusic_discovery")
+ytmusic_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="ytmusic_discovery")
 
 
 @bp.route('/api/ytmusic/playlists', methods=['GET'])
@@ -4765,6 +4892,10 @@ ytmusic_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefi
 def get_ytmusic_playlists():
     """List the signed-in YouTube Music account's own library playlists, Liked Music first."""
     from core.ytmusic_library import fetch_library_playlists, fetch_liked_music_row, library_playlists_to_rows
+    from core.playlists.account_isolation import refusal_for_request
+    _blocked = refusal_for_request("ytmusic")
+    if _blocked:
+        return jsonify(_blocked), 401
     auth = _ytmusic_auth_headers()
     if not auth:
         return jsonify({"error": "YouTube Music not authenticated. Settings → Downloads → Download Source: YouTube Only → Paste cookies.txt → Save."}), 401

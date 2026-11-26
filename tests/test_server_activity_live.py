@@ -28,7 +28,7 @@ def test_both_servers_merge_into_one_pulse(sa_env):
     sa_env.settings["upload_mbps"] = 40
     out = live.get_activity(max_age=0)
     assert out["ok"] is True
-    assert [s["server"] for s in out["servers"]] == ["plex", "jellyfin"]
+    assert [s["server"] for s in out["servers"]] == ["plex", "jellyfin", "soulsync"]
     assert out["servers"][0]["name"] == "Basement" and out["servers"][0]["plex_pass"] is True
     sm = out["summary"]
     assert sm["streams"] == 7 and sm["watching"] == 4 and sm["listening"] == 3
@@ -101,9 +101,13 @@ def test_an_unreachable_server_closes_no_plays(sa_env):
     assert len(live.recorder.open) == 4
 
 
-def test_no_server_is_a_state(sa_env):
+def test_no_media_server_still_has_the_player(sa_env):
+    """soulsync's own player is always a server: no plex or jellyfin is an
+    empty view, not an error"""
     out = live.get_activity(max_age=0)
-    assert out["ok"] is False and out["reason"] == "no_server" and out["sessions"] == []
+    assert out["ok"] is True and out["sessions"] == []
+    assert out["servers"] == [{"server": "soulsync", "name": "SoulSync", "version": None,
+                               "reachable": True, "plex_pass": None}]
 
 
 def test_remote_viewers_are_looked_up_and_home_ones_never(sa_env):

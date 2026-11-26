@@ -632,6 +632,13 @@ a.nowTitle:hover {
   opacity: 1;
 }
 
+/* a phone has no hover: the move and remove buttons were there but invisible */
+@media (hover: none) {
+  .queueTools {
+    opacity: 1;
+  }
+}
+
 .queueTools button {
   width: calc(var(--u) * 1.7);
   height: calc(var(--u) * 1.7);
@@ -830,6 +837,29 @@ a.nowTitle:hover {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* skip intro / recap / credits, while that chapter plays */
+.skipMark {
+  position: absolute;
+  left: calc(var(--u) * 2);
+  bottom: calc(var(--u) * 8);
+  z-index: 2;
+  padding: calc(var(--u) * 0.7) calc(var(--u) * 1.4);
+  border: 1px solid var(--white-a40);
+  border-radius: var(--radius-md);
+  background: var(--black-a80);
+  color: var(--pl-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  animation: fullIn var(--dur-moderate) var(--pl-ease) both;
+}
+.skipMark:hover,
+.skipMark:focus-visible {
+  background: var(--pl-text);
+  color: var(--pl-bg);
 }
 
 .upNextWrap {
@@ -1600,9 +1630,10 @@ a.nowTitle:hover {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: calc(var(--u) * 0.35);
+  justify-content: center;
+  width: calc(var(--u) * 2.4);
   height: calc(var(--u) * 2.4);
-  padding: 0 calc(var(--u) * 0.9) 0 calc(var(--u) * 0.6);
+  padding: 0;
   border: none;
   border-radius: var(--radius-pill);
   background: var(--white-a10);

@@ -326,6 +326,38 @@ def test_run_check_overall_share(conn, tmp_path):
     assert result["folders_from"] == "server"
 
 
+def test_a_server_library_soulsync_holds_nothing_from_is_not_a_missing_drive(conn, tmp_path):
+    """plex files audiobooks and podcasts as music libraries too. soulsync
+    holds no track from them, so there is nothing in them to read: listing
+    them as "can't see this folder, mount the drive" was a false alarm."""
+    lib = tmp_path / "data" / "music"
+    files = _album(lib, "Beck", "Guero", n=4)
+    _add(conn, "plex", _server_paths(str(lib), lib, files), start=1)
+
+    class Plex:
+        def get_music_library_folders(self):
+            return [{"library": "Music", "folders": [str(lib)]},
+                    {"library": "Audiobook", "folders": ["/mnt/books"]},
+                    {"library": "Podcasts", "folders": ["/mnt/pods"]}]
+
+    result = coverage.run_check(conn, "plex", Plex(), _env(library_dirs=[str(lib)]), seed=1)
+    assert [f["server_folder"] for f in result["folders"]] == [str(lib)]
+    assert result["unused_folders"] == [{"library": "Audiobook", "folder": "/mnt/books"},
+                                        {"library": "Podcasts", "folder": "/mnt/pods"}]
+    assert result["reachable_pct"] == 100.0
+
+
+def test_before_the_first_scan_every_folder_is_still_shown(conn):
+    # nothing scanned yet: this is when "mount this drive" is the advice wanted
+    class Plex:
+        def get_music_library_folders(self):
+            return [{"library": "Music", "folders": ["/mnt/music"]}]
+
+    result = coverage.run_check(conn, "plex", Plex(), _env(), seed=1)
+    assert [f["status"] for f in result["folders"]] == ["not_mounted"]
+    assert result["unused_folders"] == []
+
+
 def test_run_check_falls_back_to_inference_when_the_server_is_down(conn, tmp_path):
     _add(conn, "plex", [f"/data/music/A{i}/B/{i}.flac" for i in range(10)])
     result = coverage.run_check(conn, "plex", Broken(), _env(), seed=1)
