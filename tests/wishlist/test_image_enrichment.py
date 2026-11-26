@@ -249,3 +249,16 @@ def test_artist_lookup_survives_a_catalogue_without_name_key():
     photos, fallbacks = routes._enrich_wishlist_images(tracks, db)
     assert photos == {"boards of canada": "/api/library/v2/artwork/artist/5"}
     assert fallbacks == {"boards of canada": "https://i.scdn.co/image/boc"}
+
+
+def test_a_guest_led_albums_artist_gets_a_photo_too():
+    """#2300: the page files 93 Empire's album under 93 Empire, though a guest
+    leads every track, so that orb needs 93 Empire's photo."""
+    tracks = [{"artist_name": "Sofiane",
+               "spotify_data": {"album": {"images": [], "artists": [{"name": "93 Empire"}]}}}]
+    db = _DB(artists=[(1, "Sofiane", "https://i.scdn.co/image/sf"),
+                      (2, "93 Empire", "https://i.scdn.co/image/93")])
+    photos, fallbacks = routes._enrich_wishlist_images(tracks, db)
+    assert photos == {"sofiane": "/api/library/v2/artwork/artist/1",
+                      "93 empire": "/api/library/v2/artwork/artist/2"}
+    assert fallbacks["93 empire"] == "https://i.scdn.co/image/93"

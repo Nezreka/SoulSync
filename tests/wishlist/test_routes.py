@@ -609,6 +609,25 @@ def test_remove_album_from_wishlist_keeps_another_artists_album_of_that_name():
     assert service.removed == [("a1", 1), ("u1", 1)]
 
 
+def test_remove_album_from_wishlist_takes_a_guest_led_album_by_its_album_artist():
+    # #2300: the page files 93 Empire's album under 93 Empire though a guest
+    # leads every track, so its card removes by that name
+    album = {"name": "93 Empire", "artists": [{"name": "93 Empire"}]}
+    tracks = [
+        {"wishlist_id": n, "spotify_track_id": f"e{n}", "id": f"e{n}",
+         "spotify_data": {"album": album, "artists": [{"name": guest}]}}
+        for n, guest in ((1, "Sofiane"), (2, "Kaaris"))
+    ] + [{"wishlist_id": 3, "spotify_track_id": "o1", "id": "o1",
+          "spotify_data": {"album": {"name": "93 Empire"}, "artists": [{"name": "Other"}]}}]
+    runtime, service, _db, _logger, _activity_calls = _build_runtime(tracks=tracks)
+
+    payload, status = remove_album_from_wishlist(
+        runtime, album_name_filter="93 Empire", artist_name_filter="93 Empire")
+
+    assert status == 200
+    assert service.removed == [("e1", 1), ("e2", 1)]
+
+
 def test_remove_batch_from_wishlist_returns_removed_count():
     runtime, service, _db, _logger, _activity_calls = _build_runtime()
 

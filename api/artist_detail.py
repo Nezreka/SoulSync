@@ -2494,6 +2494,8 @@ def download_discography(artist_id):
                     track_profiles = quality_resolver(hint_artist, artist_source).for_release(
                         [album_id, resolved_album_id], tracks)
 
+                    own_release = bool(album.get('artists')) and track_artist_matches(
+                        album.get('artists'), hint_artist)
                     for track, track_profile in zip(tracks, track_profiles, strict=True):
                         track_name = track.get('name', '')
                         if not track_name:
@@ -2506,6 +2508,10 @@ def download_discography(artist_id):
                         # (cross-artist compilation / appears_on
                         # contamination). Keeps features.
                         if not track_artist_matches(track_artists, hint_artist) and not (
+                                # the artist's own release, every track led by
+                                # guests: 93 Empire's album is all theirs (#2300)
+                                own_release
+                        ) and not (
                                 # deezer's tracklist names only a track's first
                                 # artist; a co-main artist is on the album's or
                                 # the track's own credits (#2104)

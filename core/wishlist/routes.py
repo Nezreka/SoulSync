@@ -514,6 +514,7 @@ def _enrich_wishlist_images(
     )
 
     artist_names: set[str] = set()
+    album_artist_names: set[str] = set()
     lib2_album_rows: list[tuple[dict[str, Any], int]] = []
     lib2_track_ids: list[int] = []
     row_track_ids: dict[int, int] = {}      # id(track) -> lib2 track id
@@ -550,10 +551,15 @@ def _enrich_wishlist_images(
         name = track.get('artist_name')
         if name and name != 'Unknown Artist':
             artist_names.add(name)
+        # the page files a guest-led album under its album artist (#2300)
+        if isinstance(album, dict):
+            album_artist = _primary_artist_name(album).strip()
+            if album_artist and album_artist != 'Unknown Artist':
+                album_artist_names.add(album_artist)
 
     artist_images: dict[str, str] = {}
     artist_fallbacks: dict[str, str] = {}
-    if not artist_names and not lib2_album_rows:
+    if not artist_names and not album_artist_names and not lib2_album_rows:
         return artist_images, artist_fallbacks
 
     try:
@@ -580,8 +586,9 @@ def _enrich_wishlist_images(
                 if lib2_track_ids else {}
             )
             by_name = (
-                _lib2_artists_by_name(conn, sorted({n.lower() for n in artist_names}))
-                if artist_names else {}
+                _lib2_artists_by_name(
+                    conn, sorted({n.lower() for n in artist_names | album_artist_names}))
+                if artist_names or album_artist_names else {}
             )
 
             # Library-v2 rows resolve through their own track -> artist edge, so
@@ -602,6 +609,10 @@ def _enrich_wishlist_images(
                         continue
                     artist_id = match[0]
                 resolved_ids[key] = artist_id
+            for name in album_artist_names:
+                match = by_name.get(name.lower())
+                if match is not None:
+                    resolved_ids.setdefault(name.lower(), match[0])
 
             stored_photos = _lib2_artist_image_urls(
                 conn, sorted(set(resolved_ids.values())),
@@ -820,10 +831,14 @@ def remove_album_from_wishlist(
                     track_album_name = spotify_data["album"]
                 if track_album_name and track_album_name.lower().strip() == album_name_filter.lower().strip():
                     matched = True
-                # same default the page groups an artist-less row under
+                # same default the page groups an artist-less row under. the
+                # page files an album under its own artist when a guest leads
+                # the track (#2300), so either name is this album's artist
                 if matched and artist_name_filter is not None:
                     track_artist = _primary_artist_name(spotify_data) or "Unknown Artist"
-                    matched = track_artist.lower().strip() == artist_name_filter.lower().strip()
+                    album_artist = _primary_artist_name(album_data).lower().strip()
+                    matched = artist_name_filter.lower().strip() in (
+                        {track_artist.lower().strip(), album_artist} - {""})
 
             if matched:
                 spotify_track_id = track.get("track_id") or track.get("spotify_track_id") or track.get("id")
