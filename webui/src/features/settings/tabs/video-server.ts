@@ -89,14 +89,25 @@ interface State {
 
 const NAME: Record<Server, string> = { plex: 'Plex', jellyfin: 'Jellyfin', soulsync: 'Standalone' };
 
+/** the server says the connection in use is whole and it is music's */
+const usingMusic = (c: Record<string, unknown>) => {
+  const use = c.in_use as { ready?: boolean; source?: string } | undefined;
+  return Boolean(use?.ready && use.source === 'music');
+};
+
 /** connNote: what is still missing, or where the connection came from */
 export function connNote(
   server: MediaServer,
   hasUrl: boolean,
   hasSecret: boolean,
   inherited: boolean,
+  /** the connection video really uses is whole (its own, or music's) */
+  usingMusic = false,
 ) {
   const secret = server === 'plex' ? 'token' : 'API key';
+  // a half-filled video connection is ignored: video keeps using music's
+  if ((!hasUrl || !hasSecret) && (hasUrl || hasSecret) && usingMusic)
+    return `Using your music ${NAME[server]} connection until this one has both a server URL and a ${secret}.`;
   if (!hasUrl && !hasSecret) return `Not connected: add a server URL and ${secret}.`;
   if (!hasSecret) return `Add the ${secret} to finish this connection.`;
   if (!hasUrl) return 'Add the server URL to finish this connection.';
@@ -179,8 +190,8 @@ function createVideoServer() {
       set({
         conn,
         notes: {
-          plex: connNote('plex', !!p.base_url, !!p.has_token, !!p.inherited),
-          jellyfin: connNote('jellyfin', !!j.base_url, !!j.has_key, !!j.inherited),
+          plex: connNote('plex', !!p.base_url, !!p.has_token, !!p.inherited, usingMusic(p)),
+          jellyfin: connNote('jellyfin', !!j.base_url, !!j.has_key, !!j.inherited, usingMusic(j)),
         },
       });
     } catch {

@@ -296,14 +296,22 @@ def register_routes(bp):
                 v = v or ""
                 return ("•" * 12) if v else ""
 
-            pu, pt, p_inh = view("video_plex_url", "video_plex_token", video_plex_config(db))
-            ju, jk, j_inh = view("video_jellyfin_url", "video_jellyfin_key",
-                                 video_jellyfin_config(db))
+            p_eff, j_eff = video_plex_config(db), video_jellyfin_config(db)
+            pu, pt, p_inh = view("video_plex_url", "video_plex_token", p_eff)
+            ju, jk, j_inh = view("video_jellyfin_url", "video_jellyfin_key", j_eff)
+
+            def in_use(eff):
+                """the connection video really uses is whole (its own when both
+                halves are saved, else music's). a half-filled own one is
+                ignored by the connection, so the form can show a half while
+                video still works through music's"""
+                return {"ready": bool(eff.get("base_url") and (eff.get("token") or eff.get("api_key"))),
+                        "source": eff.get("source") or "music"}
             return jsonify({
                 "plex": {"base_url": pu, "token": mask(pt),
-                         "has_token": bool(pt), "inherited": p_inh},
+                         "has_token": bool(pt), "inherited": p_inh, "in_use": in_use(p_eff)},
                 "jellyfin": {"base_url": ju, "api_key": mask(jk),
-                             "has_key": bool(jk), "inherited": j_inh},
+                             "has_key": bool(jk), "inherited": j_inh, "in_use": in_use(j_eff)},
             })
         except Exception:
             logger.exception("video server-config get failed")

@@ -2228,3 +2228,31 @@ def test_detail_pages_say_whether_the_profile_can_mark_watched(tmp_path, monkeyp
     finally:
         import api.video as videoapi
         videoapi._video_db = None
+
+
+def test_a_half_filled_video_plex_still_says_music_s_connection_is_in_use(tmp_path, monkeypatch):
+    """a working plex read "not set up" on the video settings: video had an
+    address saved and no token, so the form showed that half, while the real
+    connection (which ignores a half) used music's plex and worked. the
+    answer now says which connection is in use, so the page can say so."""
+    import core.settings as cs
+
+    class CM:
+        def get_plex_config(self): return {"base_url": "http://plex:32400", "token": "musictoken"}
+        def get_jellyfin_config(self): return {}
+        def get_active_media_server(self): return "plex"
+    monkeypatch.setattr(cs, "config_manager", CM())
+    c = _client_as(tmp_path, is_admin=True)
+    assert c.post("/api/video/server-config",
+                  json={"plex": {"base_url": "http://plex:32400", "token": ""}}).status_code == 200
+    p = c.get("/api/video/server-config").get_json()["plex"]
+    assert p["base_url"] == "http://plex:32400" and p["has_token"] is False   # the form keeps the half
+    assert p["in_use"] == {"ready": True, "source": "music"}                 # but video works through music's
+    assert "musictoken" not in str(p)
+
+
+def test_nothing_anywhere_is_not_in_use(tmp_path, monkeypatch):
+    _no_music_servers(monkeypatch)
+    c = _client_as(tmp_path, is_admin=True)
+    p = c.get("/api/video/server-config").get_json()["plex"]
+    assert p["in_use"]["ready"] is False
