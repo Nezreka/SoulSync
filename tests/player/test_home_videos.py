@@ -632,3 +632,40 @@ def test_a_server_home_library_knows_the_folder_its_clips_share():
     got = H.root_places(conn, ["plex:1", "plex:2", "plex:3"])
     assert got == {"plex:1": "/mnt/easystore3/PLEX/Home Movies", "plex:2": "E:/Clips",
                    "plex:3": "/one/only"}
+
+
+def test_a_folder_holding_the_servers_own_clips_adds_them_once(vdb, monkeypatch, tmp_path):
+    # plex has cake.mp4 (2048 bytes); the same file is also reached as a folder
+    src = _plex_home()
+    folder = tmp_path / "share" / "home"
+    _clip(folder / "Birthdays" / "2022", "cake.mp4", size=2048)
+    _clip(folder, "only on disk.mp4", size=999)
+    monkeypatch.setattr(H, "_server_picks", lambda _db: ("plex", ["Home Videos"]))
+    vdb.set_setting("home_paths", f'["{folder.as_posix()}"]')
+    H.forget_roots()
+    H.scan(vdb, server_source=src)
+    c = _conn(vdb)
+    try:
+        names = sorted(os.path.basename(r[0].replace("\\", "/")) for r in c.execute("SELECT path FROM home_videos"))
+    finally:
+        c.close()
+    # cake once (from plex), the other plex clip, and the disk-only clip
+    assert names == ["VID_20210102_030405.mp4", "cake.mp4", "only on disk.mp4"]
+
+
+def test_twins_added_before_are_cleared_but_an_edited_one_stays(vdb, monkeypatch, tmp_path):
+    src = _plex_home()
+    folder = tmp_path / "share" / "home"
+    _clip(folder, "cake.mp4", size=2048)
+    vdb.set_setting("home_paths", f'["{folder.as_posix()}"]')
+    H.forget_roots()
+    H.scan(vdb)                                   # the folder alone: cake is added from disk
+    monkeypatch.setattr(H, "_server_picks", lambda _db: ("plex", ["Home Videos"]))
+    H.forget_roots()
+    H.scan(vdb, server_source=src)                # now plex has it too: the disk twin goes
+    c = _conn(vdb)
+    try:
+        cakes = c.execute("SELECT root FROM home_videos WHERE path LIKE '%cake.mp4'").fetchall()
+    finally:
+        c.close()
+    assert len(cakes) == 1 and cakes[0][0].startswith("plex:")
