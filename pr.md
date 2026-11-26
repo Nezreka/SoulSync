@@ -23,9 +23,9 @@ around it: video can run with no media server at all, or with plex and jellyfin 
 the player also comes as an android app for phones, tablets and android tv (shield included), paired to your server from settings, devices.
 
 - **repo:** https://github.com/Nezreka/soulsync-mobile-app
-- **apk (0.3.0):** https://github.com/Nezreka/soulsync-mobile-app/releases/download/v0.3.0/SoulSync-Player-0.3.0.apk
+- **apk (always the newest):** https://github.com/Nezreka/soulsync-mobile-app/releases/latest
 
-- **pair it from settings, devices, add a device** with a one-time code. after that everything goes straight between the app and your server.
+- **pair it from settings, devices, add a device:** scan the qr with your phone's camera and the app opens with the code filled in, or type the one-time code. after that everything goes straight between the app and your server.
 - **the same pages as the web player:** home, movies, tv, music, youtube, audiobooks, podcasts and the guide, with rows that follow the same per-profile layouts (arrange a page in a browser and the app follows) and your libraries as their own pages.
 - **a tv home built for a remote,** a top-right mini player, title logos, chromecast, and the stop and message an admin sends from server activity.
 - **home videos:** your own clips as a library, on phones, tablets and tv.
