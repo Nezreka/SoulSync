@@ -10,6 +10,8 @@
  *   name       what the server is called in the player and the app
  *   movies     every movie folder, grouped into libraries you can name
  *   tv         the same for shows
+ *   home       home videos: the server's home video libraries and folders on
+ *              disk, added right here, then grouped like the others
  *   people     which libraries each person can see
  *   sidebar    the order everyone starts from, and places nobody here gets
  */
@@ -22,25 +24,30 @@ import { appURL } from '@/platform/url-base';
 
 import { posterSet } from '../-lib/images';
 import { moveNav } from '../-lib/nav-order';
+import { HomeSourcesPanel } from './home-sources';
 import { styles as k } from './kit';
 import { NAV, NAV_GROUPS } from './sections';
 import s from './setup.module.css';
 import { inPlayer } from './trailer';
 
-type Kind = 'movie' | 'show';
+type Kind = 'movie' | 'show' | 'home';
 
 interface SetupFolder {
   folder: string;
   path: string;
   titles: number;
   sample: number[];
-  library_id: number;
+  library_id: number | null;
+  /** home: the folder's or server library's name, and where it is */
+  label?: string;
+  source?: 'disk' | 'plex' | 'jellyfin';
 }
 interface SetupLibrary {
   id: number;
   kind: Kind;
   name: string;
   is_default: boolean;
+  in_guide?: boolean;
   folders: string[];
 }
 interface SetupPayload {
@@ -50,8 +57,9 @@ interface SetupPayload {
   sidebar_order?: string[];
   sidebar_hidden?: string[];
   libraries?: SetupLibrary[];
-  folders?: Record<Kind, SetupFolder[]>;
+  folders?: Partial<Record<Kind, SetupFolder[]>>;
   hidden?: Record<string, number[]>;
+  home_editors?: 'admins' | 'everyone';
   profiles?: { id: number; name: string; is_admin: boolean }[];
 }
 
@@ -62,6 +70,7 @@ interface DraftLibrary {
   kind: Kind;
   name: string;
   isDefault: boolean;
+  inGuide: boolean;
 }
 
 export const playerSetupQuery = () => ({
@@ -99,6 +108,7 @@ const STEPS = [
   { label: 'Welcome', group: '' },
   { label: 'Movies', group: 'Libraries' },
   { label: 'TV', group: 'Libraries' },
+  { label: 'Home videos', group: 'Libraries' },
   { label: 'Who sees what', group: '' },
   { label: 'Sidebar', group: '' },
   { label: 'Done', group: '' },
@@ -146,7 +156,12 @@ const LIB_COLORS = [
 /** a library named after a folder: "4K MOVIES" is "4K", "Kids Movies" is "Kids" */
 export function libraryNameFor(path: string, kind: Kind): string {
   const last = splitFolderPath(path).parts.at(-1) ?? '';
-  const noise = kind === 'movie' ? /\b(movies?|films?)\b/gi : /\b(tv|shows?|series)\b/gi;
+  const noise =
+    kind === 'movie'
+      ? /\b(movies?|films?)\b/gi
+      : kind === 'show'
+        ? /\b(tv|shows?|series)\b/gi
+        : /\b(home|videos?|clips?)\b/gi;
   const left = last.replace(noise, ' ').replace(/\s+/g, ' ').trim();
   const base = left || last || 'New library';
   return base === base.toUpperCase() && base.length > 3
@@ -199,6 +214,15 @@ function Mark({ size = 'sm' }: { size?: 'sm' | 'md' | 'hero' }) {
   );
 }
 
+/** each folder's library, by draft key */
+function placesOf(data: SetupPayload): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const kind of ['movie', 'show', 'home'] as const)
+    for (const f of data.folders?.[kind] ?? [])
+      if (f.folder && f.library_id != null) out[`${kind}|${f.folder}`] = `id:${f.library_id}`;
+  return out;
+}
+
 function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boolean }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(() => (firstTime ? 0 : wantedStep));
@@ -210,16 +234,32 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
       kind: l.kind,
       name: l.name,
       isDefault: l.is_default,
+      inGuide: l.in_guide ?? l.kind !== 'home',
     })),
   );
   // folder -> the library (by key) it is in
-  const [where, setWhere] = useState<Record<string, string>>(() => {
-    const out: Record<string, string> = {};
-    for (const kind of ['movie', 'show'] as const)
-      for (const f of data.folders?.[kind] ?? [])
-        if (f.folder) out[`${kind}|${f.folder}`] = `id:${f.library_id}`;
-    return out;
-  });
+  const [where, setWhere] = useState<Record<string, string>>(() => placesOf(data));
+  // a home library or folder that turned up while setup is open (a scan
+  // started from the home videos step) joins the draft; nothing typed is lost
+  useEffect(() => {
+    setLibs((all) => {
+      const have = new Set(all.map((l) => l.id));
+      const fresh = (data.libraries ?? []).filter((l) => !have.has(l.id));
+      if (!fresh.length) return all;
+      return [
+        ...all,
+        ...fresh.map((l) => ({
+          key: `id:${l.id}`,
+          id: l.id,
+          kind: l.kind,
+          name: l.name,
+          isDefault: l.is_default,
+          inGuide: l.in_guide ?? l.kind !== 'home',
+        })),
+      ];
+    });
+    setWhere((w) => ({ ...placesOf(data), ...w }));
+  }, [data]);
   // library key -> the profiles it is hidden from
   const [hidden, setHidden] = useState<Record<string, number[]>>(() => {
     const out: Record<string, number[]> = {};
@@ -240,6 +280,8 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
     return () => document.removeEventListener('keydown', onKey);
   }, [firstTime]);
 
+  const [homeEditors, setHomeEditors] = useState(data.home_editors ?? 'admins');
+
   const save = async (defaultsOnly = false) => {
     setBusy(true);
     setError(null);
@@ -257,10 +299,12 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
           });
         body.sidebar_order = sent(order);
         body.sidebar_hidden = sent(gone);
+        body.home_editors = homeEditors;
         body.libraries = libs.map((l) => ({
           ...(l.id !== null ? { id: l.id } : {}),
           kind: l.kind,
           name: l.name,
+          in_guide: l.inGuide,
           folders: l.isDefault
             ? []
             : Object.entries(where)
@@ -277,6 +321,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
         queryClient.invalidateQueries({ queryKey: ['player', 'libraries'] }),
         queryClient.invalidateQueries({ queryKey: ['player', 'video-catalog'] }),
         queryClient.invalidateQueries({ queryKey: ['player', 'settings'] }),
+        queryClient.invalidateQueries({ queryKey: ['player', 'home'] }),
       ]);
       closePlayerSetup();
     } catch (e) {
@@ -293,7 +338,10 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
       target = `new:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
       const path = data.folders?.[kind]?.find((f) => f.folder === folder)?.path ?? folder;
       const libName = name ?? libraryNameFor(path, kind);
-      setLibs((all) => [...all, { key: target!, id: null, kind, name: libName, isDefault: false }]);
+      setLibs((all) => [
+        ...all,
+        { key: target!, id: null, kind, name: libName, isDefault: false, inGuide: kind !== 'home' },
+      ]);
     }
     setWhere((w) => ({ ...w, [`${kind}|${folder}`]: target! }));
   };
@@ -308,7 +356,15 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
     const main = mine.find((l) => l.isDefault);
     const folders = (data.folders?.[kind] ?? []).filter((f) => f.folder);
     const loose = (data.folders?.[kind] ?? []).find((f) => !f.folder);
-    const noun = kind === 'movie' ? 'films' : 'shows';
+    const noun = kind === 'movie' ? 'films' : kind === 'show' ? 'shows' : 'videos';
+    // a folder's picture: a title's poster, or a home video's own frame
+    const shot = (id: number) =>
+      kind === 'home' ? appURL(`/api/player/home/thumb/${id}`) : posterSet(kind, id).src;
+    // a home root reads as where it is: the server, or the folder's drive
+    const whereIs = (f: SetupFolder) =>
+      kind === 'home' && f.source && f.source !== 'disk'
+        ? { root: f.source === 'plex' ? 'Plex' : 'Jellyfin', parts: [f.label ?? f.path] }
+        : splitFolderPath(f.path);
     const libOf = (f: SetupFolder) => where[`${kind}|${f.folder}`] ?? main?.key ?? '';
     const colorOf = (key: string) =>
       LIB_COLORS[
@@ -343,7 +399,10 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
     const acceptIdeas = () => {
       for (const idea of ideas) {
         const key = `new:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
-        setLibs((all) => [...all, { key, id: null, kind, name: idea.name, isDefault: false }]);
+        setLibs((all) => [
+          ...all,
+          { key, id: null, kind, name: idea.name, isDefault: false, inGuide: kind !== 'home' },
+        ]);
         setWhere((w) => {
           const next = { ...w };
           for (const folder of idea.folders) next[`${kind}|${folder}`] = key;
@@ -354,7 +413,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
     // the folders grouped by where they live, then by the folders above them
     const byRoot = new Map<string, Map<string, SetupFolder[]>>();
     for (const f of folders) {
-      const { root, parts } = splitFolderPath(f.path);
+      const { root, parts } = whereIs(f);
       const group = parts.slice(0, -1).join('\u0000');
       if (!byRoot.has(root)) byRoot.set(root, new Map());
       const groups = byRoot.get(root)!;
@@ -369,6 +428,11 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
               inIt.reduce((n, f) => n + f.titles, 0) + (lib.isDefault ? (loose?.titles ?? 0) : 0);
             const shots = inIt.flatMap((f) => f.sample).slice(0, 4);
             const color = colorOf(lib.key);
+            const guide = toggle(lib.inGuide, `${lib.name || 'This library'} is in the guide`, () =>
+              setLibs((all) =>
+                all.map((x) => (x.key === lib.key ? { ...x, inGuide: !x.inGuide } : x)),
+              ),
+            );
             return (
               <section
                 key={lib.key}
@@ -383,7 +447,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                     {shots.map((id) => (
                       <img
                         key={id}
-                        src={posterSet(kind, id).src}
+                        src={shot(id)}
                         alt=""
                         loading="lazy"
                         onError={(e) => {
@@ -399,7 +463,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                 )}
                 <div className={s.libMeta}>
                   <span className={s.libDot} style={{ background: color }} aria-hidden="true" />
-                  {lib.isDefault ? (
+                  {lib.isDefault && lib.kind !== 'home' ? (
                     <b className={s.libTitle}>{lib.name}</b>
                   ) : (
                     <input
@@ -418,6 +482,10 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                   <span className={s.libCount}>
                     {total.toLocaleString()} {noun}
                   </span>
+                </div>
+                <div className={s.libGuide}>
+                  {guide}
+                  <span>Show in the guide</span>
                 </div>
                 {!lib.isDefault ? (
                   <button
@@ -451,8 +519,14 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                   key: `new:${Date.now()}`,
                   id: null,
                   kind,
-                  name: kind === 'movie' ? 'New movie library' : 'New TV library',
+                  name:
+                    kind === 'movie'
+                      ? 'New movie library'
+                      : kind === 'show'
+                        ? 'New TV library'
+                        : 'New home video library',
                   isDefault: false,
+                  inGuide: kind !== 'home',
                 },
               ])
             }
@@ -520,7 +594,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                       ) : null}
                       {list.map((f) => {
                         const key = libOf(f);
-                        const parts = splitFolderPath(f.path).parts;
+                        const parts = whereIs(f).parts;
                         return (
                           <div
                             key={f.folder}
@@ -547,7 +621,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                                 {f.sample.slice(0, 3).map((id) => (
                                   <img
                                     key={id}
-                                    src={posterSet(kind, id).src}
+                                    src={shot(id)}
                                     alt=""
                                     loading="lazy"
                                     onError={(e) => {
@@ -604,7 +678,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
               );
             })}
           </div>
-        ) : (
+        ) : kind === 'home' ? null : (
           <p className={s.muted}>
             No {kind === 'movie' ? 'movie' : 'TV'} folders are set up in SoulSync yet (Settings,
             Folders).
@@ -630,7 +704,8 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
   const places = NAV.flatMap((e) => [
     { id: e.to, label: e.label, group: e.group, lib: null as DraftLibrary | null },
     ...libs.flatMap((l) =>
-      !l.isDefault && e.to === (l.kind === 'movie' ? '/player/movies' : '/player/tv')
+      (!l.isDefault || l.kind === 'home') &&
+      e.to === (l.kind === 'movie' ? '/player/movies' : '/player/tv')
         ? [
             {
               id: l.id !== null ? `lib:${l.id}` : `draft:${l.key}`,
@@ -676,7 +751,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
     setOrder(next);
   };
 
-  const counts = (['movie', 'show'] as const).map((kind) => {
+  const counts = (['movie', 'show', 'home'] as const).map((kind) => {
     const all = data.folders?.[kind] ?? [];
     return {
       kind,
@@ -684,7 +759,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
       folders: all.filter((f) => f.folder).length,
     };
   });
-  const madeHere = libs.filter((l) => !l.isDefault).length;
+  const madeHere = libs.filter((l) => !l.isDefault || l.kind === 'home').length;
   const keptFrom = Object.values(hidden).reduce((n, list) => n + list.length, 0);
   const last = STEPS.length - 1;
 
@@ -767,15 +842,17 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                 <span className={s.muted}>Your server’s name</span>
               </label>
               <div className={s.found} aria-label="What SoulSync found">
-                {counts.map((c) => (
-                  <div key={c.kind}>
-                    <b>{c.titles.toLocaleString()}</b>
-                    <span>
-                      {c.kind === 'movie' ? 'films' : 'shows'} in {c.folders}{' '}
-                      {c.folders === 1 ? 'folder' : 'folders'}
-                    </span>
-                  </div>
-                ))}
+                {counts
+                  .filter((c) => c.kind !== 'home' || c.folders)
+                  .map((c) => (
+                    <div key={c.kind}>
+                      <b>{c.titles.toLocaleString()}</b>
+                      <span>
+                        {c.kind === 'movie' ? 'films' : c.kind === 'show' ? 'shows' : 'home videos'}{' '}
+                        in {c.folders} {c.folders === 1 ? 'folder' : 'folders'}
+                      </span>
+                    </div>
+                  ))}
                 <div>
                   <b>{people.length}</b>
                   <span>{people.length === 1 ? 'person' : 'people'} besides the admins</span>
@@ -799,6 +876,39 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
           ) : null}
 
           {step === 3 ? (
+            <div className={s.body}>
+              <div className={s.eyebrow}>Libraries · Home videos</div>
+              <h1 className={s.title}>Your home videos</h1>
+              <p className={s.lead}>
+                Clips from your phone or camera. SoulSync never looks them up or renames them: it
+                names and dates them from the clip itself, and each folder becomes an album.
+              </p>
+              <HomeSourcesPanel
+                onChanged={() =>
+                  void queryClient.invalidateQueries({ queryKey: ['player', 'setup'] })
+                }
+              />
+              {libs.some((l) => l.kind === 'home') ? (
+                <>
+                  <div className={s.stepGroup}>Libraries</div>
+                  {libraryStep('home')}
+                  <label className={s.homeEditors}>
+                    {toggle(
+                      homeEditors === 'everyone',
+                      'Everyone who can see a home video can rename it',
+                      () => setHomeEditors((v) => (v === 'everyone' ? 'admins' : 'everyone')),
+                    )}
+                    <span>
+                      Let everyone who can see them rename, re-date and pick pictures (otherwise
+                      only admins)
+                    </span>
+                  </label>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+
+          {step === 4 ? (
             <div className={s.body}>
               <div className={s.eyebrow}>People</div>
               <h1 className={s.title}>Who sees what</h1>
@@ -835,7 +945,11 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                             )}
                             <span className={s.personLib}>{lib.name || 'Unnamed'}</span>
                             <span className={s.muted}>
-                              {lib.kind === 'movie' ? 'Movies' : 'TV'}
+                              {lib.kind === 'movie'
+                                ? 'Movies'
+                                : lib.kind === 'show'
+                                  ? 'TV'
+                                  : 'Home videos'}
                             </span>
                           </div>
                         );
@@ -848,10 +962,16 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                   There is nobody but admins on this server yet. Add people in Settings, People.
                 </p>
               )}
+              {people.length && libs.some((l) => l.kind === 'home') ? (
+                <p className={s.note} role="note">
+                  Home videos are your family’s own clips. You may want to switch them off for
+                  guests or anyone outside the house.
+                </p>
+              ) : null}
             </div>
           ) : null}
 
-          {step === 4 ? (
+          {step === 5 ? (
             <div className={s.body}>
               <div className={s.eyebrow}>Sidebar</div>
               <h1 className={s.title}>Arrange the sidebar</h1>

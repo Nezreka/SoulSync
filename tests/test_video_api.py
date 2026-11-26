@@ -534,12 +534,12 @@ def test_libraries_endpoint_lists_and_saves(tmp_path, monkeypatch):
         assert [m["title"] for m in data["movies"]] == ["Movies"]
         # one library of each kind and nothing ever picked: they're picked
         # for you, so a fresh install's first scan reads something
-        assert data["selected"] == {"movies": "Movies", "movies_more": [], "tv": "TV", "tv_more": [], "anime": []}
+        assert data["selected"] == {"movies": "Movies", "movies_more": [], "tv": "TV", "tv_more": [], "anime": [], "home_more": []}
 
         # "— None —" for tv is a choice and stays one on the next load
         assert client.post("/api/video/libraries", json={"movies": "Movies", "tv": ""}).status_code == 200
         data2 = client.get("/api/video/libraries").get_json()
-        assert data2["selected"] == {"movies": "Movies", "movies_more": [], "tv": "", "tv_more": [], "anime": []}
+        assert data2["selected"] == {"movies": "Movies", "movies_more": [], "tv": "", "tv_more": [], "anime": [], "home_more": []}
     finally:
         videoapi._video_db = None
 
@@ -715,7 +715,7 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             "usenet_remove_completed": "off",
             "redownload_failed": True,
             "monitor_specials": True,
-            "movies_additional_paths": [], "tv_additional_paths": [],
+            "movies_additional_paths": [], "tv_additional_paths": [], "home_paths": [],
             # the optional 4K libraries, off until switched on
             "movies_4k_enabled": False, "movies_4k_path": "",
             "tv_4k_enabled": False, "tv_4k_path": ""}
@@ -734,7 +734,7 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             "usenet_remove_completed": "files",
             "redownload_failed": True,
             "monitor_specials": True,
-            "movies_additional_paths": [], "tv_additional_paths": [],
+            "movies_additional_paths": [], "tv_additional_paths": [], "home_paths": [],
             # the optional 4K libraries, off until switched on
             "movies_4k_enabled": False, "movies_4k_path": "",
             "tv_4k_enabled": False, "tv_4k_path": ""}

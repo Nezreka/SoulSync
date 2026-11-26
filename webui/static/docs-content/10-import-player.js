@@ -195,6 +195,64 @@ Add tracks to the queue from the Enhanced Library Manager or download results. M
 });
 
 registerDocsSection({
+    id: 'player-home-videos',
+    needs: 'everyone',
+    title: 'Home Videos',
+    icon: '🎥',
+    pages: [
+        {
+            id: 'home-what',
+            title: 'Your Home Videos',
+            lede: 'Clips from your phone or camera, by the day they were filmed.',
+            body: `
+**Home videos** is a page of its own in the player's sidebar (on a phone, under **More**). It shows:
+
+- **On this day**: clips filmed on today's date in earlier years, with how long ago.
+- **Folders**: each folder your clips sit in is an album, so the way you sorted them on disk carries over. Open one to see it in order, play it all, or download the whole album.
+- **The timeline**: every clip by month, newest first, with the day it was filmed, its length and how far you got.
+
+Switch between **Timeline** and **Folders** at the top, or type in **Find a video** to search names, notes and folders.
+
+Home videos are never looked up on TMDB or anywhere else, never matched, renamed or moved. A clip is named from its file: a camera's name like \`VID_20261031_183012\` becomes "Oct 31, 2026, 6:30 PM" until someone names it. The date comes from the clip itself (its own creation time), else a date in the name, else the file's date. The picture is a frame a few seconds in, made in the background.
+
+They play, resume, cast and download like everything else in the player. A clip whose file is gone shows greyed in its album until it comes back.
+`
+        },
+        {
+            id: 'home-edit',
+            title: 'Naming and Dating a Clip',
+            lede: 'Give a clip a name, fix its date, pick a better picture, add notes.',
+            body: `
+Hover a clip and press the pencil (on a phone, press and hold; with a mouse, right-click). The sheet has:
+
+- **Name**: shows what the file was called. Your name is kept, even after a rescan. **Use the automatic name** goes back.
+- **Date filmed**: says where the date came from. Change it if the camera's clock was wrong; the clip moves to the right month and On this day follows.
+- **Picture**: four frames from the clip. Pick one and it's the picture at once.
+- **Notes**: who's in it, where it was. Notes are searched too.
+
+Admins can edit by default. In Player setup, **Home videos**, an admin can let everyone who can see the clips edit them.
+`
+        },
+        {
+            id: 'home-setup',
+            title: 'Setting Up Home Videos (Admin)',
+            needs: 'admin',
+            lede: 'Add your server\'s home video library or a folder, right from the player.',
+            body: `
+Open **Player setup** (the player's Settings, Libraries) and go to **Home videos**:
+
+- **On Plex or Jellyfin**: a Plex library of the "Other videos" type, or a Jellyfin "Home videos and photos" library, is listed with how many clips it has. **Add it** and it's read at once, with progress on the card.
+- **Folders on disk**: type a folder and SoulSync checks it can read it and how many clips are in it before you add it. Works with or without a media server.
+
+The same lists are in Settings: **Connections** (Home videos libraries, a Scan switch each) and **Library, Folders** (Home videos folders). New clips are picked up after every library scan.
+
+Once there are clips, the **Home videos** library appears. Rename it, split folders off into more home libraries (Kids, Grandparents), and choose who sees each one under **Who sees what**: you may want to switch them off for guests. Home libraries start with **Show in the guide** off; switch it on and the guide gets a Home videos channel.
+`
+        },
+    ]
+});
+
+registerDocsSection({
     id: 'player-downloads',
     needs: 'everyone',
     title: 'Player Downloads',

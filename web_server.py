@@ -24994,6 +24994,9 @@ from api.player_stream import create_blueprint as _bp_player_stream
 app.register_blueprint(_bp_player_stream())
 from api.player_tracks import create_blueprint as _bp_player_tracks
 app.register_blueprint(_bp_player_tracks())
+# ...and its home videos (core/video/home_videos.py)
+from api.player_home import create_blueprint as _bp_player_home
+app.register_blueprint(_bp_player_home())
 # ...and its downloads: devices, what's on them, copies made for them
 from api.player_offline import create_blueprint as _bp_player_offline
 app.register_blueprint(_bp_player_offline())

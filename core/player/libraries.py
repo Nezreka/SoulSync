@@ -20,6 +20,15 @@ folders:
 a title is in the library of the folder its file sits in. a title whose file
 is in none of the folders (or has no file path) is in the default library.
 
+home videos (core/video/home_videos.py) are a third kind, ``home``. their
+"folders" are the home video roots: each home videos folder on disk and each
+server home video library picked to scan. the "Home videos" library is made
+by the first scan that finds a root (ensure_home), so a server with no home
+videos never shows one; there is no fixed id for it.
+
+every library has ``in_guide``: whether the guide schedules its titles. home
+libraries start off, the rest on.
+
 nothing here touches where downloads are filed: that is the manager's own
 "video libraries" (core/video/libraries.py), a different thing.
 
@@ -41,9 +50,13 @@ logger = get_logger("player.libraries")
 LIBS = "player_libraries"
 FOLDERS = "player_library_folders"
 HIDDEN = "player_library_hidden"
-KINDS = ("movie", "show")
-# the default libraries exist before anything is saved, by these ids
+KINDS = ("movie", "show", "home")
+# the kinds whose titles live in the movie / show tables (the resolver's)
+TITLE_KINDS = ("movie", "show")
+# the default libraries exist before anything is saved, by these ids. the
+# home one is made when there are home videos (ensure_home)
 DEFAULTS = {"movie": (1, "Movies"), "show": (2, "TV Shows")}
+HOME_NAME = "Home videos"
 MAX_NAME = 60
 MAX_LIBRARIES = 40
 
@@ -107,12 +120,20 @@ def ensure_schema(db: Any) -> None:
                 profile_id INTEGER NOT NULL,
                 PRIMARY KEY (library_id, profile_id)
             )""")
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({LIBS})")}
+        if "in_guide" not in cols:
+            # NULL: the kind's default (home off, the rest on)
+            conn.execute(f"ALTER TABLE {LIBS} ADD COLUMN in_guide INTEGER")
         for kind, (lib_id, name) in DEFAULTS.items():
             conn.execute(
                 f"INSERT OR IGNORE INTO {LIBS} (id, kind, name, position, is_default) VALUES (?, ?, ?, 0, 1)",
                 (lib_id, kind, name))
         conn.commit()
     _ready.add(key)
+
+
+def _in_guide(kind: str, value: Any) -> bool:
+    return (kind != "home") if value is None else bool(value)
 
 
 def _read(db: Any, sql: str, args: tuple = ()) -> list:
@@ -131,21 +152,29 @@ def _read(db: Any, sql: str, args: tuple = ()) -> list:
 def libraries(db: Any) -> List[Dict[str, Any]]:
     """every library, defaults first then by position: {id, kind, name,
     is_default, folders}. before anything is saved: the two defaults."""
-    rows = _read(db, f"SELECT id, kind, name, position, is_default FROM {LIBS} ORDER BY kind, is_default DESC, position, id")
+    order = "ORDER BY kind, is_default DESC, position, id"
+    try:
+        rows = _read(db, f"SELECT id, kind, name, position, is_default, in_guide FROM {LIBS} {order}")
+    except sqlite3.OperationalError as e:
+        if "no such column" not in str(e).lower():
+            raise
+        # a table from before in_guide that nothing has written to since
+        rows = [(*r, None) for r in _read(db, f"SELECT id, kind, name, position, is_default FROM {LIBS} {order}")]
     if not rows:
-        rows = [(lib_id, kind, name, 0, 1) for kind, (lib_id, name) in DEFAULTS.items()]
+        rows = [(lib_id, kind, name, 0, 1, None) for kind, (lib_id, name) in DEFAULTS.items()]
     by_lib: Dict[int, List[str]] = {}
     for _kind, folder, lib_id in _read(db, f"SELECT kind, folder, library_id FROM {FOLDERS}"):
         by_lib.setdefault(int(lib_id), []).append(str(folder))
     return [{"id": int(r[0]), "kind": r[1], "name": r[2], "is_default": bool(r[4]),
+             "in_guide": _in_guide(r[1], r[5]),
              "folders": sorted(by_lib.get(int(r[0]), []))} for r in rows]
 
 
-def default_id(libs: List[Dict[str, Any]], kind: str) -> int:
+def default_id(libs: List[Dict[str, Any]], kind: str) -> Optional[int]:
     for lib in libs:
         if lib["kind"] == kind and lib["is_default"]:
             return lib["id"]
-    return DEFAULTS[kind][0]
+    return DEFAULTS[kind][0] if kind in DEFAULTS else None
 
 
 def hidden_for(db: Any, profile_id: Optional[int]) -> FrozenSet[int]:
@@ -175,12 +204,13 @@ def hidden_map(db: Any) -> Dict[int, List[int]]:
 def visible(db: Any, profile_id: Optional[int], *, is_admin: bool = False,
             kinds: Optional[Iterable[str]] = None) -> List[Dict[str, Any]]:
     """the libraries this profile can see, as the player lists them:
-    {id, kind, name, own_page, main}. a library that isn't its kind's
-    default has a page of its own."""
+    {id, kind, name, own_page, main, in_guide}. a library that isn't its
+    kind's default has a page of its own; every home library does."""
     hidden = frozenset() if is_admin else hidden_for(db, profile_id)
     allowed = set(kinds) if kinds is not None else None
     return [{"id": lib["id"], "kind": lib["kind"], "name": lib["name"],
-             "own_page": not lib["is_default"], "main": lib["is_default"]}
+             "own_page": lib["kind"] == "home" or not lib["is_default"], "main": lib["is_default"],
+             "in_guide": lib["in_guide"]}
             for lib in libraries(db)
             if lib["id"] not in hidden and (allowed is None or lib["kind"] in allowed)]
 
@@ -188,7 +218,15 @@ def visible(db: Any, profile_id: Optional[int], *, is_admin: bool = False,
 # ── which library a title is in ───────────────────────────────────────────
 
 def roots(video_db: Any, kind: str) -> List[str]:
-    """the folders the manager keeps this kind of video in"""
+    """the folders the manager keeps this kind of video in (for home: the
+    home video roots, core/video/home_videos.roots)"""
+    if kind == "home":
+        try:
+            from core.video.home_videos import roots as home_roots
+            return [r["id"] for r in home_roots(video_db)]
+        except Exception:  # noqa: BLE001
+            logger.debug("home video roots unreadable", exc_info=True)
+            return []
     from core.video.library_roots import library_roots
     try:
         return list(library_roots(video_db, "movie" if kind == "movie" else "episode"))
@@ -203,14 +241,14 @@ class Resolver:
 
     def __init__(self, libs: List[Dict[str, Any]], roots_by_kind: Dict[str, List[str]],
                  localize: Callable[[str], str] = lambda p: p):
-        self._default = {k: default_id(libs, k) for k in KINDS}
+        self._default = {k: default_id(libs, k) for k in TITLE_KINDS}
         self._localize = localize
         assigned = {(lib["kind"], f): lib["id"] for lib in libs for f in lib["folders"]}
         # deepest folder first: a folder inside another is its own place
         self._roots = {
             k: sorted(((norm(r), assigned.get((k, norm(r)), self._default[k])) for r in roots_by_kind.get(k, [])),
                       key=lambda x: -len(x[0]))
-            for k in KINDS}
+            for k in TITLE_KINDS}
 
     def folder_of(self, kind: str, path: Any) -> Optional[str]:
         p = norm(self._localize(str(path))) if path else ""
@@ -239,7 +277,7 @@ def resolver(player_db: Any, video_db: Any) -> Resolver:
         hit = _resolver_cache.get(key)
         if hit and hit[1] == _version and now - hit[0] < RESOLVER_SECONDS:
             return hit[2]
-    built = Resolver(libraries(player_db), {k: roots(video_db, k) for k in KINDS}, _localizer(video_db))
+    built = Resolver(libraries(player_db), {k: roots(video_db, k) for k in TITLE_KINDS}, _localizer(video_db))
     with _lock:
         _resolver_cache[key] = (now, _version, built)
     return built
@@ -317,7 +355,7 @@ def folder_overview(video_db: Any, player_db: Any) -> Dict[str, List[Dict[str, A
     out: Dict[str, List[Dict[str, Any]]] = {}
     conn = video_db._get_connection()
     try:
-        for kind in KINDS:
+        for kind in TITLE_KINDS:
             counts: Dict[Optional[str], int] = {}
             samples: Dict[Optional[str], List[int]] = {}
             for tid, path in title_paths(conn, kind).items():
@@ -335,12 +373,76 @@ def folder_overview(video_db: Any, player_db: Any) -> Dict[str, List[Dict[str, A
                 rows.append({"folder": "", "path": "", "titles": counts[None], "sample": samples.get(None, []),
                              "library_id": res.library_of(kind, None)})
             out[kind] = rows
+        out["home"] = _home_overview(conn, video_db, libraries(player_db))
     finally:
         conn.close()
     return out
 
 
+def _home_overview(conn: Any, video_db: Any, libs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """setup's rows for the home video roots: {folder, path, label, source,
+    titles, sample (clip ids with a picture), library_id}"""
+    try:
+        from core.video import home_videos
+        found = home_videos.roots(video_db)
+        counts = home_videos.root_counts(conn, [r["id"] for r in found])
+    except Exception:  # noqa: BLE001 - no home table yet is no home videos
+        logger.debug("home overview unreadable", exc_info=True)
+        return []
+    return [{"folder": r["id"], "path": r["path"], "label": r["label"], "source": r["source"],
+             "titles": counts.get(r["id"], (0, []))[0], "sample": counts.get(r["id"], (0, []))[1],
+             "library_id": home_library_of(libs, r["id"])} for r in found]
+
+
+# ── home ──────────────────────────────────────────────────────────────────
+
+def home_library_of(libs: List[Dict[str, Any]], root: str) -> Optional[int]:
+    """the home library a root is in: the one it was moved to, else the default"""
+    key = norm(root)
+    for lib in libs:
+        if lib["kind"] == "home" and key in lib["folders"]:
+            return lib["id"]
+    return default_id(libs, "home")
+
+
+def home_library_roots(libs: List[Dict[str, Any]], all_roots: Iterable[str], library_id: int) -> List[str]:
+    """the roots one home library holds"""
+    return [r for r in all_roots if home_library_of(libs, r) == int(library_id)]
+
+
+def ensure_home(db: Any, video_db: Any) -> Optional[int]:
+    """the "Home videos" library, made when there are home video roots and
+    there is none yet. its id, or None with no roots."""
+    libs = libraries(db)
+    have = default_id(libs, "home")
+    if have is not None:
+        return have
+    if not roots(video_db, "home"):
+        return None
+    ensure_schema(db)
+    with db._get_connection() as conn:
+        row = conn.execute(f"SELECT id FROM {LIBS} WHERE kind = 'home' AND is_default = 1").fetchone()
+        if row:
+            return int(row[0])
+        cur = conn.execute(f"INSERT INTO {LIBS} (kind, name, position, is_default, in_guide) "
+                           "VALUES ('home', ?, 0, 1, 0)", (HOME_NAME,))
+        conn.commit()
+        made = int(cur.lastrowid)
+    _changed(db)
+    logger.info("player: made the %s library (%d)", HOME_NAME, made)
+    return made
+
+
+def guide_off(db: Any) -> FrozenSet[int]:
+    """the movie and TV libraries the guide leaves out (a home library is
+    never in the guide's catalog to begin with)"""
+    return frozenset(lib["id"] for lib in libraries(db) if not lib["in_guide"] and lib["kind"] in TITLE_KINDS)
+
+
 # ── saving ────────────────────────────────────────────────────────────────
+
+_KIND_WORDS = {"movie": "movie", "show": "TV", "home": "home video"}
+
 
 def _name(value: Any) -> str:
     name = " ".join(str(value or "").split())
@@ -357,12 +459,16 @@ def save(db: Any, video_db: Any, wanted: Any, hidden: Any = None) -> List[Dict[s
     all or nothing. each kind keeps its default library (it can be renamed,
     not removed); a folder belongs to one library and must be one of the
     manager's folders for that kind; a folder nobody names goes to the
-    default; a library left out is removed and what was hidden with it."""
+    default; a library left out is removed and what was hidden with it.
+
+    home libraries are left as they are when the list has none at all (an
+    app that knows only movies and shows saves without touching them)."""
     if not isinstance(wanted, list) or len(wanted) > MAX_LIBRARIES:
         raise LibraryError(f"libraries is a list of at most {MAX_LIBRARIES}")
     ensure_schema(db)
     current = {lib["id"]: lib for lib in libraries(db)}
-    known_folders = {k: {norm(r) for r in roots(video_db, k)} for k in KINDS}
+    wanted_kinds = {str(i.get("kind") or "") for i in wanted if isinstance(i, dict)}
+    known_folders = {k: ({norm(r) for r in roots(video_db, k)} if k in wanted_kinds else set()) for k in KINDS}
     seen_folders: Dict[Tuple[str, str], str] = {}
     seen_names: Dict[Tuple[str, str], bool] = {}
     kept_defaults = set()
@@ -372,7 +478,7 @@ def save(db: Any, video_db: Any, wanted: Any, hidden: Any = None) -> List[Dict[s
             raise LibraryError("each library is an object")
         kind = str(item.get("kind") or "")
         if kind not in KINDS:
-            raise LibraryError("a library is of movies or of shows")
+            raise LibraryError("a library is of movies, shows or home videos")
         name = _name(item.get("name"))
         if (kind, name.lower()) in seen_names:
             raise LibraryError(f"two libraries are called {name}")
@@ -388,6 +494,9 @@ def save(db: Any, video_db: Any, wanted: Any, hidden: Any = None) -> List[Dict[s
                 raise LibraryError("no such library")
             if existing["is_default"]:
                 kept_defaults.add(kind)
+        in_guide = item.get("in_guide")
+        if in_guide is not None and not isinstance(in_guide, bool):
+            raise LibraryError("in_guide is true or false")
         folders = item.get("folders") or []
         if not isinstance(folders, list):
             raise LibraryError("folders is a list")
@@ -395,16 +504,27 @@ def save(db: Any, video_db: Any, wanted: Any, hidden: Any = None) -> List[Dict[s
         for f in folders:
             key = norm(f)
             if key not in known_folders[kind]:
-                raise LibraryError(f"{f} is not one of the {'movie' if kind == 'movie' else 'TV'} folders")
+                raise LibraryError(f"{f} is not one of the {_KIND_WORDS[kind]} folders")
             if (kind, key) in seen_folders:
                 raise LibraryError(f"{f} is in two libraries")
             seen_folders[(kind, key)] = name
             clean.append(key)
         plan.append({"id": existing["id"] if existing else None, "kind": kind, "name": name,
-                     "folders": clean, "is_default": bool(existing and existing["is_default"]), "place": n})
+                     "folders": clean, "is_default": bool(existing and existing["is_default"]), "place": n,
+                     # not said: as it was (a new one: its kind's default)
+                     "in_guide": in_guide if in_guide is not None else (
+                         existing["in_guide"] if existing else kind != "home")})
+    # home libraries the list doesn't mention: kept whole
+    untouched = [lib for lib in current.values()
+                 if lib["kind"] == "home" and "home" not in wanted_kinds]
     for kind in KINDS:
-        if kind not in kept_defaults:
-            raise LibraryError(f"the {DEFAULTS[kind][1]} library can be renamed, not removed")
+        if kind == "home" and untouched:
+            continue
+        main = next((lib for lib in current.values() if lib["kind"] == kind and lib["is_default"]), None)
+        if kind not in kept_defaults and (kind in DEFAULTS or main is not None):
+            raise LibraryError(f"the {main['name'] if main else DEFAULTS[kind][1]} library can be renamed, not removed")
+        if kind == "home" and main is None and any(p["kind"] == "home" for p in plan):
+            raise LibraryError("home video libraries come once there are home videos")
 
     hide: Dict[Any, List[int]] = {}
     if hidden is not None:
@@ -422,24 +542,27 @@ def save(db: Any, video_db: Any, wanted: Any, hidden: Any = None) -> List[Dict[s
         for position, lib in enumerate(plan):
             if lib["id"] is None:
                 cur = conn.execute(
-                    f"INSERT INTO {LIBS} (kind, name, position, is_default) VALUES (?, ?, ?, 0)",
-                    (lib["kind"], lib["name"], position))
+                    f"INSERT INTO {LIBS} (kind, name, position, is_default, in_guide) VALUES (?, ?, ?, 0, ?)",
+                    (lib["kind"], lib["name"], position, int(lib["in_guide"])))
                 lib["id"] = int(cur.lastrowid)
                 new_ids[lib["place"]] = lib["id"]
             else:
-                conn.execute(f"UPDATE {LIBS} SET name = ?, position = ? WHERE id = ?",
-                             (lib["name"], position, lib["id"]))
+                conn.execute(f"UPDATE {LIBS} SET name = ?, position = ?, in_guide = ? WHERE id = ?",
+                             (lib["name"], position, int(lib["in_guide"]), lib["id"]))
             keep_ids.append(lib["id"])
+        keep_ids.extend(lib["id"] for lib in untouched)
         marks = ",".join("?" * len(keep_ids))
         conn.execute(f"DELETE FROM {LIBS} WHERE id NOT IN ({marks})", keep_ids)
         conn.execute(f"DELETE FROM {HIDDEN} WHERE library_id NOT IN ({marks})", keep_ids)
         conn.execute(f"DELETE FROM {FOLDERS}")
         conn.executemany(
             f"INSERT INTO {FOLDERS} (kind, folder, library_id) VALUES (?, ?, ?)",
-            [(lib["kind"], f, lib["id"]) for lib in plan if not lib["is_default"] for f in lib["folders"]])
+            [(lib["kind"], f, lib["id"]) for lib in plan + untouched if not lib["is_default"] for f in lib["folders"]])
         if hidden is not None:
+            kept_hidden = hidden_map(db)
             conn.execute(f"DELETE FROM {HIDDEN}")
-            rows = []
+            rows = [(lib["id"], p) for lib in untouched if str(lib["id"]) not in hide
+                    for p in kept_hidden.get(lib["id"], [])]
             for k, pids in hide.items():
                 lib_id = new_ids.get(int(k[4:])) if k.startswith("new:") and k[4:].isdigit() else (
                     int(k) if k.lstrip("-").isdigit() else None)
@@ -451,6 +574,7 @@ def save(db: Any, video_db: Any, wanted: Any, hidden: Any = None) -> List[Dict[s
     return libraries(db)
 
 
-__all__ = ["LibraryError", "KINDS", "DEFAULTS", "libraries", "visible", "hidden_for", "hidden_map",
-           "roots", "Resolver", "resolver", "title_paths", "library_ids_for", "folder_overview",
-           "save", "norm", "version", "ensure_schema", "default_id"]
+__all__ = ["LibraryError", "KINDS", "TITLE_KINDS", "DEFAULTS", "libraries", "visible", "hidden_for",
+           "hidden_map", "roots", "Resolver", "resolver", "title_paths", "library_ids_for", "folder_overview",
+           "save", "norm", "version", "ensure_schema", "default_id", "ensure_home", "home_library_of",
+           "home_library_roots", "guide_off"]

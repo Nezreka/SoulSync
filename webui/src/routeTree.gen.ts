@@ -41,6 +41,7 @@ import { Route as PodcastsPodcastIdRouteImport } from './routes/podcasts/$podcas
 import { Route as PlayerWatchlistRouteImport } from './routes/player/watchlist'
 import { Route as PlayerWatchingRouteImport } from './routes/player/watching'
 import { Route as PlayerSettingsRouteImport } from './routes/player/settings'
+import { Route as PlayerHomeVideosRouteImport } from './routes/player/home-videos'
 import { Route as PlayerGuideRouteImport } from './routes/player/guide'
 import { Route as PlayerDownloadsRouteImport } from './routes/player/downloads'
 import { Route as PlayerCalendarRouteImport } from './routes/player/calendar'
@@ -241,6 +242,11 @@ const PlayerWatchingRoute = PlayerWatchingRouteImport.update({
 const PlayerSettingsRoute = PlayerSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerHomeVideosRoute = PlayerHomeVideosRouteImport.update({
+  id: '/home-videos',
+  path: '/home-videos',
   getParentRoute: () => PlayerRouteRoute,
 } as any)
 const PlayerGuideRoute = PlayerGuideRouteImport.update({
@@ -490,6 +496,7 @@ export interface FileRoutesByFullPath {
   '/player/calendar': typeof PlayerCalendarRoute
   '/player/downloads': typeof PlayerDownloadsRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/home-videos': typeof PlayerHomeVideosRoute
   '/player/settings': typeof PlayerSettingsRoute
   '/player/watching': typeof PlayerWatchingRoute
   '/player/watchlist': typeof PlayerWatchlistRoute
@@ -561,6 +568,7 @@ export interface FileRoutesByTo {
   '/player/calendar': typeof PlayerCalendarRoute
   '/player/downloads': typeof PlayerDownloadsRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/home-videos': typeof PlayerHomeVideosRoute
   '/player/settings': typeof PlayerSettingsRoute
   '/player/watching': typeof PlayerWatchingRoute
   '/player/watchlist': typeof PlayerWatchlistRoute
@@ -637,6 +645,7 @@ export interface FileRoutesById {
   '/player/calendar': typeof PlayerCalendarRoute
   '/player/downloads': typeof PlayerDownloadsRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/home-videos': typeof PlayerHomeVideosRoute
   '/player/settings': typeof PlayerSettingsRoute
   '/player/watching': typeof PlayerWatchingRoute
   '/player/watchlist': typeof PlayerWatchlistRoute
@@ -714,6 +723,7 @@ export interface FileRouteTypes {
     | '/player/calendar'
     | '/player/downloads'
     | '/player/guide'
+    | '/player/home-videos'
     | '/player/settings'
     | '/player/watching'
     | '/player/watchlist'
@@ -785,6 +795,7 @@ export interface FileRouteTypes {
     | '/player/calendar'
     | '/player/downloads'
     | '/player/guide'
+    | '/player/home-videos'
     | '/player/settings'
     | '/player/watching'
     | '/player/watchlist'
@@ -860,6 +871,7 @@ export interface FileRouteTypes {
     | '/player/calendar'
     | '/player/downloads'
     | '/player/guide'
+    | '/player/home-videos'
     | '/player/settings'
     | '/player/watching'
     | '/player/watchlist'
@@ -1153,6 +1165,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/player/settings'
       preLoaderRoute: typeof PlayerSettingsRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/home-videos': {
+      id: '/player/home-videos'
+      path: '/home-videos'
+      fullPath: '/player/home-videos'
+      preLoaderRoute: typeof PlayerHomeVideosRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
     '/player/guide': {
@@ -1492,6 +1511,7 @@ interface PlayerRouteRouteChildren {
   PlayerCalendarRoute: typeof PlayerCalendarRoute
   PlayerDownloadsRoute: typeof PlayerDownloadsRoute
   PlayerGuideRoute: typeof PlayerGuideRoute
+  PlayerHomeVideosRoute: typeof PlayerHomeVideosRoute
   PlayerSettingsRoute: typeof PlayerSettingsRoute
   PlayerWatchingRoute: typeof PlayerWatchingRoute
   PlayerWatchlistRoute: typeof PlayerWatchlistRoute
@@ -1529,6 +1549,7 @@ const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
   PlayerCalendarRoute: PlayerCalendarRoute,
   PlayerDownloadsRoute: PlayerDownloadsRoute,
   PlayerGuideRoute: PlayerGuideRoute,
+  PlayerHomeVideosRoute: PlayerHomeVideosRoute,
   PlayerSettingsRoute: PlayerSettingsRoute,
   PlayerWatchingRoute: PlayerWatchingRoute,
   PlayerWatchlistRoute: PlayerWatchlistRoute,

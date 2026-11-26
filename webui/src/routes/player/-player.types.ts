@@ -97,15 +97,30 @@ export interface CatalogYoutube {
  */
 export interface PlayerLibrary {
   id: number;
-  kind: 'movie' | 'show';
+  /** home: clips from a camera or a phone (core/video/home_videos.py) */
+  kind: 'movie' | 'show' | 'home';
   name: string;
   own_page: boolean;
   main: boolean;
+  /** whether the guide schedules its titles (home libraries start off) */
+  in_guide?: boolean;
+}
+
+/** a home video the guide may schedule (only home libraries switched into the guide) */
+export interface CatalogHome {
+  id: number;
+  title: string;
+  duration_s: number | null;
+  thumb_url: string | null;
+  album: string;
+  filmed_at: string | null;
 }
 
 export interface VideoCatalog {
   /** the libraries this profile can see (none sent by an older server) */
   libraries?: PlayerLibrary[];
+  /** home videos in the guide's pool (guide=1 only) */
+  home?: CatalogHome[];
   movies: CatalogMovie[];
   shows: CatalogShow[];
   recent_episodes: CatalogRecentEpisode[];

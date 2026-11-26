@@ -374,6 +374,7 @@ A full web player built into the sidebar.
 - A persistent, reorderable queue that can **auto-download** tracks you don't own yet.
 - **Radio mode**, **Artist Radio** and **Library Radio** (an endless shuffle of your own collection).
 - Tracks you don't own stream from a preview source, so you can hear before you grab.
+- **Home videos**: clips from your phone or camera (a Plex "Other videos" or Jellyfin "Home videos" library, or a folder on disk) as a player library of their own: On this day, folders as albums, a month-by-month timeline. Never looked up or renamed; named and dated from the clip itself, with your own names, dates, pictures and notes kept through every rescan. Set up from Player setup.
 
 ## Sample Studio
 

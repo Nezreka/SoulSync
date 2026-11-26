@@ -33,6 +33,9 @@ DEFAULTS: Dict[str, Any] = {
     "sidebar_order": [],
     # places nobody on this server gets (a profile can hide more, not fewer)
     "sidebar_hidden": [],
+    # who may rename, re-date and re-picture home videos: "admins" or
+    # "everyone" (anyone who can see the clip)
+    "home_editors": "admins",
 }
 
 
@@ -59,6 +62,10 @@ def _clean(key: str, value: Any) -> Any:
             return _nav_ids(value)
         if key == "sidebar_hidden":
             return _nav_hidden(value)
+        if key == "home_editors":
+            if value not in ("admins", "everyone"):
+                raise SetupError("home_editors is admins or everyone")
+            return value
     except SettingsError as e:
         raise SetupError(str(e)) from None
     raise SetupError(f"no setup value called {key}")

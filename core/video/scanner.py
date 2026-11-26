@@ -357,6 +357,16 @@ class VideoLibraryScanner:
             except Exception:   # noqa: BLE001 - never fails the scan itself
                 logger.exception("video scan: library attribution failed")
 
+            # home videos (core/video/home_videos.py) are read on their own
+            # thread after a whole-library scan: never matched, so never in
+            # the rows above
+            if media_type == "all":
+                try:
+                    from core.video import home_videos
+                    home_videos.scan_async(self.db)
+                except Exception:   # noqa: BLE001 - never fails the scan itself
+                    logger.debug("video scan: home videos not started", exc_info=True)
+
             # plex and jellyfin as one library (core/video/server_links.py):
             # the other server is read on its own thread once this scan's rows
             # are in. off unless linking is switched on.

@@ -1002,8 +1002,6 @@
   margin-bottom: calc(var(--u) * 0.5);
 }
 
-
-
 .miniGroup {
   margin: calc(var(--u) * 0.5) calc(var(--u) * 0.4) calc(var(--u) * 0.1);
   color: var(--pl-text-3);
@@ -1082,5 +1080,176 @@
   /* the step list above already says where you are */
   .foot > .muted {
     display: none;
+  }
+}
+
+/* ── home videos ─────────────────────────────────────── */
+
+.libGuide {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.45);
+  padding: 0 calc(var(--u) * 0.75) calc(var(--u) * 0.7);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.75);
+}
+
+.homeEditors {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.6);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.85);
+}
+
+.note {
+  margin: 0;
+  padding: calc(var(--u) * 0.7) calc(var(--u) * 0.9);
+  border: 1px solid rgba(var(--gold-rgb), 0.3);
+  border-radius: var(--radius-lg);
+  background: rgba(var(--gold-rgb), 0.08);
+  color: var(--pl-text-2);
+  line-height: 1.45;
+}
+
+.homeSources {
+  display: grid;
+  gap: calc(var(--u) * 1.2);
+}
+
+.homeGroup {
+  display: grid;
+  gap: calc(var(--u) * 0.5);
+}
+
+.homeCard {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  min-height: calc(var(--u) * 3.6);
+  padding: calc(var(--u) * 0.7) calc(var(--u) * 0.9);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--radius-lg);
+  background: var(--pl-panel-solid);
+}
+
+.homeCard[data-on='true'] {
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+.homeCard[data-ghost='true'] {
+  background: var(--white-a04);
+}
+
+.homeIcon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 2.3);
+  height: calc(var(--u) * 2.3);
+  border-radius: var(--radius-md);
+  background: rgba(var(--gold-rgb), 0.14);
+  color: var(--gold);
+}
+
+.homeCard[data-on='true'] .homeIcon {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent-light);
+}
+
+.homeIcon svg {
+  width: 58%;
+  height: 58%;
+}
+
+.homeText {
+  display: grid;
+  flex: 1;
+  gap: calc(var(--u) * 0.15);
+  min-width: 0;
+}
+
+.homeText b {
+  overflow: hidden;
+  color: var(--pl-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.homeBar {
+  position: relative;
+  overflow: hidden;
+  height: 3px;
+  margin-top: calc(var(--u) * 0.25);
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+}
+
+.homeBar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: homeBarSlide 1.3s var(--pl-ease) infinite;
+}
+
+@keyframes homeBarSlide {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(300%);
+  }
+}
+
+.homeAdd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: calc(var(--u) * 0.6);
+}
+
+.homeAddField {
+  display: grid;
+  flex: 1;
+  gap: calc(var(--u) * 0.3);
+  min-width: calc(var(--u) * 14);
+}
+
+.homeAddField input {
+  padding: calc(var(--u) * 0.6) calc(var(--u) * 0.75);
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-md);
+  background: var(--pl-bg);
+  color: var(--pl-text);
+  font: inherit;
+}
+
+.homeAddField input:focus-visible {
+  border-color: rgba(var(--accent-rgb), 0.75);
+  outline: none;
+}
+
+.homeAdd > button {
+  margin-top: calc(var(--u) * 1.3);
+}
+
+.homeCheck {
+  font-size: calc(var(--u) * 0.78);
+}
+
+.homeCheck[data-tone='ok'] {
+  color: var(--accent-light);
+}
+
+.homeCheck[data-tone='problem'] {
+  color: var(--danger-light);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .homeBar i {
+    animation: none;
   }
 }

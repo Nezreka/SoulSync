@@ -297,3 +297,12 @@ export const SparkIcon = () => (
     <path d="M18.5 16.5 19.2 18.3 21 19 19.2 19.7 18.5 21.5 17.8 19.7 16 19 17.8 18.3Z" />
   </Icon>
 );
+
+/** home videos: a camcorder */
+export const CamcorderIcon = () => (
+  <Icon>
+    <rect x="2.5" y="6.5" width="13" height="11" rx="2.5" />
+    <path d="m15.5 10.5 6-3.5v10l-6-3.5" />
+    <circle cx="7" cy="12" r="1.6" />
+  </Icon>
+);

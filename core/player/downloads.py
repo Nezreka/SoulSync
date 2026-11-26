@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-VALID_TYPES = frozenset({"movie", "episode", "youtube", "podcast", "audiobook", "track", "album"})
+VALID_TYPES = frozenset({"movie", "episode", "youtube", "home", "podcast", "audiobook", "track", "album"})
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS player_downloads (

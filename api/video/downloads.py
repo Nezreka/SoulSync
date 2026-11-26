@@ -1088,6 +1088,8 @@ def register_routes(bp):
         out["download_path"] = config_manager.get(_SHARED_DOWNLOAD_KEY, "") or ""   # shared w/ music
         from core.video.library_roots import ADDITIONAL_KEYS, additional_paths
         out.update({key: additional_paths(db, key) for key in ADDITIONAL_KEYS})
+        from core.video.library_roots import HOME_KEY
+        out[HOME_KEY] = additional_paths(db, HOME_KEY)
         # the optional 4K libraries: a switch and a folder each, off by default
         from core.video.library_roots import FOUR_K_KEYS, _on
         for enabled, folder in FOUR_K_KEYS.values():
@@ -1102,14 +1104,19 @@ def register_routes(bp):
         from core.video.download_config import save as save_source
         db = get_video_db()
         body = request.get_json(silent=True) or {}
-        from core.video.library_roots import ADDITIONAL_KEYS, normalize_paths
+        from core.video.library_roots import ADDITIONAL_KEYS, HOME_KEY, home_paths, normalize_paths
         import json
         try:
-            extras = {key: normalize_paths(body[key]) for key in ADDITIONAL_KEYS if key in body}
+            extras = {key: normalize_paths(body[key]) for key in (*ADDITIONAL_KEYS, HOME_KEY) if key in body}
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
+        home_before = home_paths(db)
         for key, paths in extras.items():
             db.set_setting(key, json.dumps(paths))
+        if HOME_KEY in extras and extras[HOME_KEY] != home_before:
+            # a home video folder added is read now, not at the next scan
+            from core.video import home_videos
+            home_videos.scan_async(db)
         for key in _PATH_KEYS:
             if key in body:
                 db.set_setting(key, (str(body.get(key) or "")).strip())

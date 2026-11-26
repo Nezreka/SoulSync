@@ -26,7 +26,8 @@ KIND_PERMISSION = {
 # kind missing here plays nothing; a new kind adds its line beside its permission.
 KIND_ITEM_TYPES = {
     T.KIND_MUSIC: frozenset({"track"}),
-    T.KIND_PLAYER: frozenset({"track", "movie", "episode", "youtube", "podcast", "audiobook", "commercial"}),
+    T.KIND_PLAYER: frozenset({"track", "movie", "episode", "youtube", "home", "podcast", "audiobook",
+                                 "commercial"}),
 }
 
 

@@ -39,6 +39,16 @@ def additional_paths(db, key):
         return []
 
 
+# home video folders (core/video/home_videos.py): scanned off disk into the
+# player's home video libraries, never into movies or TV, never a download's home
+HOME_KEY = "home_paths"
+
+
+def home_paths(db):
+    """the home video folders, as saved"""
+    return additional_paths(db, HOME_KEY)
+
+
 # kind -> (switch, folder) for the optional 4K libraries
 FOUR_K_KEYS = {"movie": ("movies_4k_enabled", "movies_4k_path"),
                "episode": ("tv_4k_enabled", "tv_4k_path")}

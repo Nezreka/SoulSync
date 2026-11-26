@@ -1715,6 +1715,7 @@ export type PlayerIssueItemType =
   | 'movie'
   | 'episode'
   | 'youtube'
+  | 'home'
   | 'track'
   | 'podcast'
   | 'podcast_episode'

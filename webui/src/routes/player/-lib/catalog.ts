@@ -13,6 +13,7 @@ import type {
   CatalogYoutube,
   PlayerLibrary,
   VideoCatalog,
+  CatalogHome,
 } from '../-player.types';
 
 export interface CatalogWire {
@@ -22,6 +23,8 @@ export interface CatalogWire {
   shows?: unknown[][];
   recent_episodes?: CatalogRecentEpisode[];
   youtube?: CatalogYoutube[];
+  /** clips of home libraries switched into the guide (guide pool only) */
+  home?: CatalogHome[];
   kinds?: VideoCatalog['kinds'];
   libraries?: PlayerLibrary[];
   /** the guide's clock: only sent with the day's frozen pool */
@@ -91,6 +94,7 @@ export function decodeCatalog(wire: CatalogWire): VideoCatalog {
     shows,
     recent_episodes: wire.recent_episodes ?? [],
     youtube: wire.youtube ?? [],
+    home: Array.isArray(wire.home) ? wire.home : [],
     kinds: wire.kinds ?? { movies: false, shows: false, youtube: false },
   };
 }

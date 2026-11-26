@@ -34,7 +34,7 @@ const ACCENT_PALETTE: Record<PlayerAccentColor, { rgb: string; lightRgb: string 
 };
 import { PlayerBootOverlay } from './boot-loader';
 import { ContextMenuHost } from './context-menu';
-import { BackIcon, ChevronIcon, ExitIcon, GearIcon, MoreIcon } from './icons';
+import { BackIcon, CamcorderIcon, ChevronIcon, ExitIcon, GearIcon, MoreIcon } from './icons';
 import { AddToPlaylistHost } from './music/add-to-playlist';
 import { NoticeHost } from './notice';
 import { useNowPlaying } from './now-playing';
@@ -69,6 +69,7 @@ const TOP_LEVEL_PATHS = new Set([
   '/player/admin-users',
   '/player/collections',
   '/player/settings',
+  '/player/home-videos',
 ]);
 
 function fallbackParentFor(pathname: string): string {
@@ -141,10 +142,13 @@ function currentEntry(entries: NavEntry[], path: string): NavEntry | null {
 /** a phone's More: every place that isn't one of its tabs, and settings */
 function MoreSheet({
   entries,
+  homes = [],
   watching,
   onClose,
 }: {
   entries: NavEntry[];
+  /** home video libraries: on a phone they're reached from here */
+  homes?: PlayerLibrary[];
   watching: number;
   onClose: () => void;
 }) {
@@ -164,6 +168,20 @@ function MoreSheet({
             {e.to === '/player/watching' && watching ? (
               <span className={s.navBadge}>{watching}</span>
             ) : null}
+          </Link>
+        ))}
+        {homes.map((lib) => (
+          <Link
+            key={lib.id}
+            to="/player/home-videos"
+            search={{ library: lib.id }}
+            className={s.moreItem}
+            data-nav
+          >
+            <span className={s.navIcon}>
+              <CamcorderIcon />
+            </span>
+            <span>{lib.name}</span>
           </Link>
         ))}
         <Link to="/player/settings" className={s.moreItem} data-nav>
@@ -191,13 +209,29 @@ export interface NavPlace {
   library?: PlayerLibrary;
 }
 
+/** the page a library with a page of its own sits after (home videos: after TV, else Movies) */
+export function libraryAnchor(lib: PlayerLibrary, entries: { to: string }[]): string {
+  if (lib.kind === 'movie') return '/player/movies';
+  if (lib.kind === 'show') return '/player/tv';
+  return entries.some((e) => e.to === '/player/tv') ? '/player/tv' : '/player/movies';
+}
+
+/** where a library's own page is */
+export function libraryPath(lib: PlayerLibrary): string {
+  return lib.kind === 'home'
+    ? '/player/home-videos'
+    : lib.kind === 'movie'
+      ? '/player/movies'
+      : '/player/tv';
+}
+
 /** the sidebar's places in their usual order */
 export function navPlaces(entries: NavEntry[], ownPages: PlayerLibrary[]): NavPlace[] {
   const out: NavPlace[] = [];
   for (const entry of entries) {
     out.push({ id: entry.to, label: entry.label, entry });
     for (const lib of ownPages)
-      if (entry.to === (lib.kind === 'movie' ? '/player/movies' : '/player/tv'))
+      if (entry.to === libraryAnchor(lib, entries))
         out.push({ id: `lib:${lib.id}`, label: lib.name, entry, library: lib });
   }
   return out;
@@ -219,11 +253,14 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
   const libraryParam = useRouterState({
     select: (r) => Number((r.location.search as { library?: unknown }).library) || 0,
   });
+  const firstHome = ownPages.find((lib) => lib.kind === 'home')?.id ?? 0;
   const onLibrary =
     (pathname === '/player/movies' || pathname === '/player/tv') &&
     ownPages.some((lib) => lib.id === libraryParam)
       ? libraryParam
-      : 0;
+      : pathname === '/player/home-videos'
+        ? libraryParam || firstHome
+        : 0;
   // every place, in this profile's order: the pages, and each library with a
   // page of its own after the page it is a kind of
   const prefs = useQuery(playerSettingsQuery()).data;
@@ -257,7 +294,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
             {items.map((item) => (
               <Link
                 key={item.id}
-                to={item.entry.to as '/player/movies'}
+                to={(item.library ? libraryPath(item.library) : item.entry.to) as '/player/movies'}
                 search={item.library ? { library: item.library.id } : undefined}
                 className={s.navLink}
                 data-tab={item.entry.tab && !item.library ? 'true' : undefined}
@@ -267,7 +304,9 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
                 title={collapsed ? item.label : undefined}
                 data-nav
               >
-                <span className={s.navIcon}>{item.entry.icon}</span>
+                <span className={s.navIcon}>
+                  {item.library?.kind === 'home' ? <CamcorderIcon /> : item.entry.icon}
+                </span>
                 <span className={s.navLabel}>{item.label}</span>
                 {item.id === '/player/watching' && watching ? (
                   <span className={s.navBadge} aria-label={`${watching} playing`}>
@@ -299,6 +338,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
       </button>
       {more ? (
         <MoreSheet
+          homes={ownPages.filter((lib) => lib.kind === 'home')}
           entries={entries.filter((e) => !e.tab)}
           watching={watching}
           onClose={() => setMore(false)}

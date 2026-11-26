@@ -13,7 +13,7 @@ the player's own session and a paired device's token alike.
                                                       (copied video: a keyframe)
 
 ``?part=`` picks a video's file version (a media file id) or an audiobook's
-part (0 based). item types: track, movie, episode, youtube, audiobook.
+part (0 based). item types: track, movie, episode, youtube, home, audiobook.
 podcasts don't come here: their episodes stream from the feed's host
 through the podcast side's checked audio proxy.
 """
@@ -58,7 +58,7 @@ def _admin_stopped(item_type, item_id):
     return jsonify({"success": False, "error": "stopped", "message": message}), 403
 
 
-VIDEO_TYPES = ("movie", "episode", "youtube")
+VIDEO_TYPES = ("movie", "episode", "youtube", "home")
 
 
 def _transcode_url(item_type: str, item_id: str, part, quality: str) -> str:
