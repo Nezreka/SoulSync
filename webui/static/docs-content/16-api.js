@@ -3012,7 +3012,7 @@ Return the current server settings with sensitive values redacted. Safe to log o
 
 **Redacted keys.** Redaction is recursive and prefix-based: any setting whose dot-path starts with one of these is redacted (so \`spotify.client_id\` and anything nested under such a path are covered):
 
-\`spotify.client_id\`, \`spotify.client_secret\`, \`tidal.client_id\`, \`tidal.client_secret\`, \`tidal_tokens\`, \`tidal_download.session\`, \`qobuz.session\`, \`plex.token\`, \`jellyfin.api_key\`, \`navidrome.password\`, \`soulseek.api_key\`, \`listenbrainz.token\`, \`acoustid.api_key\`, \`lastfm.api_key\`, \`genius.access_token\`, \`hydrabase.api_key\`
+\`spotify.client_id\`, \`spotify.client_secret\`, \`tidal.client_id\`, \`tidal.client_secret\`, \`tidal_tokens\`, \`tidal_download.session\`, \`qobuz.session\`, \`plex.token\`, \`jellyfin.api_key\`, \`navidrome.password\`, \`soulseek.api_key\`, \`listenbrainz.token\`, \`acoustid.api_key\`, \`acoustid.user_key\`, \`lastfm.api_key\`, \`genius.access_token\`, \`hydrabase.api_key\`
 
 **Example:**
 

@@ -1110,6 +1110,20 @@ def shared_state():
 
 
 @pytest.fixture(autouse=True)
+def _acoustid_keys_hermetic(monkeypatch):
+    """the acoustid user key is required from 1 january 2027 (#2318). the
+    calendar must not decide a test: the cutoff sits far off unless a test
+    moves it, and no soulsync application key leaks in from the env."""
+    from datetime import date
+    from core import acoustid_account
+    monkeypatch.setattr(acoustid_account, "USER_KEY_REQUIRED_FROM", date(9999, 1, 1))
+    monkeypatch.setattr(acoustid_account, "SOULSYNC_ACOUSTID_APP_KEY", "")
+    monkeypatch.delenv(acoustid_account.APP_KEY_ENV, raising=False)
+    acoustid_account._last_needs_log[0] = 0.0
+    acoustid_account._last_call[0] = 0.0
+
+
+@pytest.fixture(autouse=True)
 def _quality_profile_refresh_inline(monkeypatch):
     """the Quality page's wishlist refresh runs on a thread in the app; in
     tests it runs inline, so nothing touches a test's db after it ends."""
