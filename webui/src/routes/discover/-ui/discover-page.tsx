@@ -115,7 +115,7 @@ import { DiscoveryInbox } from './discovery-inbox';
 import { DownloadBar } from './download-bar';
 import { GenreDiveModal } from './genre-dive-modal';
 import { GreetingGrid } from './greeting-grid';
-import { MixModal } from './mix-modal';
+import { CompactPlaylist, MixModal } from './mix-modal';
 import { MixShelf } from './mix-shelf';
 import { NowPlayingBanner, useNowPlaying } from './now-playing-banner';
 import { AlbumPoster, ArtistPoster, ConcertPoster, PosterRow } from './poster-row';
@@ -1326,7 +1326,9 @@ export function DiscoverPage() {
             infoOpen={bp.infoOpen}
             onToggleInfo={bp.toggleInfo}
             loaded={true}
-          />
+          >
+            <CompactPlaylist tracks={bp.tracks ?? []} />
+          </BuildPlaylistSection>
         );
       default:
         return null;
