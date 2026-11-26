@@ -16,6 +16,8 @@ from flask import jsonify, request
 from utils.logging_config import get_logger
 
 logger = get_logger("video_api.libraries")
+_unread_checked = False
+_asked: set = set()   # libraries queued this run, so a save never re-queues one
 
 
 def _start_library_scans(db, server, before) -> list:
@@ -27,10 +29,17 @@ def _start_library_scans(db, server, before) -> list:
         return []
     after = db.get_library_selection(server)
     new = library_scan.added(before, after)
+    # one switched on before it was read on switch-on: read it once this run
+    new += [p for p in library_scan.unread_extras(db, after)
+            if p not in new and p not in _asked]
     cfg = video_plex_config(db) if server == "plex" else video_jellyfin_config(db)
     if not cfg.get("base_url"):
+        if new:
+            logger.info("video libraries switched on but no %s address is set, so not read yet: %s",
+                        server, ", ".join(t for _k, t in new))
         return []
     # never on the request: the scan runs on its own thread
+    _asked.update(new)
     library_scan.start(db, new, keep=library_scan.picks(after))
     if new:
         logger.info("video libraries switched on, reading now: %s", ", ".join(t for _k, t in new))
@@ -42,6 +51,21 @@ def register_routes(bp):
     @bp.route("/libraries/scan", methods=["GET"])
     def video_library_scans():
         from core.video import library_scan
+        global _unread_checked
+        # once per run: an extra library switched on before it was read when
+        # switched on is read now, so nobody has to switch it off and on
+        if not _unread_checked:
+            _unread_checked = True
+            try:
+                from core.video.sources import resolve_video_server
+
+                from . import get_video_db
+                db = get_video_db()
+                server = resolve_video_server()
+                if server:
+                    _start_library_scans(db, server, db.get_library_selection(server))
+            except Exception:  # noqa: BLE001 - the status still answers
+                logger.debug("unread library check failed", exc_info=True)
         return jsonify({"scans": library_scan.status()})
 
     # your library's folders (core/video/drive_map): every folder the server's

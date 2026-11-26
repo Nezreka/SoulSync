@@ -59,6 +59,37 @@ def added(before: Dict[str, Any], after: Dict[str, Any]) -> List[Tuple[str, str]
     return [p for p in picks(after) if p not in had]
 
 
+READ_KEY = "video_libraries_read"
+
+
+def _read_set(db) -> set:
+    import json
+    try:
+        return set(json.loads(db.get_setting(READ_KEY) or "[]"))
+    except (ValueError, TypeError):
+        return set()
+
+
+def mark_read(db, kind: str, title: str) -> None:
+    """remember a library has been read once, so it isn't read again for it"""
+    import json
+    try:
+        have = _read_set(db)
+        have.add(key(kind, title))
+        db.set_setting(READ_KEY, json.dumps(sorted(have)))
+    except Exception:  # noqa: BLE001 - only a hint; a full scan reads it anyway
+        logger.debug("library read mark failed", exc_info=True)
+
+
+def unread_extras(db, sel: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """extra libraries switched on that were never read on their own: one
+    switched on before reading on switch-on existed, waiting for a full scan"""
+    sel = sel or {}
+    main = {("movie", str(sel.get("movies") or "")), ("show", str(sel.get("tv") or ""))}
+    done = _read_set(db)
+    return [p for p in picks(sel) if p not in main and key(*p) not in done]
+
+
 def _default_build(kind: str, title: str):
     from core.video.sources import _build_source
     return _build_source([title], None) if kind == "movie" else _build_source(None, [title])
@@ -149,6 +180,7 @@ def read_one(db, kind: str, title: str, *, build: Callable[[str, str], Any] = _d
     found = int(result.get("movies" if kind == "movie" else "shows") or 0)
     if result.get("state") == "done":
         _set(p, state="done", found=found, finished_at=time.time())
+        mark_read(db, kind, title)
         logger.info("video library scan: %s read, %d found", title, found)
     else:
         _set(p, state="error", found=found, finished_at=time.time(),
