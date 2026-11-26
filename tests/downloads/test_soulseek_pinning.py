@@ -547,23 +547,20 @@ def test_album_bundle_falls_back_when_no_album_folder(configured_client, tmp_pat
     dl.assert_not_awaited()
 
 
-def test_download_extracts_id_from_list_response(configured_client):
-    """Pinning: slskd sometimes returns a list of file objects.
-    The first item's id is the download_id."""
+def test_download_rejects_ambiguous_legacy_list_response(configured_client):
+    """One requested file cannot be identified from two ID-only entries."""
     with patch.object(configured_client, '_make_request',
                       AsyncMock(return_value=[{'id': 'list-id'}, {'id': 'second'}])):
         result = _run_async(configured_client.download('user', 'song.flac', 1024))
-    assert result == 'list-id'
+    assert result is None
 
 
-def test_download_falls_back_to_filename_when_no_id_in_response(configured_client):
-    """Pinning: defensive — older slskd builds returned 201 Created
-    with no id field. The client uses the filename as the download
-    identifier in that case so downstream tracking still works."""
+def test_download_rejects_response_without_transfer_id(configured_client):
+    """A filename is not an acknowledgement or a usable transfer ID."""
     with patch.object(configured_client, '_make_request',
                       AsyncMock(return_value={'status': 'queued'})):
         result = _run_async(configured_client.download('user', 'song.flac', 1024))
-    assert result == 'song.flac'
+    assert result is None
 
 
 # ---------------------------------------------------------------------------
