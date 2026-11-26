@@ -50,6 +50,10 @@ def _parse_time(value) -> Optional[datetime]:
     return parsed.replace(microsecond=0)
 
 
+# the clock the shared Lidarr answers age by, taken once so a wait's own
+# clock (which tests drive) is not read for it
+_share_clock = time.monotonic
+
 class LidarrDownloadClient(DownloadSourcePlugin):
     """Lidarr download client — uses Lidarr as a download source for Usenet/torrent content.
 
@@ -82,6 +86,11 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         self._bundle_waits: Dict[str, int] = {}
         # (monotonic time, Lidarr's artist list): see _library_artists
         self._artist_list_cache = None
+        # endpoint -> (generation, monotonic time, answer): see _shared_get
+        self._shared_answers: Dict[str, Tuple[int, float, Any]] = {}
+        self._shared_answers_lock = threading.Lock()
+        self._shared_fetch_lock = threading.Lock()
+        self._shared_generation = 0
         self.shutdown_check = None
         self._load_config()
 
@@ -923,11 +932,59 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                 self._album_searched_at[foreign_album_id] = time.monotonic()
             return lidarr_album_id, None
 
-    def _queue_records(self, foreign_album_id: str) -> Optional[List[Dict[str, Any]]]:
+    # how long one answer from Lidarr may serve the other waits. every track
+    # of an album waits on its own and each read Lidarr's whole queue every
+    # poll: ten tracks were five full-queue reads a second (#2253)
+    _SHARE_SECONDS = 3.0
+
+    def _shared_get(self, endpoint: str, params: Optional[dict] = None,
+                    seen: Optional[Dict[str, int]] = None) -> Optional[Any]:
+        """GET ``endpoint``, sharing one answer between concurrent waits.
+
+        ``seen`` is the caller's own record of the answers it already used.
+        an answer fetched in the last _SHARE_SECONDS that this caller has not
+        seen yet is handed out again instead of asking Lidarr; one it has
+        seen is not, so a single wait polls Lidarr exactly as before and
+        never reads the same answer twice. one fetch at a time: a wait that
+        finds a fetch running takes its answer. without ``seen`` it always
+        asks Lidarr (and shares the answer)."""
+        def fresh() -> Optional[Tuple[int, float, Any]]:
+            if seen is None:
+                return None
+            with self._shared_answers_lock:
+                hit = self._shared_answers.get(endpoint)
+            if (hit is not None and seen.get(endpoint) != hit[0]
+                    and _share_clock() - hit[1] < self._SHARE_SECONDS):
+                return hit
+            return None
+
+        hit = fresh()
+        if hit is None:
+            with self._shared_fetch_lock:
+                hit = fresh()
+                if hit is None:
+                    answer = self._api_get(endpoint, params=params)
+                    if answer is None:
+                        return None
+                    now = _share_clock()
+                    with self._shared_answers_lock:
+                        self._shared_generation += 1
+                        hit = (self._shared_generation, now, answer)
+                        self._shared_answers[endpoint] = hit
+                        if len(self._shared_answers) > 64:
+                            for key, value in list(self._shared_answers.items()):
+                                if now - value[1] >= self._SHARE_SECONDS:
+                                    del self._shared_answers[key]
+        if seen is not None:
+            seen[endpoint] = hit[0]
+        return hit[2]
+
+    def _queue_records(self, foreign_album_id: str,
+                       seen: Optional[Dict[str, int]] = None) -> Optional[List[Dict[str, Any]]]:
         """This album's queue records, or None when the queue could not be
         read. None is "unknown", never "nothing queued": an empty answer lets
         the wait call a half-imported album complete."""
-        queue = self._api_get('queue', params={'includeAlbum': 'true', 'pageSize': 1000})
+        queue = self._shared_get('queue', params={'includeAlbum': 'true', 'pageSize': 1000}, seen=seen)
         if not isinstance(queue, dict):
             return None
         return [r for r in (queue.get('records') or [])
@@ -953,6 +1010,8 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         # grab, bytes arriving, a record leaving) counts as progress
         left_by_record: Dict[Any, int] = {}
         last_progress = start
+        # the shared answers this wait already used (see _shared_get)
+        seen: Dict[str, int] = {}
         while True:
             if self.shutdown_check and self.shutdown_check():
                 return 'shutdown'
@@ -961,7 +1020,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
             now = time.monotonic()
             elapsed = now - start
             try:
-                records = self._queue_records(foreign_album_id)
+                records = self._queue_records(foreign_album_id, seen=seen)
                 if records is not None:
                     current = {r.get('id'): r.get('sizeleft', 0) or 0 for r in records}
                     if current != left_by_record:
@@ -986,7 +1045,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                     left = item.get('sizeleft', 0) or 0
                     if on_progress:
                         on_progress(max(0.0, 100.0 - left / size * 100))
-                album_check = self._api_get(f'album/{lidarr_album_id}')
+                album_check = self._shared_get(f'album/{lidarr_album_id}', seen=seen)
                 if album_check is None:
                     album_misses += 1
                     if album_misses >= self._GONE_AFTER_MISSES and elapsed > 30:
