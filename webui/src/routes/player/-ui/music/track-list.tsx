@@ -1,8 +1,9 @@
 /**
  * a list of songs: an album, a playlist, search results. each row plays on
  * click or enter, shows which one is playing (moving bars, still when
- * paused), and has Heart (Liked Songs), Add to Queue (when actively playing),
- * and Add to Playlist actions.
+ * paused), and keeps two things on the row: the Heart (Liked Songs) and a
+ * ⋯ that opens the More menu (play next, queue, playlist, download, info,
+ * report), the same one right-click opens.
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,16 +14,12 @@ import type { SongRef } from '../../-player.api';
 
 import { clock } from '../../-engine/timeline';
 import { playlistEdits, playlistQuery, playlistsQuery } from '../../-player.api';
-import { openContextMenu } from '../context-menu';
-import { DownloadMediaButton } from '../download-button';
-import { DownloadIcon, GripIcon, HeartIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
-import { InfoButton } from '../item-info';
+import { MoreButton, openContextMenu, type ContextMenuTarget } from '../context-menu';
+import { DownloadIcon, GripIcon, HeartIcon, PlayIcon } from '../icons';
 import { PlayerLink } from '../kit';
 import { longPress } from '../long-press';
 import { getEngine, usePlayer } from '../playback/use-player';
-import { ReportIssueButton } from '../report-issue';
 import { RetryImg } from '../retry-img';
-import { openAddToPlaylist } from './add-to-playlist';
 import s from './music.module.css';
 
 export interface TrackRow {
@@ -66,28 +63,6 @@ export function EqBars({ paused }: { paused?: boolean }) {
   );
 }
 
-function QueueAddIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M3 6h13" />
-      <path d="M3 12h9" />
-      <path d="M3 18h9" />
-      <path d="M18 14v6" />
-      <path d="M15 17h6" />
-    </svg>
-  );
-}
-
 function songKey(artist: string | undefined, title: string): string {
   return `${(artist ?? '').trim().toLowerCase()}|${title.trim().toLowerCase()}`;
 }
@@ -119,7 +94,6 @@ export function TrackList({
   const [drag, setDrag] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
   const [optimisticLiked, setOptimisticLiked] = useState<Record<string, boolean>>({});
-  const [queuedKeys, setQueuedKeys] = useState<Record<string, boolean>>({});
 
   // Single lightweight lookup of the profile's Liked Songs playlist for O(1) per-row Heart state
   const lists = useQuery({ ...playlistsQuery(), retry: false });
@@ -166,23 +140,51 @@ export function TrackList({
     }
   };
 
+  const rowItem = (row: TrackRow): PlayItem => ({
+    type: 'track',
+    id: String(row.trackId),
+    title: row.title,
+    subtitle: row.song?.artist ?? row.artist ?? '',
+    artwork: row.art ?? null,
+    href: row.albumHref,
+    duration: row.duration ?? null,
+    parentTitle: row.song?.album ?? row.album,
+  });
+
   const addToQueue = (row: TrackRow) => {
     if (row.trackId === null) return;
-    const item: PlayItem = {
-      type: 'track',
-      id: String(row.trackId),
+    getEngine().append([rowItem(row)]);
+  };
+
+  /** a row's More menu: the same one right-click and the ⋯ open */
+  const rowTarget = (row: TrackRow, index: number): Omit<ContextMenuTarget, 'x' | 'y'> => {
+    const playable = row.playable !== undefined ? row.playable : row.trackId !== null;
+    const id = playable && row.trackId !== null ? String(row.trackId) : null;
+    const artist = row.artist ?? row.song?.artist ?? null;
+    return {
+      kind: 'track',
+      owned: playable,
+      id,
       title: row.title,
-      subtitle: row.song?.artist ?? row.artist ?? '',
+      subtitle: artist,
       artwork: row.art ?? null,
-      href: row.albumHref,
-      duration: row.duration ?? null,
-      parentTitle: row.song?.album ?? row.album,
+      href: row.albumHref ?? row.artistHref ?? null,
+      onPlay: playable ? () => onPlay(index) : undefined,
+      onPlayNext: id && hasActivePlayback ? () => getEngine().playNext([rowItem(row)]) : undefined,
+      onQueue: id ? () => addToQueue(row) : undefined,
+      liked: playable ? isRowLiked(row) : false,
+      onToggleLike: playable && row.song ? () => void toggleLike(row) : undefined,
+      song: playable ? (row.song ?? null) : null,
+      downloadType: id ? 'track' : null,
+      downloadId: id,
+      report: id
+        ? { entityType: 'track', entityId: id, title: row.title, subtitle: artist ?? undefined }
+        : null,
+      onRequest: !playable ? (row.onMissingAction ?? row.onRequest) : undefined,
+      extraActions: onRemove
+        ? [{ label: 'Remove from playlist', onSelect: () => onRemove(index), danger: true }]
+        : undefined,
     };
-    getEngine().append([item]);
-    setQueuedKeys((prev) => ({ ...prev, [row.key]: true }));
-    window.setTimeout(() => {
-      setQueuedKeys((prev) => ({ ...prev, [row.key]: false }));
-    }, 1600);
   };
 
   return (
@@ -200,41 +202,13 @@ export function TrackList({
         const interactive = playable || requestable;
         const playing = playable && row.trackId !== null && row.trackId === playingId;
         const liked = !!row.song && isRowLiked(row);
-        const justQueued = !!queuedKeys[row.key];
         const activate = () => {
           if (playable) onPlay(index);
           else if (row.onMissingAction) row.onMissingAction();
           else if (row.onRequest) row.onRequest();
         };
         const openRowMenu = (e: { clientX: number; clientY: number }) =>
-          openContextMenu({
-            x: e.clientX,
-            y: e.clientY,
-            kind: 'track',
-            owned: playable,
-            id: playable && row.trackId !== null ? String(row.trackId) : null,
-            title: row.title,
-            subtitle: row.artist ?? row.song?.artist ?? null,
-            artwork: row.art ?? null,
-            href: row.albumHref ?? row.artistHref ?? null,
-            onPlay: playable ? () => onPlay(index) : undefined,
-            onQueue: playable && row.trackId !== null ? () => addToQueue(row) : undefined,
-            liked: playable ? liked : false,
-            onToggleLike: playable && row.song ? () => void toggleLike(row) : undefined,
-            song: playable ? (row.song ?? null) : null,
-            downloadType: playable && row.trackId !== null ? 'track' : null,
-            downloadId: playable && row.trackId !== null ? String(row.trackId) : null,
-            onRequest: !playable ? (row.onMissingAction ?? row.onRequest) : undefined,
-            extraActions: onRemove
-              ? [
-                  {
-                    label: 'Remove from playlist',
-                    onSelect: () => onRemove(index),
-                    danger: true,
-                  },
-                ]
-              : undefined,
-          });
+          openContextMenu({ ...rowTarget(row, index), x: e.clientX, y: e.clientY });
         return (
           <div
             key={row.key}
@@ -337,7 +311,7 @@ export function TrackList({
               ) : null}
               <span className={s.trackMain}>
                 <span className={s.trackTitle}>
-                  {row.title}
+                  <span className={s.trackTitleText}>{row.title}</span>
                   {row.explicit ? (
                     <span className={s.explicit} title="Explicit" aria-label="Explicit">
                       E
@@ -378,11 +352,7 @@ export function TrackList({
             </div>
             <span
               className={s.trackActions}
-              style={
-                liked || justQueued || (!playable && row.onMissingAction)
-                  ? { opacity: 1 }
-                  : undefined
-              }
+              style={liked || (!playable && row.onMissingAction) ? { opacity: 1 } : undefined}
             >
               {playable && row.song ? (
                 <button
@@ -401,64 +371,8 @@ export function TrackList({
                   <HeartIcon filled={liked} />
                 </button>
               ) : null}
-              {playable && hasActivePlayback && row.trackId !== null ? (
-                <button
-                  type="button"
-                  className={s.trackBtn}
-                  aria-label={`Add ${row.title} to queue`}
-                  title={justQueued ? 'Added to queue' : 'Add to queue'}
-                  style={justQueued ? { color: 'var(--accent-light, #10b981)' } : undefined}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    addToQueue(row);
-                  }}
-                  data-nav
-                >
-                  {justQueued ? '✓' : <QueueAddIcon />}
-                </button>
-              ) : null}
-              {playable && row.song ? (
-                <>
-                  <button
-                    type="button"
-                    className={s.trackBtn}
-                    aria-label={`Add ${row.title} to a playlist`}
-                    title="Add to playlist"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openAddToPlaylist([row.song!]);
-                    }}
-                    data-nav
-                  >
-                    <PlusIcon />
-                  </button>
-                  {row.trackId !== null ? (
-                    <>
-                      <DownloadMediaButton
-                        itemType="track"
-                        itemId={String(row.trackId)}
-                        title={row.title}
-                        subtitle={row.artist ?? row.song?.artist ?? undefined}
-                        artwork={row.art ?? undefined}
-                        compact
-                      />
-                      <ReportIssueButton
-                        entityType="track"
-                        entityId={String(row.trackId)}
-                        title={row.title}
-                        subtitle={row.artist ?? row.song?.artist ?? undefined}
-                        iconOnly
-                        className={s.trackBtn}
-                      />
-                      <InfoButton
-                        type="track"
-                        id={row.trackId}
-                        title={row.title}
-                        className={s.trackBtn}
-                      />
-                    </>
-                  ) : null}
-                </>
+              {playable || onRemove ? (
+                <MoreButton label={row.title} target={() => rowTarget(row, index)} />
               ) : null}
               {!playable && row.onMissingAction ? (
                 <button
@@ -487,18 +401,6 @@ export function TrackList({
                   {row.missingActionLabel ?? 'Request'}
                 </button>
               ) : null}
-              {onRemove ? (
-                <button
-                  type="button"
-                  className={s.trackBtn}
-                  aria-label={`Take ${row.title} out of this playlist`}
-                  title="Take out of this playlist"
-                  onClick={() => onRemove(index)}
-                  data-nav
-                >
-                  <XIcon />
-                </button>
-              ) : null}
               {onMove ? (
                 <span
                   className={s.trackGrip}
@@ -510,7 +412,7 @@ export function TrackList({
               ) : null}
             </span>
             <span className={s.trackEnd}>
-              {row.end}
+              {row.end ? <span className={s.trackNote}>{row.end}</span> : null}
               <span>{row.duration ? clock(row.duration) : ''}</span>
             </span>
           </div>

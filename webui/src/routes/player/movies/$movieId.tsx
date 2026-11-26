@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 
 import { runtime, shortDate } from '../-lib/format';
@@ -15,6 +15,7 @@ import {
   videoCatalogQuery,
 } from '../-player.api';
 import { Comments } from '../-ui/comments';
+import { MoreButton } from '../-ui/context-menu';
 import {
   CollectionRail,
   DetailLayout,
@@ -27,13 +28,10 @@ import {
   RelatedDiscoveryRails,
   Section,
 } from '../-ui/detail';
-import { DownloadButton } from '../-ui/download-button';
-import { InfoButton } from '../-ui/item-info';
 import { Badge, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { CrewList, mergeCrew, StudioLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { playItems } from '../-ui/playback/use-player';
-import { ReportIssueButton } from '../-ui/report-issue';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
 import {
@@ -56,6 +54,7 @@ export const Route = createFileRoute('/player/movies/$movieId')({
 function MoviePage() {
   const sections = useSections();
   const id = Number(Route.useParams().movieId);
+  const navigate = useNavigate();
   const ok = sections.movies && Number.isFinite(id);
   const detail = useQuery({ ...movieDetailQuery(id), enabled: ok, retry: false });
   const files = useQuery({ ...movieFilesQuery(id), enabled: ok, retry: false });
@@ -134,27 +133,40 @@ function MoviePage() {
                 onPlay={() => playItems([movieItem(m, playFile)], 0, { startAt: 0 })}
               />
             ) : null}
-            {best ? (
-              <Link
-                to="/player/watching"
-                search={{
-                  start: `movie:${id}`,
-                  title: m.title,
-                  artwork: m.has_poster ? `/api/video/poster/movie/${id}` : undefined,
-                  backdrop: m.has_backdrop ? `/api/video/backdrop/movie/${id}` : undefined,
-                }}
-                className={s.btn}
-                title="Start a Watch Party for this movie"
-                data-nav
-              >
-                🍿 Watch Party
-              </Link>
-            ) : null}
             <WatchlistButton kind="movie" id={id} />
             <TrailerButton kind="movie" id={id} />
-            {best ? <DownloadButton type="movie" id={String(id)} title={m.title} /> : null}
-            <ReportIssueButton entityType="movie" entityId={id} title={m.title} />
-            <InfoButton type="movie" id={id} title={m.title} className={s.btn} labelled />
+            <MoreButton
+              label={m.title}
+              heroClassName={s.btn}
+              target={() => ({
+                kind: 'movie',
+                page: true,
+                id: String(id),
+                title: m.title,
+                artwork: m.has_poster ? `/api/video/poster/movie/${id}` : null,
+                download: best ? { type: 'movie', id: String(id) } : null,
+                report: { entityType: 'movie', entityId: id, title: m.title },
+                extraActions: best
+                  ? [
+                      {
+                        label: 'Start a Watch Party',
+                        onSelect: () =>
+                          void navigate({
+                            to: '/player/watching',
+                            search: {
+                              start: `movie:${id}`,
+                              title: m.title,
+                              artwork: m.has_poster ? `/api/video/poster/movie/${id}` : undefined,
+                              backdrop: m.has_backdrop
+                                ? `/api/video/backdrop/movie/${id}`
+                                : undefined,
+                            },
+                          }),
+                      },
+                    ]
+                  : undefined,
+              })}
+            />
             {ends ? (
               <span className={s.notYet}>
                 Ends at {ends.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}

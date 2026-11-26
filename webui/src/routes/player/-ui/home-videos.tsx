@@ -47,10 +47,10 @@ import {
   type HomeOverview,
   type HomeVideo,
 } from '../-lib/home-videos';
+import { MoreButton } from './context-menu';
 import { DownloadButton } from './download-button';
 import s from './home-videos.module.css';
 import { CamcorderIcon, PencilIcon, PlayIcon } from './icons';
-import { InfoButton } from './item-info';
 import { Empty, styles as k } from './kit';
 import { longPress } from './long-press';
 import { notify } from './notice';
@@ -152,8 +152,19 @@ export function ClipCard({
               <PencilIcon />
             </button>
           ) : null}
-          <DownloadButton type="home" id={String(video.id)} title={video.title} compact />
-          <InfoButton type="home" id={video.id} title={video.title} className={s.action} />
+          <MoreButton
+            label={video.title}
+            className={s.action}
+            target={() => ({
+              kind: 'other',
+              id: String(video.id),
+              title: video.title,
+              onPlay,
+              download: { type: 'home', id: String(video.id) },
+              info: { type: 'home', id: String(video.id) },
+              report: null,
+            })}
+          />
         </div>
       ) : null}
     </div>
