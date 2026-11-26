@@ -974,6 +974,14 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     keywords: 'naming template rename tv episodes',
   },
   {
+    label: 'Anime episode naming template',
+    tab: 'library',
+    anchor: id('vo-anime-episode-template'),
+    file: 'library-video-organization.tsx',
+    hint: 'how anime episodes are named',
+    keywords: 'naming template rename anime absolute episodes',
+  },
+  {
     label: 'Recycle deleted video files',
     tab: 'library',
     anchor: id('vo-recycle'),

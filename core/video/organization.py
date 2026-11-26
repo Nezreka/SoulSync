@@ -8,6 +8,8 @@ turn on and off.
 Settings (persisted as JSON in video.db ``video_settings['organization']``):
   - ``movie_template``      : path template for movies   (folders via '/', last = file)
   - ``episode_template``    : path template for episodes
+  - ``anime_episode_template`` : path template for an anime show's episodes
+                              ('' = the episode template; see for_series_type)
   - ``verify_with_ffprobe`` : probe the real file (true quality + reject junk)
   - ``replace_existing``    : upgrade-replace a worse copy already in the library
   - ``transfer_mode``       : 'copy' (reclaim source unless torrent) | 'move'
@@ -18,11 +20,14 @@ Template tokens
             $audiolangs $sublangs $tmdbid $imdbid
   Episodes: $series $season $seasonraw $episode $episodetitle $year $quality
             $resolution $source $codec $audiolangs $sublangs $tmdbid $imdbid
-            $tvdbid $airdate
+            $tvdbid $airdate $absolute
             (an episode's ids are its SHOW's)
   ($season/$episode are zero-padded to 2; $seasonraw is the bare number; a
   multi-episode file renders its span through $episode — 'S01E01-E02'; $airdate
-  is the episode's YYYY-MM-DD air date, for daily-show naming. $audiolangs /
+  is the episode's YYYY-MM-DD air date, for daily-show naming. $absolute is
+  the episode's place in the show's aired order, specials left out, padded to
+  3 ('033', a span '033-034'), for anime naming beside S$seasonE$episode; empty
+  while the show's episode list doesn't hold the episode. $audiolangs /
   $sublangs are the file's audio / embedded subtitle languages as 'JA+EN',
   empty when it has no language tags -- write '[$audiolangs]' and the
   brackets go with it. An id that isn't
@@ -46,6 +51,9 @@ DEFAULTS = {
     "version": 1,
     "movie_template": "$title ($year)/$title ($year) $quality",
     "episode_template": "$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality",
+    # anime shows (set by hand, or in an anime-marked library) name their
+    # episodes with this one instead; empty = the episode template above
+    "anime_episode_template": "",
     # YouTube channels organise as a TV show Plex/Jellyfin can index WITHOUT any
     # online agent: channel = series, season = upload YEAR, and the ytdl-sub-style
     # $sxe token (s2026e0711) in the FILENAME. Plex's Series Scanner parses that
@@ -132,6 +140,9 @@ def normalize(raw: Any) -> dict:
         v = raw.get(key)
         if isinstance(v, str) and v.strip():
             d[key] = v.strip()
+    # unlike the others, blank is a real value here: no anime template of its own
+    if isinstance(raw.get("anime_episode_template"), str):
+        d["anime_episode_template"] = raw["anime_episode_template"].strip()
     sb = str(raw.get("youtube_sponsorblock") or "").strip().lower()
     if sb in ("off", "mark", "remove"):
         d["youtube_sponsorblock"] = sb
@@ -263,6 +274,15 @@ def _pad2(v: Any) -> str:
         return _str(v)
 
 
+def _pad3(v: Any) -> str:
+    """an absolute episode number at 3 digits, wider past 999; '' for none"""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return ""
+    return "%03d" % n if n > 0 else ""
+
+
 def _plausible_year(v: Any) -> bool:
     try:
         return 1870 <= int(v) <= 2999
@@ -288,6 +308,20 @@ def _langs(v) -> str:
     MediaInfo AudioLanguages shape). '' when it has none."""
     from core.video.mediainfo import language_list
     return "+".join(code.upper() for code in language_list(v))
+
+
+def for_series_type(settings: Any, series_type: Any) -> dict:
+    """the settings an episode of a show of this series type is named by: an
+    anime show's episodes take the anime episode template when one is set,
+    every other show (and an anime one with none set) the episode template.
+    Everything that renders or reads the episode template takes these, so
+    one swap covers the importer, mass rename and the naming check. Any
+    other show's settings come back as they were given, not copied."""
+    anime = str((settings or {}).get("anime_episode_template") or "").strip() \
+        if isinstance(settings, dict) else ""
+    if not anime or str(series_type or "").strip().lower() != "anime":
+        return settings
+    return dict(settings, episode_template=anime)
 
 
 def languages_unknown(scope: Any, fields: dict, settings: Any) -> bool:
@@ -321,6 +355,18 @@ def missing_ids(scope: Any, fields: dict, settings: Any) -> list:
             if re.search(r"\$\{?" + t + r"(?![A-Za-z0-9_])", tpl) and not _str(fields.get(t)).strip()]
 
 
+def absolute_unknown(scope: Any, fields: dict, settings: Any) -> bool:
+    """the episode template names $absolute and this episode's absolute
+    number isn't known (its show's episode list doesn't hold it yet): mass
+    rename and the naming check leave the file alone instead of renaming it
+    without a number it will have once the list fills in."""
+    if scope != "episode":
+        return False
+    s = normalize(settings)
+    tpl = str(s.get("episode_template") or "")
+    return ("$absolute" in tpl or "${absolute}" in tpl) and fields.get("absolute") is None
+
+
 def _movie_values(f: dict) -> dict:
     title = f.get("title") or "Unknown"
     return {
@@ -347,6 +393,10 @@ def _episode_values(f: dict) -> dict:
     episode = _pad2(f.get("episode"))
     if f.get("episode_end"):
         episode = "%s-E%s" % (episode, _pad2(f.get("episode_end")))
+    # $absolute: Sonarr's {absolute:000}, and its span the same way ('033-034')
+    absolute = _pad3(f.get("absolute"))
+    if absolute and f.get("absolute_end"):
+        absolute = "%s-%s" % (absolute, _pad3(f.get("absolute_end")))
     return {
         "series": series,
         "season": _pad2(f.get("season")),
@@ -355,6 +405,7 @@ def _episode_values(f: dict) -> dict:
         "episodetitle": _str(f.get("episode_title")),
         # daily-show naming (P8): $airdate = the episode's YYYY-MM-DD air date
         "airdate": str(f.get("air_date") or "")[:10],
+        "absolute": absolute,
         "year": _str(f.get("year")) if _plausible_year(f.get("year")) else "",
         "quality": _str(f.get("quality")),
         "resolution": _str(f.get("resolution")),
@@ -507,6 +558,6 @@ def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) ->
 
 __all__ = [
     "DEFAULTS", "default_settings", "normalize", "load", "save",
-    "render_template", "render_path", "episode_folders_below_series",
+    "render_template", "render_path", "episode_folders_below_series", "for_series_type",
     "COLON_MODES", "replace_colons",
 ]

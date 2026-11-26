@@ -610,8 +610,9 @@ export function VideoMassRenameCard() {
             </div>
           ) : preview?.held ? (
             <div className="vbk-empty">
-              No renames: {preview.held} file(s) are held back because an id their name uses isn't
-              stored yet. Naming Conformance lists those titles.
+              No renames: {preview.held} file(s) are held back because an id or an anime episode's
+              absolute number their name uses isn't stored yet. Naming Conformance lists the titles
+              missing an id.
             </div>
           ) : (
             <div className="vbk-empty">Everything already matches your naming templates.</div>

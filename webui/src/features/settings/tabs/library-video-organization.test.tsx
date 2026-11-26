@@ -224,6 +224,22 @@ describe('the fields', () => {
     expect(el('vo-movie-preview').textContent).toBe('The Matrix [EN].mkv');
   });
 
+  it('the anime template previews the episode one while empty, and saves with the rest', async () => {
+    panel();
+    await shown();
+    expect(el('vo-anime-episode-template').value).toBe('');
+    // empty: anime is named by the episode template, so that is the preview,
+    // drawn on an anime sample rather than the TV one
+    expect(el('vo-anime-episode-preview').textContent).toBe('Attack on Titan/Beast Titan.mkv');
+    typeAndLeave(el('vo-anime-episode-template'), '$series - S$seasonE$episode - $absolute');
+    expect(el('vo-anime-episode-preview').textContent).toBe('Attack on Titan - S02E01 - 026.mkv');
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]).toMatchObject({
+      episode_template: '$series/$episodetitle',
+      anime_episode_template: '$series - S$seasonE$episode - $absolute',
+    });
+  });
+
   it('a typed field saves when it is left, the whole of it; a box saves at once', async () => {
     panel();
     await shown();
