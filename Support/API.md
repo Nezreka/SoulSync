@@ -1163,6 +1163,34 @@ Returns `404 NOT_FOUND` if no matching entity exists in the library.
 
 ---
 
+### Library — Batch Artist Check
+
+#### `POST /api/v1/library/check`
+
+A page of artist names in one call: is each one in the library, its library id, and whether this profile watches it. Built for badge overlays (the SoulSync Companion browser extension) that would otherwise search once per artist. Exact matching only: the name as written, then the same name with case, accents and punctuation folded (`ACDC` finds `AC/DC`, `Bjork` finds `Björk`). A name that only appears inside a longer one never matches. Nothing is fetched from a metadata provider.
+
+**Body:**
+```json
+{"artists": ["Low", {"name": "Radiohead", "provider_id": "4Z8W4fKeB5YxbusRsdQVPb", "albums": true}]}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `artists` | array | Up to 200 names, each a string or `{name, provider_id?, albums?}`. Duplicates are answered once. |
+| `provider_id` | string | A provider artist id the page knows; a watch stored under it counts. |
+| `albums` | boolean | Also return the artist's albums (`[{id, title}]`). |
+
+**Response** (`data.artists`, in the order asked):
+```json
+{"name": "Low", "in_library": true, "artist_id": "1", "library_name": "Low",
+ "watching": true, "watch_id": "spotify-id-the-watch-was-stored-under",
+ "albums": [{"id": "100", "title": "Things We Lost in the Fire"}]}
+```
+
+`in_library` follows the Library page: an artist with something of their own on disk, a watch, or a wanted release. `watching` matches the watchlist by the provider id given, the provider ids the library artist carries, or the watched name; `watch_id` is the id to pass to `POST /api/watchlist/remove`. `400 BAD_REQUEST` when `artists` is missing or empty.
+
+---
+
 ### Library — Stats
 
 #### `GET /api/v1/library/stats`
@@ -2752,6 +2780,10 @@ What you own of one library movie or show (`kind=movie|show`, `id` is the librar
 #### `POST /api/v1/video/<kind>/<id>/identify`
 
 Fix match. Body: `{"tmdb_id": 841}`. Re-points the library title to that TMDB entry, fills the imdb / tvdb ids TMDB gives for it, takes TMDB's title and year when your server named it differently, and locks the ids so a scan can't switch it back. Returns the new `tmdb_id`, `title` and `year`. `409` (with nothing changed) when TMDB doesn't answer for that id.
+
+#### `POST /api/v1/video/check`
+
+Badge status for a page of titles by TMDB id, in one call. Body: `{"items": [{"kind": "movie", "tmdb_id": 603}, {"kind": "show", "tmdb_id": 95396, "season": 1, "episode": 2}]}` (up to 300). Answers `data.items` in the order asked, each `{kind, tmdb_id, in_library, on_wishlist, following}`; `following` is the show watchlist as the Watchlist page shows it (your follows plus airing library shows you haven't muted), `null` for a movie. An item with `season` and `episode` adds `episode_in_library` and `episode_on_wishlist`. A kids profile gets `null` for titles above its rating cap. No TMDB calls. `400 BAD_REQUEST` when no item is usable.
 
 #### `GET /api/v1/video/search?q=`
 
