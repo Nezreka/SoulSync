@@ -18,6 +18,7 @@ import time
 from typing import Any, Dict, Iterator, List, Tuple
 
 from core.library2 import ADMIN_PROFILE_ID
+from utils.bounded_dict import put_bounded
 
 from .quality_eval import evaluate_file, profile_targets
 from .recording_links import owned_by_recording_sql
@@ -275,7 +276,8 @@ def _cutoff_unmet_cached(conn: Any, *, search: str, profile_id: int) -> List[Dic
     if hit and hit[1] == fingerprint and time.monotonic() - hit[0] < _CUTOFF_TTL:
         return hit[2]
     unmet = list(iter_cutoff_unmet(conn, search=search, profile_id=profile_id))
-    _cutoff_cache[key] = (time.monotonic(), fingerprint, unmet)
+    # keyed by the search text too: every search typed kept its whole list
+    put_bounded(_cutoff_cache, key, (time.monotonic(), fingerprint, unmet), 32)
     return unmet
 
 

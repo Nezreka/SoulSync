@@ -930,6 +930,12 @@ class LidarrDownloadClient(DownloadSourcePlugin):
             if not has_files and not recent and not self._queue_records(foreign_album_id):
                 self._api_post('command', data={'name': 'AlbumSearch', 'albumIds': [lidarr_album_id]})
                 self._album_searched_at[foreign_album_id] = time.monotonic()
+                if len(self._album_searched_at) > 512:
+                    # only recent searches matter; every album ever searched stayed
+                    cutoff = time.monotonic() - self._SEARCH_DEDUP_SECONDS
+                    for key, at in list(self._album_searched_at.items()):
+                        if at < cutoff:
+                            self._album_searched_at.pop(key, None)
             return lidarr_album_id, None
 
     # how long one answer from Lidarr may serve the other waits. every track
