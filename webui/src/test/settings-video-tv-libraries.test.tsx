@@ -68,6 +68,7 @@ describe('other TV libraries', () => {
     await waitFor(() =>
       expect(posts().at(-1)).toEqual({
         movies: 'Movies',
+        movies_more: [],
         tv: 'TV Shows',
         tv_more: ['Anime'],
         anime: ['Anime'],

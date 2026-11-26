@@ -168,6 +168,11 @@ def _server_folders_cached(fetch: Optional[Callable[[], Any]] = None):
     return folders
 
 
+def forget_server_folders() -> None:
+    """the library picks changed: ask the server again on the next look"""
+    _folders_cache.update(at=0.0, folders=None)
+
+
 def _configured_roles(db) -> List[tuple]:
     """(local folder, what it is) for every folder set in Settings"""
     from core.video.library_roots import additional_paths, four_k_path
