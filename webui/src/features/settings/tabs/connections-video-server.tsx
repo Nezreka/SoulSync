@@ -3,7 +3,7 @@
  * V3b; on the settings parts in settings-bic phase 3, the same card pattern
  * as the music side's): Plex or Jellyfin as a pick-one row with its state in
  * words, Test and View configuration in the card's head, and which Movies, TV
- * and other TV libraries the scan reads as rows under it. View configuration
+ * and other movie and TV libraries the scan reads as rows under it. View configuration
  * opens the server's fields (URL, token or key, the Jellyfin user) in the
  * side sheet (VideoServerFields). The state is video-server.ts. A field saves
  * when it is left, a pick or a switch at once.
@@ -26,6 +26,7 @@ import {
   type ConnField,
   type Server,
   linksWords,
+  otherMovies,
   otherTv,
   useVideoServer,
   videoServer,
@@ -121,6 +122,36 @@ function LibraryRow({ kind }: { kind: 'movies' | 'tv' }) {
   );
 }
 
+/** the other movie libraries, each with a Scan switch */
+function OtherMovies() {
+  const { libs } = useVideoServer();
+  const others = libs ? otherMovies(libs) : [];
+  const tick = (title: string, on: boolean) => {
+    if (!libs) return;
+    const rest = libs.moviesMore.filter((t) => t !== title);
+    void videoServer.setLibs({ moviesMore: on ? [...rest, title] : rest });
+  };
+  return (
+    <div data-video-lib-movies-more-row="" hidden={!others.length}>
+      <div data-video-lib-movies-more="">
+        {others.map((l) => (
+          <Row key={l.title} sub field label={l.title} help="Another movie library on this server.">
+            <label className={s.inlineSwitch}>
+              Scan
+              <Switch
+                data-video-lib-movies-scan={l.title}
+                aria-label={`Scan ${l.title}`}
+                checked={libs!.moviesMore.includes(l.title)}
+                onChange={(event) => tick(l.title, event.target.checked)}
+              />
+            </label>
+          </Row>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** the other TV libraries, each with a Scan and an Anime switch */
 function OtherTv() {
   const { libs } = useVideoServer();
@@ -141,7 +172,13 @@ function OtherTv() {
     <div data-video-lib-tv-more-row="" hidden={!others.length}>
       <div data-video-lib-tv-more="">
         {others.map((l) => (
-          <Row key={l.title} sub field label={l.title} help="Another TV library on this server.">
+          <Row
+            key={l.title}
+            sub
+            field
+            label={l.title}
+            help="Another TV library on this server. Scan reads it. Anime is for a library of anime, numbered the way anime is; leave it off for anything else, like YouTube."
+          >
             <label className={s.inlineSwitch}>
               Scan
               <Switch
@@ -266,6 +303,7 @@ export function VideoServerConnection({ onView }: { onView?: () => void }) {
         <>
           <div className={s.cardRows}>
             <LibraryRow kind="movies" />
+            <OtherMovies />
             <LibraryRow kind="tv" />
             <OtherTv />
             <LinkServers />

@@ -902,6 +902,14 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     keywords: '4k uhd 2160p library',
   },
   {
+    label: 'Extra video folders',
+    tab: 'library',
+    anchor: heading('Extra folders'),
+    file: 'library-video-folders.tsx',
+    hint: 'more movie and TV folders to manage',
+    keywords: 'additional extra movies tv folders second drive standalone',
+  },
+  {
     label: 'Album path template',
     tab: 'library',
     anchor: id('template-album-path'),

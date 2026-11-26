@@ -5257,21 +5257,30 @@ class VideoDatabase:
     # ── library mapping (which server library is Movies / TV) ─────────────────
     def get_library_selection(self, server: str) -> dict:
         """The picked libraries for ``server``. ``movies`` / ``tv`` are the main
-        picks (one title each, None = never picked, '' = picked none). ``tv_more``
-        lists further TV libraries to scan as well, and ``anime`` the TV
-        libraries whose shows are anime (both lists of titles)."""
+        picks (one title each, None = never picked, '' = picked none).
+        ``movies_more`` / ``tv_more`` list further movie / TV libraries to scan
+        as well, and ``anime`` the TV libraries whose shows are anime (all
+        lists of titles)."""
         return {
             "movies": self.get_setting(server + ".movies_library"),
+            "movies_more": self._json_title_list(self.get_setting(server + ".movies_libraries_more")),
             "tv": self.get_setting(server + ".tv_library"),
             "tv_more": self._json_title_list(self.get_setting(server + ".tv_libraries_more")),
             "anime": self.anime_libraries(server),
         }
 
-    def set_library_selection(self, server: str, movies, tv, tv_more=None, anime=None) -> None:
-        """Save the picks. ``tv_more`` / ``anime`` are left as they are when not
-        passed (None), so an older caller saving just movies + tv keeps them."""
+    def set_library_selection(self, server: str, movies, tv, tv_more=None, anime=None,
+                              movies_more=None) -> None:
+        """Save the picks. ``movies_more`` / ``tv_more`` / ``anime`` are left as
+        they are when not passed (None), so an older caller saving just movies +
+        tv keeps them."""
         self.set_setting(server + ".movies_library", movies or "")
         self.set_setting(server + ".tv_library", tv or "")
+        if movies_more is not None:
+            clean = self._json_title_list(
+                json.dumps(list(movies_more) if isinstance(movies_more, (list, tuple)) else []))
+            main = str(movies or "").strip()
+            self.set_setting(server + ".movies_libraries_more", json.dumps([t for t in clean if t != main]))
         if tv_more is not None:
             clean = self._json_title_list(json.dumps(list(tv_more) if isinstance(tv_more, (list, tuple)) else []))
             main = str(tv or "").strip()

@@ -296,6 +296,7 @@ describe('the video media server', () => {
     await waitFor(() => expect(posts('/api/video/libraries')).toHaveLength(1));
     expect(posts('/api/video/libraries')[0]).toEqual({
       movies: 'Movies',
+      movies_more: [],
       tv: 'TV',
       tv_more: ['Anime', 'Kids TV'],
       anime: ['Anime', 'TV'],
@@ -308,6 +309,7 @@ describe('the video media server', () => {
     await waitFor(() => expect(posts('/api/video/libraries')).toHaveLength(2));
     expect(posts('/api/video/libraries')[1]).toEqual({
       movies: 'Movies',
+      movies_more: [],
       tv: 'Kids TV',
       tv_more: ['Anime'],
       anime: ['TV', 'Anime'],

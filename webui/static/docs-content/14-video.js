@@ -62,6 +62,8 @@ A handful of pages are **shared** across both sides — **Chat**, **Issues**, an
             body: `
 The video side reads your libraries from **Plex** or **Jellyfin**. Configure the connection under **Video → Settings**, pick which libraries to include, then run a scan to import them.
 
+Pick a main Movies and TV library, then switch on **Scan** for any other movie or TV library on the same server (a separate **4K Movies** library on another drive, say) and every scan reads it too. A film in two scanned libraries is two copies of one title. Switching a library off stops reading it; nothing is deleted.
+
 ![Video server settings: the Plex/Jellyfin connection panel with server URL, token and library pickers](vid-server.jpg)
 
 SoulSync stores a lightweight copy of every movie/show/episode row and enriches it in the background — it never modifies your server's files during a scan.
@@ -174,7 +176,7 @@ Plex and Jellyfin report every file at the path *they* see it under, like \`/mnt
 - The folders SoulSync already reaches, like your Movies and TV output folders, are recognised from their files and ticked. You never type them twice.
 - For the rest, type where SoulSync reaches each one. It checks a sample of that folder's real files right away (**48 of 50 sample files found**).
 - A reached folder is a full library folder of its kind: every file in it is found, renamed to your templates, recycled on delete (into that drive's own recycle bin) and has its languages read. New downloads still go to your output folders.
-- **Folders your server doesn't list** (in the same section) is for a collection SoulSync should manage that your server doesn't read.
+- **Extra folders** (in the same section) is for folders SoulSync should also manage that the libraries it scans from your server don't include. On Standalone it's where you add more movie and TV folders to scan, like a second drive. New downloads never go there.
 - A folder left blank works the way it always did.
 
 ## 4K libraries

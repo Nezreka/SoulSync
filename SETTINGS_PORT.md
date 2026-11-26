@@ -1768,7 +1768,7 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 |---|---|---|---|---|
 | button | `video-drive-map-save` | Save folders | both | yes (video pass V2a) |
 
-**Folders your server doesn't list** (both, 2)
+**Extra folders** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
