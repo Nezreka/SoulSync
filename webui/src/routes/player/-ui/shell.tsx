@@ -35,6 +35,7 @@ export const ACCENT_PALETTE: Record<PlayerAccentColor, { rgb: string; lightRgb: 
 import { PlayerBootOverlay } from './boot-loader';
 import { ContextMenuHost } from './context-menu';
 import { BackIcon, CamcorderIcon, ChevronIcon, ExitIcon, GearIcon, MoreIcon } from './icons';
+import { ItemInfoHost } from './item-info';
 import { AddToPlaylistHost } from './music/add-to-playlist';
 import { NoticeHost } from './notice';
 import { NotificationBell } from './notifications';
@@ -565,6 +566,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       <ReminderBell />
       <AddToPlaylistHost />
       <ContextMenuHost />
+      <ItemInfoHost />
       {gate && profiles ? (
         <WhoGate profiles={profiles} currentId={profileId} onDone={() => setGate(false)} />
       ) : null}

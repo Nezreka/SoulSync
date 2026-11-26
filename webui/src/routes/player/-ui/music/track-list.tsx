@@ -16,6 +16,7 @@ import { playlistEdits, playlistQuery, playlistsQuery } from '../../-player.api'
 import { openContextMenu } from '../context-menu';
 import { DownloadMediaButton } from '../download-button';
 import { DownloadIcon, GripIcon, HeartIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
+import { InfoButton } from '../item-info';
 import { PlayerLink } from '../kit';
 import { longPress } from '../long-press';
 import { getEngine, usePlayer } from '../playback/use-player';
@@ -447,6 +448,12 @@ export function TrackList({
                         title={row.title}
                         subtitle={row.artist ?? row.song?.artist ?? undefined}
                         iconOnly
+                        className={s.trackBtn}
+                      />
+                      <InfoButton
+                        type="track"
+                        id={row.trackId}
+                        title={row.title}
                         className={s.trackBtn}
                       />
                     </>
