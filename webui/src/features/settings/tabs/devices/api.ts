@@ -110,6 +110,8 @@ export interface NewCode {
   seconds_left: number;
   payload: Record<string, unknown>;
   payload_text: string;
+  /** what the QR shows: a soulsync://pair link (older servers: missing) */
+  qr_text?: string;
   warnings: string[];
 }
 

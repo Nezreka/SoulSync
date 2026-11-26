@@ -65,6 +65,9 @@ import { groupFingerprint } from './server-fingerprint';
 
 export const DEVICES_TAB = 'devices';
 
+// where the player app is downloaded, for a phone that doesn't have it yet
+const APP_RELEASES = 'https://github.com/Nezreka/soulsync-mobile-app/releases';
+
 const toast = (message: string, type = 'info') =>
   (window as Window & { showToast?: (m: string, t?: string) => void }).showToast?.(message, type);
 
@@ -393,7 +396,20 @@ function ShownCode({
             </Btn>
           </FieldLine>
         </div>
-        <QrImage className={css.qr} text={code.payload_text} label="Pairing QR code" />
+        <figure className={css.qrBox}>
+          <QrImage
+            className={css.qr}
+            text={code.qr_text || code.payload_text}
+            label="Pairing QR code"
+          />
+          <figcaption className={`${itemClass.dim} ${css.qrNote}`}>
+            Scan with your phone&apos;s camera to open the SoulSync Player app. No app yet? Get it
+            at{' '}
+            <a href={APP_RELEASES} target="_blank" rel="noopener noreferrer">
+              github.com/Nezreka/soulsync-mobile-app/releases
+            </a>
+          </figcaption>
+        </figure>
       </div>
     </div>
   );

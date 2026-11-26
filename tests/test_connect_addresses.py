@@ -87,6 +87,21 @@ def test_the_pairing_payload_and_its_qr_text():
     assert " " not in text
 
 
+def test_the_qr_is_a_link_a_phone_camera_opens():
+    import base64
+
+    payload = A.pairing_payload(lookup_id="ab" * 32, fingerprint="ab" * 6,
+                                addresses=[{"kind": "local", "url": "http://192.168.1.5:8008"}],
+                                code="7KQ4-M2XD-9FHA-T3VB")
+    link = A.pairing_link(payload)
+    assert link.startswith("soulsync://pair?d=")
+    data = link[len("soulsync://pair?d="):]
+    # url safe as is: no padding, no + or /
+    assert "=" not in data and "+" not in data and "/" not in data
+    decoded = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("utf-8")
+    assert decoded == A.payload_text(payload)
+
+
 # ── reachability ─────────────────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
