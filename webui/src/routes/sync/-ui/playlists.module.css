@@ -719,6 +719,31 @@ opened from Add) ---------- */
   max-width: calc(100vw - 32px);
   flex-wrap: wrap;
 }
+/* #2320: the run's pill in the header, which brings the panel back */
+.bulkPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.bulkPill[data-state='done'] {
+  border-color: var(--white-a15);
+  background: none;
+}
+.bulkPill:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
 /* #2309: the selection syncing in turn, above the bar */
 .bulkPanel {
   position: fixed;

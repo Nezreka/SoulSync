@@ -417,3 +417,75 @@ def test_one_music_folder_scans_as_before(tmp_path, monkeypatch):
     db_admin._run_soulsync_full_refresh(incremental=True)
     db_admin._run_soulsync_full_refresh()
     assert said["errors"] == [] and "other music folder" not in said["summary"][-1]
+
+
+# #2317 (thanks qchateau): the quarantine never comes back in a standalone scan
+def test_standalone_full_refresh_skips_deleted_quarantine(tmp_path, monkeypatch):
+    import web_server
+    from api import database_admin as db_admin
+
+    transfer = tmp_path / "Transfer"
+    staging = tmp_path / "Staging"
+    (transfer / "Artist" / "Album").mkdir(parents=True)
+    (transfer / ".deleted" / "Artist" / "Album").mkdir(parents=True)
+    staging.mkdir()
+    kept = transfer / "Artist" / "Album" / "kept.flac"
+    kept.write_bytes(b"fLaC")
+    trashed = transfer / ".deleted" / "Artist" / "Album" / "deleted.flac"
+    trashed.write_bytes(b"fLaC")
+
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    _db_holder["db"] = db
+    _configure_paths(monkeypatch, web_server, transfer, staging)
+    monkeypatch.setattr(web_server, "get_database", lambda: db)
+
+    imports = []
+    monkeypatch.setattr(
+        "core.library2.autolink.link_download_into_library_v2",
+        lambda context, *, raise_on_error=False: (
+            imports.append(context["_final_processed_path"]) or 1
+        ),
+    )
+    errors = []
+    monkeypatch.setattr(db_admin, "_db_update_phase_callback", lambda *_: None)
+    monkeypatch.setattr(db_admin, "add_activity_item", lambda *_: None)
+    monkeypatch.setattr(db_admin, "_db_update_finished_callback", lambda *args: None)
+    monkeypatch.setattr(db_admin, "_db_update_error_callback", lambda error: errors.append(error))
+
+    db_admin._run_soulsync_full_refresh()
+
+    assert errors == []
+    assert imports == [str(kept)]
+
+
+def test_standalone_deep_scan_skips_deleted_quarantine(tmp_path, monkeypatch):
+    import web_server
+    from api import database_admin as db_admin
+
+    transfer = tmp_path / "Transfer"
+    staging = tmp_path / "Staging"
+    (transfer / "Artist" / "Album").mkdir(parents=True)
+    (transfer / ".deleted" / "Artist" / "Album").mkdir(parents=True)
+    staging.mkdir()
+    new = transfer / "Artist" / "Album" / "new.flac"
+    new.write_bytes(b"fLaC")
+    trashed = transfer / ".deleted" / "Artist" / "Album" / "deleted.flac"
+    trashed.write_bytes(b"fLaC")
+
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    _db_holder["db"] = db
+    _configure_paths(monkeypatch, web_server, transfer, staging)
+    monkeypatch.setattr(web_server, "get_database", lambda: db)
+    monkeypatch.setattr("core.library2.scan.rescan_files", lambda database, *, file_ids: {})
+    errors = []
+    monkeypatch.setattr(db_admin, "_db_update_phase_callback", lambda *_: None)
+    monkeypatch.setattr(db_admin, "add_activity_item", lambda *_: None)
+    monkeypatch.setattr(db_admin, "_db_update_finished_callback", lambda *args: None)
+    monkeypatch.setattr(db_admin, "_db_update_error_callback", lambda error: errors.append(error))
+
+    db_admin._run_soulsync_deep_scan()
+
+    assert errors == []
+    assert (staging / "Artist" / "Album" / "new.flac").is_file()
+    assert trashed.is_file()
+    assert not (staging / ".deleted" / "Artist" / "Album" / "deleted.flac").exists()
