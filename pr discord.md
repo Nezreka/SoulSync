@@ -1,8 +1,10 @@
 **SoulSync 3.7.0 is out** :musical_note:
 
-**The player, set up your way.** A first-run setup for admins: name the server, sort folders into libraries, and set the sidebar. A library is a named group of folders (4K, Kids, Anime) with its own page, and can be hidden from a profile. Movies, TV, Music and YouTube each have rows you reorder, hide and restyle per profile, with extra rows to switch on.
+**The player, set up your way.** A first-run setup for admins: name the server, sort folders into libraries (4K, Kids, Anime) that can be hidden from a profile, and set the sidebar. Movies, TV, Music and YouTube rows can be reordered, hidden and restyled per profile.
 
-**The SoulSync Player app.** Android phones, tablets and TV, paired from Settings, Devices. 0.1.0 is out: github.com/Nezreka/soulsync-mobile-app/releases
+**The SoulSync Player app.** Android phones, tablets and TV, with offline downloads. Pair it from Settings, Devices.
+Repo: <https://github.com/Nezreka/soulsync-mobile-app>
+APK: <https://github.com/Nezreka/soulsync-mobile-app/releases/download/v0.2.0/SoulSync-Player-0.2.0.apk>
 
 **Chapters, skip intro, parties and casting.** Videos show their own chapters and offer Skip intro when the file marks one. Watch parties get a waiting room, countdown and reactions, and Chromecast plays anything.
 
@@ -16,7 +18,7 @@
 
 **Search and activity.** Identify a song by listening, from the search bar (thanks Jygijiji). Player streams show in Server Activity and can be stopped with a message.
 
-**Downloads.** Four ways a download could lose a file are closed, tribute acts are refused, a track tries eight peers, and deep verify can catch fake lossless (off by default).
+**Downloads.** Four ways a download could lose a file are closed, tribute acts are refused, and deep verify can catch fake lossless (off by default).
 
 **Thanks** to savemosca, EffakT, PapaBearDoes, TaunGadd, jonjomckay, adityaanikam and Jygijiji for their PRs.
 

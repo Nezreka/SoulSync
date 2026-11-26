@@ -18,11 +18,15 @@ the player becomes its own place: it has a first-run setup, libraries you name a
 
 ## the soulsync player app
 
-the player has an android app now: phones, tablets and android tv (shield included). release 0.1.0 is out with the apk: https://github.com/Nezreka/soulsync-mobile-app/releases/tag/v0.1.0
+the player has an android app now: phones, tablets and android tv (shield included).
+
+- **repo:** https://github.com/Nezreka/soulsync-mobile-app
+- **apk (0.2.0):** https://github.com/Nezreka/soulsync-mobile-app/releases/download/v0.2.0/SoulSync-Player-0.2.0.apk
 
 - **pair it from settings, devices, add a device** with a one-time code. after that everything goes straight between the app and your server.
 - **the same pages as the web player:** home, movies, tv, music, youtube, audiobooks, podcasts and the guide, with rows that follow the same per-profile layouts (arrange a page in a browser and the app follows) and your libraries as their own pages.
 - **a tv home built for a remote,** a top-right mini player, title logos, chromecast, and the stop and message an admin sends from server activity.
+- **downloads on phones and tablets:** pick original, high, phone or small with real sizes, download a whole season, album or playlist, smart downloads that keep the next episodes ready and delete what's watched, a queue that keeps going with the app closed, wi-fi only and a storage limit, and offline play that syncs your progress when you're back. the web player's downloads page manages every device's downloads, and the tv app sends things to a phone.
 - it needs this release (3.7.0) on the server.
 
 ## video without a media server
