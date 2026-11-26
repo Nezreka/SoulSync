@@ -238,7 +238,7 @@ export function MusicFolders({ store }: { store: SettingsStore }) {
             onChange={(v) => store.set('soulseek', 'transfer_path', v)}
             warn={
               installDefault
-                ? 'Still the install folder default, so music fills the disk SoulSync runs on (on a small Proxmox LXC that can hang it). Unlock it and point it at your real music folder.'
+                ? 'Still the install folder default. Music fills the disk SoulSync runs on, and on a small Proxmox LXC that can hang it. Unlock it and point it at your real music folder.'
                 : null
             }
           />
