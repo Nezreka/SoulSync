@@ -1484,3 +1484,17 @@ def test_chat_loops_skip_slskd_while_it_is_unreachable():
     for name in ("_emit_chat_push_loop", "_chat_auto_prove_loop"):
         loop = ws.split(f"def {name}")[1].split("\ndef ")[0]
         assert "unreachable_backoff_active()" in loop, name
+
+
+def test_an_empty_accepted_reply_from_older_slskd_is_a_download(configured_client):
+    """slskd 0.23 and older answer a successful enqueue with a bare 201 and
+    no body, which reads as {}. that is accepted, with the filename standing
+    in for the id, or every soulseek download fails on those versions"""
+    with patch.object(configured_client, '_make_request', AsyncMock(return_value={})):
+        result = _run_async(configured_client.download('user', 'song.flac', 1024))
+    assert result == 'song.flac'
+
+
+def test_a_failed_request_is_still_no_download(configured_client):
+    with patch.object(configured_client, '_make_request', AsyncMock(return_value=None)):
+        assert _run_async(configured_client.download('user', 'song.flac', 1024)) is None

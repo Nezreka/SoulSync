@@ -35,7 +35,8 @@ def start_download(username: str, filename: str, size_bytes: int = 0) -> dict:
                           headers=headers, timeout=15)
         r.raise_for_status()
         try:
-            response = r.json()
+            # slskd 0.23 and older: a bare 201 with no body is an accepted enqueue
+            response = r.json() if (r.text or "").strip() else {}
         except requests.exceptions.JSONDecodeError:
             response = None
         if not acknowledged_transfer_id(response, username, filename):
