@@ -15,6 +15,7 @@ import { runtime } from '../-lib/format';
 import { albumArtwork, remoteImage } from '../-lib/images';
 import { playlistItems, songCount, songFromRow, sourceName } from '../-lib/playlists';
 import { playlistEdits, playlistQuery } from '../-player.api';
+import { DownloadButton } from '../-ui/download-button';
 import { CopyIcon, PencilIcon, PlusIcon, SearchIcon, ShuffleIcon, TrashIcon } from '../-ui/icons';
 import { Empty, PlayButton, styles as k } from '../-ui/kit';
 import { openAddToPlaylist } from '../-ui/music/add-to-playlist';
@@ -260,6 +261,13 @@ function PlaylistPage() {
               <ShuffleIcon />
               Shuffle
             </button>
+            {queue.length ? (
+              <DownloadButton
+                type="playlist"
+                id={`${yours ? 'user' : 'mirror'}:${p.id}`}
+                title={p.name}
+              />
+            ) : null}
             {queue.length ? (
               <button
                 type="button"

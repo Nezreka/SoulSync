@@ -27,7 +27,7 @@ import {
   RelatedDiscoveryRails,
   Section,
 } from '../-ui/detail';
-import { DownloadMediaButton } from '../-ui/download-button';
+import { DownloadButton } from '../-ui/download-button';
 import { Badge, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { CrewList, mergeCrew, StudioLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
@@ -151,15 +151,7 @@ function MoviePage() {
             ) : null}
             <WatchlistButton kind="movie" id={id} />
             <TrailerButton kind="movie" id={id} />
-            {best ? (
-              <DownloadMediaButton
-                itemType="movie"
-                itemId={String(id)}
-                title={m.title}
-                subtitle={m.year ? String(m.year) : undefined}
-                artwork={m.has_poster ? `/api/video/poster/movie/${id}` : undefined}
-              />
-            ) : null}
+            {best ? <DownloadButton type="movie" id={String(id)} title={m.title} /> : null}
             <ReportIssueButton entityType="movie" entityId={id} title={m.title} />
             {ends ? (
               <span className={s.notYet}>

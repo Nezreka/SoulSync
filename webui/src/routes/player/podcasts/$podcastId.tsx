@@ -7,6 +7,7 @@ import { remoteImage } from '../-lib/images';
 import { podcastItems } from '../-lib/play-items';
 import { episodeKey, fraction } from '../-lib/rails';
 import { podcastShowQuery, podcastSubsQuery, progressLookupQuery } from '../-player.api';
+import { DownloadButton } from '../-ui/download-button';
 import { Art, Badge, Hero, PlayButton, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { playItems, usePlayer } from '../-ui/playback/use-player';
@@ -75,11 +76,20 @@ function PodcastPage() {
         }
         overview={about}
         actions={
-          <PlayButton
-            label="Play latest"
-            onPlay={queue.length ? () => playItems(queue) : undefined}
-            why="This feed has no episodes with audio."
-          />
+          <>
+            <PlayButton
+              label="Play latest"
+              onPlay={queue.length ? () => playItems(queue) : undefined}
+              why="This feed has no episodes with audio."
+            />
+            {queue.length ? (
+              <DownloadButton
+                type="podcast"
+                id={String(sub.id)}
+                title={show.data?.title ?? sub.title}
+              />
+            ) : null}
+          </>
         }
       />
 

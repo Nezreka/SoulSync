@@ -33,7 +33,7 @@ import {
   RelatedDiscoveryRails,
   Section,
 } from '../-ui/detail';
-import { DownloadMediaButton } from '../-ui/download-button';
+import { DownloadButton, DownloadMediaButton } from '../-ui/download-button';
 import { Art, Badge, Hero, HScroll, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { CrewList, mergeCrew, NetworkLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
@@ -620,6 +620,9 @@ function ShowPage() {
             ) : null}
             <WatchlistButton kind="show" id={id} />
             <TrailerButton kind="show" id={id} />
+            {firstOwnedEpisode ? (
+              <DownloadButton type="show" id={String(id)} title={show.title} />
+            ) : null}
             <ReportIssueButton entityType="show" entityId={id} title={show.title} />
             {next?.title ? <span className={s.notYet}>Up next: {next.title}</span> : null}
           </>
@@ -682,18 +685,29 @@ function ShowPage() {
                     {current.episode_owned ?? 0} of{' '}
                     {current.episode_total ?? current.episodes.length} episodes in your library
                   </span>
-                  {(current.episode_owned ?? 0) <
-                  (current.episode_total ?? current.episodes.length) ? (
-                    <button
-                      type="button"
-                      className={s.filterPill}
-                      aria-pressed={onlyMine}
-                      onClick={() => setOnlyMine((v) => !v)}
-                      data-nav
-                    >
-                      {onlyMine ? '✓ In library only' : 'In library only'}
-                    </button>
-                  ) : null}
+                  <span className={s.seasonHeadActions}>
+                    {(current.episode_owned ?? 0) > 0 ? (
+                      <DownloadButton
+                        type="season"
+                        id={`${id}:${current.season_number}`}
+                        title={`${show.title} · ${current.season_number === 0 ? 'Specials' : `Season ${current.season_number}`}`}
+                        label="Download season"
+                        small
+                      />
+                    ) : null}
+                    {(current.episode_owned ?? 0) <
+                    (current.episode_total ?? current.episodes.length) ? (
+                      <button
+                        type="button"
+                        className={s.filterPill}
+                        aria-pressed={onlyMine}
+                        onClick={() => setOnlyMine((v) => !v)}
+                        data-nav
+                      >
+                        {onlyMine ? '✓ In library only' : 'In library only'}
+                      </button>
+                    ) : null}
+                  </span>
                 </div>
               ) : null}
 

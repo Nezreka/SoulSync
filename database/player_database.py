@@ -24,7 +24,9 @@ from typing import Iterator, Optional
 TABLES_WITH_PROFILES = ("watch_progress", "player_favorite_channels", "player_home_layout",
                         "player_watchlist", "player_settings", "player_notes",
                         "player_lineup", "player_reminders",
-                        "player_downloads", "player_download_permissions")
+                        "player_downloads", "player_download_permissions",
+                        "player_offline_devices", "player_offline_items", "player_offline_wishes",
+                        "player_offline_rules", "player_offline_plays")
 
 
 def default_path() -> str:

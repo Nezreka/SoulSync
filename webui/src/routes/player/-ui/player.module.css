@@ -3507,6 +3507,13 @@
   gap: calc(var(--u) * 0.8);
 }
 
+.seasonHeadActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--u) * 0.5);
+}
+
 /* ── Android-parity Cinema Season Poster Strip & Episode Cards ───────── */
 
 .seasonStrip {

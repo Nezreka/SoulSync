@@ -11,6 +11,7 @@ import { fileQuality, ownedReleases } from '../-lib/music';
 import { albumItems, isLibTrackOwned } from '../-lib/play-items';
 import { albumQuery, artistQuery, requestMusicTrack } from '../-player.api';
 import { Comments } from '../-ui/comments';
+import { DownloadButton } from '../-ui/download-button';
 import { DownloadIcon, PlusIcon } from '../-ui/icons';
 import { CardRail, Hero, PlayButton, PlayerLink, styles as s } from '../-ui/kit';
 import { LabelLink, MusicGenreLinks } from '../-ui/links';
@@ -213,6 +214,9 @@ function AlbumPage() {
               }
               why="None of this album's tracks are on disk."
             />
+            {queue.length ? (
+              <DownloadButton type="album" id={String(a.id)} title={a.title} />
+            ) : null}
             {queue.length ? (
               <button
                 type="button"

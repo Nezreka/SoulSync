@@ -193,3 +193,74 @@ Add tracks to the queue from the Enhanced Library Manager or download results. M
         },
     ]
 });
+
+registerDocsSection({
+    id: 'player-downloads',
+    needs: 'everyone',
+    title: 'Player Downloads',
+    icon: '⬇️',
+    pages: [
+        {
+            id: 'pdl-download',
+            title: 'Downloading Something',
+            lede: 'Keep a movie, a season, an album or a playlist on your phone, or save it to this computer.',
+            body: `
+Every movie, episode, season, show, album, playlist, audiobook and podcast in the player has a **Download** button. It also says where the thing already is: **Waiting**, **60%**, **On Pixel 8** or **Downloaded**.
+
+The button opens the download sheet:
+
+- **Download to**: *This computer* (your browser saves the file) or one of your phones and tablets that has the SoulSync app signed in to your profile.
+- **Quality**: *Original* is the file as it is on the server. Smaller copies (**1080p**, **720p**, **480p** for video, **320**, **256** or **128 kbps** for music) are made by the server first. Each one shows its real size before you commit, and the quality you pick is remembered for next time. A copy never goes above the source: a 720p file only offers 720p and 480p.
+- **Whole things in one go**: a season, a show, an album, a playlist, a book, or a podcast's newest episodes.
+- **Fits**: for a phone, the sheet says how much room is left under its storage limit.
+
+When you pick **This computer**, the server gets the file ready (a smaller copy shows its progress while it's made) and then your browser downloads it. When you pick a phone, the download waits for it: the phone picks it up the next time the app is open and online.
+
+Subtitles and chapter marks come along in a smaller copy, so an offline episode plays like a streamed one.
+`
+        },
+        {
+            id: 'pdl-smart',
+            title: 'Smart Downloads',
+            lede: 'Let the phone keep itself topped up.',
+            body: `
+When you send a show, a playlist or a podcast to a phone, the sheet offers a **Smart download**:
+
+- **Shows**: keep the next 1, 3 or 5 unwatched episodes ready. As you watch, the next ones download on their own. **Delete an episode once it's watched** clears the ones you've seen.
+- **Playlists**: **Keep in step with the playlist**. Songs added later download, songs taken out are removed. Works for your own playlists, mirrored ones and your Discover mixes.
+- **Podcasts**: keep the newest few episodes ready, and delete the ones you've played.
+
+Change or turn off a smart download from the sheet, or from the Downloads page. Turning it off keeps what it already downloaded.
+`
+        },
+        {
+            id: 'pdl-page',
+            title: 'The Downloads Page',
+            lede: 'See and manage what is on each of your devices, from any screen.',
+            body: `
+**Downloads** in the player's sidebar lists your devices at the top, each with how much room it uses and when it was last seen. Pick one to see what's on it, grouped by show, movie, album, playlist, book and podcast, with each item's state: on the phone, downloading, waiting, watched.
+
+From there you can **add the rest** of a season, change a group's **smart settings**, **remove** an item or **remove all** of a group, and cancel something still waiting. Changes reach the device the next time it's online.
+
+**This computer** lists the files you saved from this browser. **Download again** gets one in another quality; **Forget** only takes it off the list (the file stays where your browser saved it).
+
+Plays, positions and watched marks made offline on a phone are sent back when it reconnects, so Continue Watching and your listening history stay right.
+`
+        },
+        {
+            id: 'pdl-admin',
+            title: 'Download Settings (Admin)',
+            needs: 'admin',
+            lede: 'Who may download, and how much work the server does for smaller copies.',
+            body: `
+In the player's **Settings**, under **Downloads**:
+
+- **Members may ask for smaller copies**: off means members download originals only. Admins always can.
+- **Copies made at once**: how many smaller copies the server makes at the same time. Each one keeps a CPU core or the GPU busy (the same encoder the player uses for streaming, so a GPU is used when it works).
+- **Room for smaller copies**: how much disk the copies may use. When it's full, the copies used longest ago go first. A copy is made once per file and quality and shared by everyone who asks for it.
+
+Whether a profile may download at all is set per person on the player's **Users & Downloads** page.
+`
+        },
+    ]
+});

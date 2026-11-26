@@ -6,6 +6,7 @@ import { plainText, remaining, runtime } from '../-lib/format';
 import { bookItem } from '../-lib/play-items';
 import { bookCover } from '../-lib/rails';
 import { booksQuery, catalogBookQuery, playableQuery, progressLookupQuery } from '../-player.api';
+import { DownloadButton } from '../-ui/download-button';
 import { Empty, Hero, PlayButton, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { getEngine, playItems, usePlayer } from '../-ui/playback/use-player';
@@ -89,6 +90,7 @@ function BookPage() {
                 onPlay={() => playItems([bookItem(book)], 0, { startAt: 0 })}
               />
             ) : null}
+            <DownloadButton type="audiobook" id={book.asin} title={book.title} />
             <ReportIssueButton
               entityType="audiobook"
               entityId={book.asin}

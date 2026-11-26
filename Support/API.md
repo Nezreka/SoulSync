@@ -464,6 +464,17 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 - `GET /api/player/transcode/<item_type>/<item_id>?q=&part=&t=`: the converted stream, fragmented MP4, from `t` seconds. It can't seek by `Range`: to seek, start a new one at the new `t`. A few run at once; past that it answers `503 busy`.
 - `GET /api/player/transcode/<item_type>/<item_id>/start?t=`: where a stream asked to start at `t` really starts, `{start, seek}`. Copied video can only start at a keyframe, so request `t=seek` and count the stream's time from `start`.
 
+#### Downloads
+
+Phones, tablets and the web player keep downloads; the TV app sends things to another of the profile's devices. Every route is under `/api/player/offline/`, takes the session or a paired device's token, and only ever sees the caller's own devices. A profile the admin switched downloads off for gets `403 downloads_disabled` for anything new (admins always may). The routes:
+
+- `GET plan?type=&id=&device=`: a movie, episode, `season` (`<show_id>:<n>`), show, youtube video, track, album, artist, playlist (`user:<id>`, `mirror:<id>`, `discover:<key>`), audiobook or podcast (`count` newest, 5 by default) as `{kind, title, subtitle, artwork, items, qualities}`. Each quality has a `total_bytes` and `per_item_bytes`; original is the real size, the others an estimate. Never above the source.
+- `POST prepare` with `{item_type, item_id, quality}`: `{id, status, progress, url, size_bytes, error, filename}`. The original is `ready` at once; a smaller copy is made by the server once per file and quality (`queued`, `converting`, `ready`), kept in the player cache. `GET prepare/<id>` polls it. `GET file/<id>` is the file with `Range`, `ETag` and a clean name.
+- `POST devices/report` with the device's whole list; `GET devices` lists the profile's devices with their items, smart rules and pending adds/removes.
+- `POST wishes` with `{device_id, action: add|remove, type, id, quality}` and `POST rules` with `{device_id, type: show|playlist|podcast, id, quality, keep_next, delete_watched, follow}` (`DELETE rules/<rule_id>`). `GET devices/<device_id>/wanted` is what that device should add and remove now.
+- `POST sync` with `{device_id, events}`: positions, watched marks and plays made offline. A position only lands when it's newer than the server's; a play counts once.
+- `GET settings` (anyone) and `PUT settings` (admin): `allow_conversion_for_members`, `max_conversions`, `cache_gb`.
+
 #### Playlists (music)
 
 - `GET /api/player/playlists`: this profile's playlists as `{yours, mirrored}`. Yours (Liked Songs first) are the ones made in SoulSync; mirrored ones follow Spotify, Deezer and the rest. Request lists stay out. Each is `{id, name, description, kind, liked, source, owner, track_count, image_url, cover_tiles, updated_at}`.

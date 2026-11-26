@@ -27,6 +27,13 @@ import {
 } from './-engine/crossfade';
 import { QUALITIES, type Quality } from './-engine/engine';
 import {
+  bytes,
+  offlineKeys,
+  offlineSettingsQuery,
+  saveOfflineSettings,
+  type OfflineSettings,
+} from './-lib/offline';
+import {
   clearCommercialsCache,
   commercialsConfigQuery,
   commercialsStatusQuery,
@@ -41,6 +48,7 @@ import {
 import {
   CheckIcon,
   ChevronIcon,
+  DownloadIcon,
   HomeIcon,
   MovieIcon,
   MusicIcon,
@@ -164,6 +172,92 @@ const SUBTITLE_SIZES: { value: SubtitleSize; label: string }[] = [
   { value: 'large', label: 'Large' },
 ];
 const ORDERED_BRIGHTNESS = [...BRIGHTNESS_STEPS].reverse();
+
+const CONVERSIONS = [1, 2, 3, 4, 6, 8];
+const CACHE_GB = [10, 25, 50, 100, 250, 500];
+
+/** admin: what the server does for downloads. members asking for smaller
+ *  copies, how many it makes at once, and how much room the copies get */
+function DownloadsSettings({ onSaved }: { onSaved: () => void }) {
+  const queryClient = useQueryClient();
+  const q = useQuery(offlineSettingsQuery());
+  const save = useMutation({
+    mutationFn: (changes: Partial<OfflineSettings>) => saveOfflineSettings(changes),
+    onSuccess: (out) => {
+      queryClient.setQueryData(offlineKeys.settings, (old: typeof q.data) =>
+        old ? { ...old, settings: out.settings } : old,
+      );
+      onSaved();
+    },
+    onError: notifyError("Couldn't save that setting"),
+  });
+  const now = q.data?.settings;
+  if (!q.data?.is_admin || !now) return null;
+  const withNow = (list: number[], v: number) =>
+    list.includes(v) ? list : [...list, v].sort((a, b) => a - b);
+  return (
+    <Group
+      icon={<DownloadIcon />}
+      title="Downloads"
+      badge="Admin"
+      note="Phones keep downloads, and the web player saves files to a computer. A smaller copy (1080p, 720p, 480p or a lower bitrate) is made once by the server and kept for the next person who asks."
+    >
+      <Row
+        label="Members may ask for smaller copies"
+        help="Off: members download originals only. Admins always can."
+      >
+        <Switch
+          label="Members may ask for smaller copies"
+          on={now.allow_conversion_for_members}
+          busy={save.isPending}
+          onChange={(v) => save.mutate({ allow_conversion_for_members: v })}
+        />
+      </Row>
+      <Row stacked label="Copies made at once" help="Each one keeps a CPU core or the GPU busy.">
+        <div className={s.segGroup} role="radiogroup" aria-label="Copies made at once">
+          {withNow(CONVERSIONS, now.max_conversions).map((n) => (
+            <button
+              key={n}
+              type="button"
+              role="radio"
+              aria-checked={now.max_conversions === n}
+              className={s.segBtn}
+              data-on={now.max_conversions === n ? 'true' : undefined}
+              disabled={save.isPending}
+              onClick={() => save.mutate({ max_conversions: n })}
+              data-nav
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      </Row>
+      <Row
+        stacked
+        label="Room for smaller copies"
+        help={`${bytes(q.data.cache_used_bytes) || 'Nothing'} in use. When it's full, the copies used longest ago go first.`}
+      >
+        <div className={s.segGroup} role="radiogroup" aria-label="Room for smaller copies">
+          {withNow(CACHE_GB, now.cache_gb).map((n) => (
+            <button
+              key={n}
+              type="button"
+              role="radio"
+              aria-checked={now.cache_gb === n}
+              className={s.segBtn}
+              data-on={now.cache_gb === n ? 'true' : undefined}
+              disabled={save.isPending}
+              onClick={() => save.mutate({ cache_gb: n })}
+              data-nav
+            >
+              {n} GB
+            </button>
+          ))}
+        </div>
+      </Row>
+    </Group>
+  );
+}
 
 function SettingsPage() {
   const { shell } = useRouteContext({ from: '/player' });
@@ -871,6 +965,8 @@ function SettingsPage() {
             </Row>
           </Group>
         ) : null}
+
+        <DownloadsSettings onSaved={flashSaved} />
 
         <Group
           icon={<HomeIcon />}
