@@ -495,11 +495,69 @@ def _set(**kw) -> None:
         _status.update(kw)
 
 
+def _identity(path: Any, size: Any) -> Optional[Tuple[str, int]]:
+    """a clip is the same file when its name and size match: a server's path
+    and soulsync's path to one file differ, its name and size don't"""
+    name = os.path.basename(str(path or "").replace("\\", "/")).casefold()
+    try:
+        n = int(size or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return (name, n) if name and n > 0 else None
+
+
+def _server_identities(db, server_roots: List[str]) -> Tuple[set, set]:
+    """(name+size identities, local paths) of the clips read from a server,
+    so a folder holding the same files doesn't add them twice"""
+    ids: set = set()
+    paths: set = set()
+    if not server_roots:
+        return ids, paths
+    try:
+        from core.video import drive_map
+        entries = drive_map.load(db)
+    except Exception:  # noqa: BLE001 - without the map, name+size still works
+        entries = []
+    conn = db._get_connection()
+    try:
+        for path, size in conn.execute(
+                f"SELECT path, size_bytes FROM {TABLE} WHERE root IN ({_marks(server_roots)}) "  # noqa: S608
+                "AND missing_since IS NULL", server_roots):
+            ident = _identity(path, size)
+            if ident:
+                ids.add(ident)
+            if entries:
+                from core.video import drive_map
+                local = drive_map.map_path(entries, path)
+                if local:
+                    paths.add(_norm(local))
+    finally:
+        conn.close()
+    return ids, paths
+
+
+def _drop_twins(conn, disk_root: str, ids: set, paths: set) -> int:
+    """a folder's rows that are a server's clips over again, gone: unless
+    someone edited one, then it stays as theirs"""
+    gone = 0
+    for vid, path, size in conn.execute(
+            f"SELECT id, path, size_bytes FROM {TABLE} WHERE root = ? AND user_title IS NULL "  # noqa: S608
+            "AND user_filmed_at IS NULL AND user_thumb_at_s IS NULL AND notes IS NULL",
+            (disk_root,)).fetchall():
+        if _identity(path, size) in ids or _norm(path) in paths:
+            conn.execute(f"DELETE FROM {TABLE} WHERE id = ?", (vid,))  # noqa: S608
+            gone += 1
+    return gone
+
+
 def scan(db, *, only: Optional[str] = None, server_source: Any = None) -> Dict[str, Any]:
     """read every root (or the one ``only`` names) into the store. a root
     that can't be read is skipped and said in ``problems``."""
     all_roots = roots(db)
     todo = [r for r in all_roots if only is None or r["id"] == only]
+    # servers first, so a folder that holds the same files can tell
+    todo.sort(key=lambda r: r["source"] == "disk")
+    server_roots = [r["id"] for r in all_roots if r["source"] != "disk"]
     labels = {r["id"]: r["label"] for r in all_roots}
     totals = {"added": 0, "changed": 0, "back": 0, "missing": 0, "found": 0}
     problems: List[str] = []
@@ -514,6 +572,22 @@ def scan(db, *, only: Optional[str] = None, server_source: Any = None) -> Dict[s
                 if found is None:
                     problems.append(f"Can't read the folder {root['path']}")
                     continue
+                # the same files plex or jellyfin already gave are one clip
+                ids, paths = _server_identities(db, server_roots)
+                if ids or paths:
+                    before = len(found)
+                    found = [f for f in found
+                             if _identity(f.get("path"), f.get("size_bytes")) not in ids
+                             and _norm(f.get("path")) not in paths]
+                    if len(found) != before:
+                        logger.info("home videos: %s holds %d clips a server already gave, kept once",
+                                    root["label"], before - len(found))
+                    c2 = db._get_connection()
+                    try:
+                        _drop_twins(c2, root["id"], ids, paths)
+                        c2.commit()
+                    finally:
+                        c2.close()
             else:
                 if src is None:
                     from core.video.sources import _build_source
