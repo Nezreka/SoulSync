@@ -242,9 +242,10 @@ describe('library names and suggestions from folder names', () => {
       { folder: 'd', path: '\\\\nas\\PLEX\\MOVIES' },
     ];
     const ideas = librarySuggestions('movie', folders, ['Movies']);
+    // home videos are their own kind, never a movie library ("camera" and
+    // "cam" rips are not home videos either)
     expect(ideas.map((i) => [i.name, i.folders])).toEqual([
       ['4K', ['a']],
-      ['Home Videos', ['b']],
       ['Kids', ['c']],
     ]);
     expect(librarySuggestions('movie', folders, ['Movies', '4k']).map((i) => i.name)).not.toContain(
@@ -445,5 +446,42 @@ describe('a finished setup with home videos, as a real server has it', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     act(() => openPlayerSetup());
     expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument();
+  });
+});
+
+describe('the folder hint knows the step it is on', () => {
+  it('sends a home-like movie folder to the home videos step, and never makes it a movie library', async () => {
+    const { HOME_LIKE, librarySuggestions } = await import('./player-setup');
+    expect(HOME_LIKE.test('Home Movies')).toBe(true);
+    expect(HOME_LIKE.test('home videos')).toBe(true);
+    expect(HOME_LIKE.test('Camcorder tapes')).toBe(true);
+    expect(HOME_LIKE.test('Cam Movies')).toBe(false);
+    expect(HOME_LIKE.test('Homeland')).toBe(false);
+    const folders = [{ folder: 'h', path: '/mnt/easystore3/PLEX/Home Movies' }];
+    expect(librarySuggestions('movie', folders, ['Movies'])).toEqual([]);
+
+    const base = admin(false);
+    state.payload = {
+      ...base,
+      folders: {
+        ...base.folders,
+        movie: [
+          ...base.folders.movie,
+          {
+            folder: '/mnt/e3/Home Movies',
+            path: '/mnt/e3/Home Movies',
+            titles: 5,
+            sample: [],
+            library_id: 1,
+          },
+        ],
+      },
+    };
+    await mount();
+    await waitFor(() => expect(screen.getByText('Let’s set up your player')).toBeTruthy());
+    next(); // movies
+    expect(screen.getByText(/looks like home/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Set up in Home videos' }));
+    expect(await screen.findByText(/Your home videos/)).toBeInTheDocument();
   });
 });
