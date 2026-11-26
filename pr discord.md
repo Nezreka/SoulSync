@@ -4,7 +4,7 @@
 
 **The app.** The player on Android phones, tablets and TV, with offline downloads. Pair it from Settings, Devices.
 Repo: <https://github.com/Nezreka/soulsync-mobile-app>
-APK: <https://github.com/Nezreka/soulsync-mobile-app/releases/download/v0.2.0/SoulSync-Player-0.2.0.apk>
+APK: <https://github.com/Nezreka/soulsync-mobile-app/releases/download/v0.3.0/SoulSync-Player-0.3.0.apk>
 
 **Chapters, skip intro, parties and casting.** Skip intro when the file marks one, watch parties with a countdown and reactions, and Chromecast that plays anything.
 
