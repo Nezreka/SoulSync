@@ -13680,6 +13680,10 @@ class MusicDatabase:
                               across every album of a series, and without a preference the
                               first row won, which sent a caller that compares albums
                               (watchlist, allow-duplicates) to a copy on the wrong album.
+                              A copy on that album also wins over one scoring at most
+                              _PREFER_ALBUM_MARGIN higher (#2331: a classical piece on many
+                              compilations, its title spelled a little differently on each),
+                              as long as it clears the threshold itself.
 
         Returns (track, confidence) tuple where confidence is 0.0-1.0
         """
@@ -13689,10 +13693,22 @@ class MusicDatabase:
             _want_album = self._normalize_for_comparison(prefer_album) if prefer_album else ''
 
             def _better(conf, trk):
-                if conf > best_confidence:
-                    return True
-                return bool(_want_album) and conf == best_confidence and best_match is not None \
-                    and self._on_album(trk, _want_album) and not self._on_album(best_match, _want_album)
+                if not _want_album or best_match is None:
+                    return conf > best_confidence
+                new_on = self._on_album(trk, _want_album)
+                cur_on = self._on_album(best_match, _want_album)
+                if new_on == cur_on:
+                    return conf > best_confidence
+                margin = self._PREFER_ALBUM_MARGIN
+                if new_on:
+                    # the asked-for album's copy, near enough to the best
+                    return conf > best_confidence or (
+                        conf >= confidence_threshold and conf >= best_confidence - margin)
+                # the best is on the album: only a clearly better copy, or
+                # any better one while the album copy misses the threshold
+                if best_confidence < confidence_threshold:
+                    return conf > best_confidence
+                return conf > best_confidence + margin
 
             if candidate_tracks:
                 # BATCHED PATH — score every pre-fetched track in-memory.
@@ -13986,6 +14002,10 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error checking track existence for '{title}' by '{artist}': {e}")
             return None, 0.0
+
+    # how far below the best score a copy on the asked-for album may sit and
+    # still win (check_track_exists' prefer_album)
+    _PREFER_ALBUM_MARGIN = 0.05
 
     def _on_album(self, track, wanted_key: str) -> bool:
         """Whether ``track`` sits on the album whose normalized name is ``wanted_key``."""

@@ -1795,6 +1795,8 @@ class PlaylistSyncService:
                     # the first that clears the threshold, or a marginal raw
                     # match could mask a stronger (correct) canonical one.
                     db_track, confidence = None, 0.0
+                    from core.discovery.album_pref import album_name as _album_name
+                    _sync_album = _album_name(getattr(spotify_track, 'album', None))
                     for _try_title, _try_artist in _attempts:
                         artist_candidates = self._get_or_fetch_artist_candidates(
                             candidate_pool, db, _try_artist, active_server,
@@ -1807,6 +1809,8 @@ class PlaylistSyncService:
                             # (multi-artist albums filed under another artist) —
                             # the cleanup path already passes it; sync didn't.
                             album=getattr(spotify_track, 'album', None) or None,
+                            # #2331: the copy on the playlist's album wins
+                            prefer_album=_sync_album or None,
                         )
                         if _cand_conf > confidence:
                             db_track, confidence = _cand_track, _cand_conf
@@ -1824,6 +1828,7 @@ class PlaylistSyncService:
                                 _try_title, _try_artist,
                                 confidence_threshold=0.7, server_source=active_server,
                                 album=getattr(spotify_track, 'album', None) or None,
+                                prefer_album=_sync_album or None,
                             )
                             if _cand_conf > confidence:
                                 db_track, confidence = _cand_track, _cand_conf

@@ -34,6 +34,8 @@ import types
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from core.discovery.album_pref import cached_match_fits_album
+
 logger = logging.getLogger(__name__)
 
 
@@ -98,7 +100,8 @@ def run_deezer_discovery_worker(playlist_id, deps: DeezerDiscoveryDeps):
                 try:
                     cache_db = deps.get_database()
                     cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
-                    if cached_match and deps.validate_discovery_cache_artist(track_artists[0] if track_artists else '', cached_match):
+                    if (cached_match and deps.validate_discovery_cache_artist(track_artists[0] if track_artists else '', cached_match)
+                            and cached_match_fits_album(track_album, cached_match)):
                         logger.debug(f"CACHE HIT [{i+1}/{len(tracks)}]: {track_name} by {', '.join(track_artists)}")
                         # Extract display-friendly artist string from cached match
                         cached_artists = cached_match.get('artists', [])
