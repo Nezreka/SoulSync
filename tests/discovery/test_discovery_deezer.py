@@ -118,11 +118,12 @@ def _track(track_id=1, name='Track', artists=None, album='Album', duration_ms=18
 def test_cache_hit_short_circuits():
     """Discovery cache hit appends Found result, no live search."""
     states = {}
+    # same album as the source track: a cached copy from another album is searched again (#2331)
     cached = {
         'id': 'spt-cached',
         'name': 'Cached Track',
         'artists': ['Cached Artist'],
-        'album': {'name': 'Cached Album'},
+        'album': {'name': 'Album'},
     }
     _seed_state('p1', states, tracks=[_track()])
     deps = _build_deps(states=states, cache_match=cached)

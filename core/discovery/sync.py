@@ -359,10 +359,14 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
             else:
                 artist_name = str(artist)
 
+            # #2331: the copy on the playlist's album wins
+            from core.discovery.album_pref import album_name as _album_name
+            _sync_album = _album_name(getattr(spotify_track, 'album', None)) or None
             db_track, confidence = db.check_track_exists(
                 original_title, artist_name,
                 confidence_threshold=0.80,
-                server_source=active_server
+                server_source=active_server,
+                prefer_album=_sync_album,
             )
 
             if not (db_track and confidence >= 0.80):
@@ -375,7 +379,8 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
                     if (_canon_title, _canon_artist) != (original_title, artist_name):
                         _alt_track, _alt_conf = db.check_track_exists(
                             _canon_title, _canon_artist,
-                            confidence_threshold=0.80, server_source=active_server)
+                            confidence_threshold=0.80, server_source=active_server,
+                            prefer_album=_sync_album)
                         if _alt_track and _alt_conf > confidence:
                             db_track, confidence = _alt_track, _alt_conf
                 except Exception as _canon_err:

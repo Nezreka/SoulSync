@@ -40,6 +40,14 @@ from typing import Any, Callable
 from core.discovery.canonical import canonical_best_score
 from core.discovery.manual_match import should_rediscover
 
+from core.discovery.album_pref import (
+    ALBUM_BONUS,
+    album_query,
+    album_rank,
+    best_with_album,
+    cached_match_fits_album,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -190,6 +198,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                 track_name = track.get('track_name', '')
                 artist_name = track.get('artist_name', '')
                 duration_ms = track.get('duration_ms', 0)
+                # the album the playlist names is part of which copy it is (#2331)
+                source_album = track.get('album_name') or ''
 
                 # same service on both ends (#1566): the mirror already has this
                 # track's own id, so fetch it. it runs before the cache because a
@@ -219,7 +229,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                 try:
                     cached_match = None if direct_track else db.get_discovery_cache_match(
                         cache_key[0], cache_key[1], discovery_source)
-                    if cached_match and deps.validate_discovery_cache_artist(artist_name, cached_match):
+                    if (cached_match and deps.validate_discovery_cache_artist(artist_name, cached_match)
+                            and cached_match_fits_album(source_album, cached_match)):
                         extra_data = {
                             'discovered': True,
                             'provider': discovery_source,
@@ -269,10 +280,20 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                 except Exception as _cq_err:
                     logger.debug("canonical search-query add failed: %s", _cq_err)
 
+                # a piece on fifty compilations: ask for the playlist's album
+                # first, so its copy is in the results (#2331)
+                _aq = album_query(track_name, artist_name, source_album)
+                if _aq and _aq not in search_queries:
+                    search_queries = [_aq] + list(search_queries)
+
                 # Step 3: Search and score
                 best_match = direct_track
                 best_confidence = 1.0 if direct_track else 0.0
+                best_rank = best_confidence + (ALBUM_BONUS if direct_track else 0.0)
                 min_confidence = 0.7
+
+                def _score(rs, _t=track_name, _a=artist_name, _d=duration_ms):
+                    return _canonical_best_score(deps, _t, _a, _d, rs)
 
                 # deezer's free text can leave the original out entirely
                 # (#1565), so its first query also asks search_song
@@ -290,12 +311,12 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         if not results:
                             continue
 
-                        match, confidence = _canonical_best_score(
-                            deps, track_name, artist_name, duration_ms, results
-                        )
+                        match, confidence, _ = best_with_album(_score, source_album, results, min_confidence)
+                        rank = album_rank(confidence, source_album, match, min_confidence) if match else 0.0
 
-                        if match and confidence > best_confidence:
+                        if match and rank > best_rank:
                             best_confidence = confidence
+                            best_rank = rank
                             best_match = match
 
                         if best_confidence >= 0.9:
@@ -316,11 +337,11 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                             from core.metadata.song_search import search_song
                             extended = search_song(itunes_client_instance, track_name, artist_name, limit=50)
                         if extended:
-                            match, confidence = _canonical_best_score(
-                                deps, track_name, artist_name, duration_ms, extended
-                            )
-                            if match and confidence > best_confidence:
+                            match, confidence, _ = best_with_album(_score, source_album, extended, min_confidence)
+                            rank = album_rank(confidence, source_album, match, min_confidence) if match else 0.0
+                            if match and rank > best_rank:
                                 best_confidence = confidence
+                                best_rank = rank
                                 best_match = match
                     except Exception as e:
                         logger.debug("extended discovery search failed: %s", e)
