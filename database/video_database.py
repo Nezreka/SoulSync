@@ -997,12 +997,18 @@ class VideoDatabase:
         conn = self._open_or_set_aside()
         try:
             prev_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            # a db at v79 may be from skip markers or from video levelling, which
+            # both took that number on their own branches: look before the
+            # schema makes the markers tables
+            had_markers = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'video_segments'"
+            ).fetchone() is not None
             conn.executescript(schema)
             self._ensure_columns(conn)
             self._ensure_indexes(conn)
             self._seed_named_links_from_scalar(conn)
             self._seed_builtin_libraries(conn)
-            self._run_data_migrations(conn, prev_version)
+            self._run_data_migrations(conn, prev_version, had_markers=had_markers)
             conn.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
             conn.commit()
             logger.info(
@@ -1195,7 +1201,7 @@ class VideoDatabase:
                     "video schema: %s.%s was added by another process mid-init", table, col)
 
     @staticmethod
-    def _run_data_migrations(conn, prev_version: int) -> None:
+    def _run_data_migrations(conn, prev_version: int, *, had_markers: bool = True) -> None:
         """One-time data fixes, gated on the PRAGMA user_version the DB carried
         BEFORE this boot (fresh DBs start at 0 with empty tables, so every step
         is a no-op there)."""
@@ -1454,10 +1460,12 @@ class VideoDatabase:
             if requeued:
                 logger.info("tvdb: %d show(s) queued once to read their linked ids", requeued)
 
-        if 0 < prev_version < 79:
+        if 0 < prev_version < 79 or (prev_version == 79 and not had_markers):
             # v79: skip markers can be written next to the videos as .edl
             # files. a new library does that by default; one that was here
-            # before only when someone switches it on
+            # before only when someone switches it on. a v79 db without the
+            # markers tables came from video levelling's v79 (now v80), so it
+            # never had this step
             conn.execute(
                 "UPDATE video_libraries SET options = json_set("
                 "CASE WHEN json_valid(options) THEN options ELSE '{}' END, "

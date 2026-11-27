@@ -21,7 +21,7 @@ import pytest
 from core.video.markers import audio as A
 from core.video.markers import detect, edl, merge, server_import, service, store, visual
 from core.video.markers.job import MarkerJob
-from database.video_database import VideoDatabase
+from database.video_database import SCHEMA_VERSION, VideoDatabase
 
 R = A.RATE
 
@@ -466,6 +466,67 @@ def test_existing_libraries_stop_writing_after_the_upgrade(tmp_path):
     from core.video.libraries import normalize_options
     assert normalize_options({})["markers_write"] is True        # a new library writes
     assert normalize_options(opts[0])["markers_write"] is False
+
+
+def _reopen_at(path, version, *, drop=(), options=None):
+    """an existing db put back at an older version (and without some tables),
+    then opened again the way a restart does"""
+    import sqlite3
+    conn = sqlite3.connect(path)
+    for table in drop:
+        conn.execute("DROP TABLE IF EXISTS %s" % table)
+    if options is not None:
+        conn.execute("UPDATE video_libraries SET options = ?", (json.dumps(options),))
+    conn.execute("PRAGMA user_version = %d" % version)
+    conn.commit()
+    conn.close()
+    from database import video_database as vdb
+    vdb._initialized_paths.discard(str(Path(path).resolve()))
+    VideoDatabase(database_path=path)
+    conn = sqlite3.connect(path)
+    try:
+        opts = [json.loads(r[0]) for r in conn.execute("SELECT options FROM video_libraries")]
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        conn.close()
+    return opts, tables, version
+
+
+_MARKER_TABLES = ("video_segments", "video_segment_suppressions", "video_audio_fingerprints",
+                  "video_analysis_state", "video_marker_sidecars")
+
+
+def test_a_v79_from_video_levelling_still_stops_writing(tmp_path):
+    # levelling took v79 on its own branch: that db never ran the markers step
+    path = str(tmp_path / "video_library.db")
+    VideoDatabase(database_path=path)
+    opts, tables, version = _reopen_at(path, 79, drop=_MARKER_TABLES, options={})
+    assert version == SCHEMA_VERSION
+    assert set(_MARKER_TABLES) <= tables
+    assert opts and all(o.get("markers_write") is False for o in opts)
+
+
+def test_a_v79_from_skip_markers_keeps_what_was_switched_on(tmp_path):
+    # the markers step already ran there: a library switched on since stays on,
+    # and levelling's table is made
+    path = str(tmp_path / "video_library.db")
+    VideoDatabase(database_path=path)
+    opts, tables, version = _reopen_at(path, 79, drop=("video_file_loudness",),
+                                       options={"markers_write": True})
+    assert version == SCHEMA_VERSION
+    assert "video_file_loudness" in tables
+    assert opts and all(o.get("markers_write") is True for o in opts)
+
+
+def test_a_v78_db_gets_both(tmp_path):
+    path = str(tmp_path / "video_library.db")
+    VideoDatabase(database_path=path)
+    opts, tables, version = _reopen_at(path, 78, drop=_MARKER_TABLES + ("video_file_loudness",),
+                                       options={})
+    assert version == SCHEMA_VERSION
+    assert set(_MARKER_TABLES) <= tables and "video_file_loudness" in tables
+    assert opts and all(o.get("markers_write") is False for o in opts)
 
 
 def test_player_markers_read_the_sidecar_and_queue_a_first_play(db, tmp_path):

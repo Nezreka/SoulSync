@@ -37,7 +37,7 @@ class Ctx:
 
 def test_the_schema_has_the_table_and_the_version_moved():
     from database.video_database import SCHEMA_VERSION
-    assert SCHEMA_VERSION >= 79
+    assert SCHEMA_VERSION >= 80   # v80: levelling comes after skip markers' v79
 
 
 def test_the_job_measures_newest_first_and_keeps_it_by_name_and_size(vdb):
