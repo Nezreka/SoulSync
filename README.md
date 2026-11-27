@@ -218,6 +218,8 @@ One search box with three modes, and a note button that identifies what is playi
 | **Enriched download** *(recommended)* | Each file is matched to a real release, tagged, given cover art and filed |
 | **Tag it yourself** | For bootlegs, live sets and mixtapes |
 
+Paste a YouTube link (a video, a short, a music.youtube.com song or a playlist) into the Files box and it shows exactly that video instead of searching. A playlist lists its videos (up to 200) to download all or just the ones you tick.
+
 ### Sources
 
 Use one, or build a **hybrid chain** in the order you prefer. If a source can't meet your quality profile, SoulSync falls through to the next.

@@ -4,6 +4,7 @@ import type { DownloadTarget } from '../-basic.types';
 import type { BasicSearchController } from '../-basic.use-controller';
 
 import { sourceLabel } from '../-basic.api';
+import { isYoutubeUrl, useYoutubeLink } from '../-youtube-link';
 import { BasicFilters } from './basic-filters';
 import { BasicResults } from './basic-results';
 import { BasicSearchBar } from './basic-search-bar';
@@ -12,10 +13,11 @@ import styles from './basic.module.css';
 import { DownloadChooser } from './download-chooser';
 import { EnrichedModal } from './enriched-modal';
 import { ManualModal } from './manual-modal';
+import { YoutubeLinkPanel } from './youtube-link-panel';
 
 /** before anything has been searched for */
 export const EMPTY_PLACEHOLDER =
-  'Search a download source directly, then pick how each file comes in.';
+  'Search a download source directly, or paste a YouTube link, then pick how each file comes in.';
 /** results came back, the filters hide all of them */
 export const FILTERED_OUT_PLACEHOLDER = 'Nothing matches these filters.';
 
@@ -42,6 +44,8 @@ export function BasicSearch({
   const [target, setTarget] = useState<DownloadTarget | null>(null);
   const [enriched, setEnriched] = useState<DownloadTarget | null>(null);
   const [manual, setManual] = useState<DownloadTarget | null>(null);
+  // a pasted youtube link shows that video instead of searching (#2322)
+  const link = useYoutubeLink();
 
   // the handoffs (wishlist "search manually", the global download widget) run
   // a search for a query this input never saw. following state.query keeps the
@@ -61,41 +65,58 @@ export function BasicSearch({
     >
       <BasicSearchBar
         query={query}
-        searching={state.searching}
+        searching={state.searching || link.state.status === 'loading'}
         sources={state.sources}
         activeSource={state.activeSource}
         singleSource={state.singleSource}
         onQueryChange={setQuery}
-        onSubmit={() => search(query)}
-        onCancel={cancel}
+        onSubmit={() => {
+          if (isYoutubeUrl(query)) {
+            cancel();
+            void link.resolve(query.trim());
+            return;
+          }
+          link.clear();
+          search(query);
+        }}
+        onCancel={() => {
+          link.clear();
+          cancel();
+        }}
         onSelectSource={selectSource}
       />
 
       <BasicFilters
         filters={state.filters}
-        visible={state.filtersVisible && !state.searching}
+        visible={state.filtersVisible && !state.searching && link.state.status === 'idle'}
         results={state.results}
         sourceName={current ? sourceLabel(current) : ''}
         onChange={setFilters}
         onToggleOrder={toggleSortOrder}
       />
 
-      {!state.searching && <BasicWarnings warnings={state.warnings} />}
+      {!state.searching && link.state.status === 'idle' && (
+        <BasicWarnings warnings={state.warnings} />
+      )}
 
-      <BasicResults
-        results={visible}
-        // one message at a time: the hint before any search, a filter that
-        // hides everything, else whatever the controller says (searching,
-        // nothing found, failed, cancelled)
-        placeholder={
-          state.results.length
-            ? FILTERED_OUT_PLACEHOLDER
-            : state.query || state.searching
-              ? state.status
-              : EMPTY_PLACEHOLDER
-        }
-        onDownload={setTarget}
-      />
+      {link.state.status !== 'idle' ? (
+        <YoutubeLinkPanel state={link.state} onDownload={setTarget} />
+      ) : (
+        <BasicResults
+          results={visible}
+          // one message at a time: the hint before any search, a filter that
+          // hides everything, else whatever the controller says (searching,
+          // nothing found, failed, cancelled)
+          placeholder={
+            state.results.length
+              ? FILTERED_OUT_PLACEHOLDER
+              : state.query || state.searching
+                ? state.status
+                : EMPTY_PLACEHOLDER
+          }
+          onDownload={setTarget}
+        />
+      )}
 
       <DownloadChooser
         target={target}

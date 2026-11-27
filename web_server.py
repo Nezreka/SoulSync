@@ -6926,6 +6926,39 @@ def search_music():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/search/youtube-link', methods=['POST'])
+@requires("music.access")
+def search_youtube_link():
+    """a pasted youtube video or playlist link, shown as is (#2322).
+
+    body ``{"url": str}``. answers ``{kind, id, url, title, channel,
+    thumbnail, results, count, truncated}``: ``results`` are files-search
+    track rows, so the page downloads them through /api/download like any
+    youtube result. metadata only, nothing downloads here. only youtube
+    hosts are accepted and yt-dlp gets a url rebuilt from the id.
+    """
+    from core.search.youtube_link import parse_youtube_url, resolve_youtube_link
+
+    data = request.get_json(silent=True) or {}
+    raw = data.get('url')
+    if parse_youtube_url(raw) is None:
+        return jsonify({"error": "That isn't a YouTube video or playlist link."}), 400
+    client = None
+    try:
+        client = download_orchestrator.client('youtube') if download_orchestrator else None
+    except Exception as e:  # noqa: BLE001 - answered as unavailable below
+        logger.debug(f"youtube client unavailable: {e}")
+    if client is None:
+        return jsonify({"error": "YouTube isn't available as a download source."}), 503
+    try:
+        return jsonify(resolve_youtube_link(raw, client))
+    except LookupError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logger.error(f"youtube link lookup failed: {e}")
+        return jsonify({"error": "Couldn't read that YouTube link."}), 502
+
+
 def _mark_request_free_ok_for_spotify(source: str) -> None:
     """Explicit-Spotify request marker: lets the no-auth Spotify source serve
     THIS request even without the persistent metadata-source opt-in (the
