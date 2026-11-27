@@ -902,8 +902,10 @@ def _rehome_track_lead_releases_once(database: Any, conn: Any) -> Dict[str, int]
     from core.library2.schema import _done_once, _mark_done
     # v2 (#2239/#2240): runs again for a library v1 already passed, for a
     # release filed under its whole credit line ("A, B & C") and the kind
-    # a moved single's folder took. the repair only moves what still fits
-    name = "track_lead_releases_rehomed_v2"
+    # a moved single's folder took. the repair only moves what still fits.
+    # v3: wishlist adds before #2300 split compilations over their
+    # performers after v2 had run
+    name = "track_lead_releases_rehomed_v3"
     if _done_once(conn.cursor(), name):
         return {}
     from core.library2.release_artist_repair import rehome_track_lead_releases
