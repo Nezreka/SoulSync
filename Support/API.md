@@ -216,6 +216,14 @@ Settings: `library.watch_folders` (default true), `library.watch_poll_minutes` (
 
 Settings: `holiday_music.mode` (`season` default, `always`, `never`), `holiday_music.season_start` (`11-15`), `holiday_music.season_end` (`01-06`), `holiday_music.write_tag` (false). Out of season, every Discover track list, personalized playlist, radio, recipe mix, the player's rows and a Subsonic app's `getRandomSongs` leave holiday songs out; the personalized kind `holiday_mix` is the in-season Holiday mix.
 
+### Secondary library (web UI routes, #2332)
+
+- `GET /api/secondary-library`: `{rules: {enabled, path, name, match_holiday, genres, album_titles, active, problem}, check: {checked, hidden, server, folder, files_on_disk, server_sees}}` (the last check, after a scan).
+- `POST /api/secondary-library/check` (admin): check now whether the media server returns any of the folder.
+- `POST /api/secondary-library/move` (admin): `{apply: false}` (default) previews, `{apply: true}` moves; optional `album_ids`. Returns `{items: [{album_id, title, artist, why: "holiday"|"genre"|"album title", action: "move"|"moved"|"exists"|"shared folder"|"failed", src, dst}], to_move, moved, skipped, failed}`. A move asks the media server to rescan.
+
+Settings: `library.secondary_enabled` (false), `library.secondary_path`, `library.secondary_name` (`Holiday`), `library.secondary_match_holiday` (true), `library.secondary_genres`, `library.secondary_album_titles` (words split by `|` or commas). Matching downloads headed for the shared folder are filed under the secondary folder with the same naming template; an album already in the library stays where its files are. The folder is added to `library.music_paths` and counts as owned for the server-scoped ownership checks.
+
 ### Library coverage and folder overrides (web UI routes, admins only)
 
 How much of the media server's music SoulSync can read directly, folder by folder. Each folder is sampled (up to 40 real files, opened and size-checked), never scanned whole.

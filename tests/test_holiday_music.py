@@ -100,6 +100,71 @@ def test_provider_genres_and_moods(genres):
     assert H.detect("Some Song", "Some Album", H._genre_list(genres))
 
 
+# ── false positives (the reporter's list) ─────────────────────────────────
+
+@pytest.mark.parametrize("title,album,artist,genres", [
+    ("Holiday", "Madonna", "Madonna", ["pop", "holiday"]),        # tag = the title
+    ("Holiday", "American Idiot", "Green Day", ["punk", "rock"]),
+    ("Holiday", "Holiday", "Anyone", ["holiday"]),               # "holiday" by any artist
+    ("Holiday", "Some Record", "Weezer", []),
+    ("Lover Man", "Lady Day", "Billie Holiday", ["jazz", "billie holiday"]),
+    ("Strange Fruit", "The Billie Holiday Collection", "Billie Holiday", ["vocal jazz"]),
+    ("Fine and Mellow", "Sings the Billie Holiday Songbook", "Someone Else", []),
+    ("All I Want", "Debut", "Mike Christmas", ["mike christmas", "indie"]),  # a surname
+    ("Song (feat. Mike Christmas)", "Album", "Other", []),        # a credited name
+    ("Song", "Album", "Other", ["holiday inn", "billie holiday"]),
+    ("Wonderwall", "Noel Gallagher's High Flying Birds", "Noel Gallagher", []),
+    ("And I Am Telling You", "Dreamgirls", "Jennifer Holiday", ["jennifer holiday"]),
+    ("Rudolph", "Album", "Other", []),
+    ("Carol", "Album", "Other", ["carol"]),
+    ("Summer Holiday", "Summer Holiday", "Cliff Richard", ["oldies"]),
+    ("Holiday", "Holiday", "The Holidays", ["holiday"]),
+])
+def test_names_and_the_bare_word_holiday_are_not_holiday_music(title, album, artist, genres):
+    assert not H.detect(title, album, genres, artist=artist)
+    assert not H.Policy(mode="never").is_holiday(
+        {"title": title, "album": album, "artist": artist, "genres": genres})
+
+
+@pytest.mark.parametrize("title,album,artist,genres", [
+    ("Song", "Album", "Bobby Helms", ["Christmas"]),
+    ("Song", "Album", "Anyone", ["holiday music"]),
+    ("Song", "Album", "Anyone", ["Holiday"]),                    # the tag soulsync writes
+    ("Song", "Album", "Anyone", ["christmas pop"]),
+    ("Track 3", "Merry Christmas", "Mariah Carey", []),
+    ("Noël", "Album", "Anyone", []),
+    ("The First Noel", "Album", "Anyone", []),
+    ("Feliz Navidad", "Album", "José Feliciano", []),
+    ("Rudolph the Red-Nosed Reindeer", "Album", "Gene Autry", []),
+    ("Silent Night", "Album", "Billie Holiday", []),             # her carol still is one
+    ("Track 2", "Christmas Carols", "Choir", []),
+    ("Track 1", "Happy Holidays", "Andy Williams", []),
+])
+def test_genre_and_seasonal_phrases_are(title, album, artist, genres):
+    assert H.detect(title, album, genres, artist=artist)
+
+
+def test_an_artist_tagged_christmas_somewhere_is_not_all_christmas():
+    # only the artist's main genre counts: mariah sings in july too
+    song = {"title": "Fantasy", "album": "Daydream", "artist": "Mariah Carey",
+            "artist_genres": ["pop", "r&b", "christmas"]}
+    assert not H.Policy(mode="never").is_holiday(song)
+    act = {"title": "Deck the Halls", "album": "Fresh Aire Christmas",
+           "artist": "Mannheim Steamroller", "artist_genres": ["christmas", "new age"]}
+    assert H.Policy(mode="never").is_holiday(act)
+    assert H.detect("Track 1", "Album", [], artist="Mannheim Steamroller",
+                    artist_genres=["Christmas"])
+
+
+def test_an_album_is_decided_by_what_all_its_tracks_share():
+    # one carol on a pop record doesn't make the record holiday music
+    assert not H.album_says_holiday("Pop Hits 2020", ["pop"], artist="Various")
+    assert H.album_says_holiday("A Very Special Christmas", [], artist="Various")
+    assert H.album_says_holiday("Album", ["Christmas"], artist="Various")
+    assert not H.album_says_holiday("The Billie Holiday Collection", ["jazz"],
+                                    artist="Billie Holiday")
+
+
 def test_ordinary_genres_are_not():
     assert not H.detect("Some Song", "Some Album", ["pop", "soul", "jazz"])
 

@@ -393,7 +393,9 @@ def transfer_root_for_context(context) -> str:
     a track there meant that directory, and the file has to land where it was
     put (E-04). Only with nothing selected does the download's own profile
     decide, and with neither it is the configured transfer folder -- which is
-    every download on an install without own directories.
+    every download on an install without own directories. A download headed
+    for the shared folder whose album matches a secondary library rule
+    (core/library_rules.py) goes to that folder instead.
     """
     from core.audiobook_routing import routed_root_for_context
     routed = routed_root_for_context(context) or lidarr_root_for_context(context)
@@ -406,7 +408,13 @@ def transfer_root_for_context(context) -> str:
         from core.library_scope import own_library_supported
         if not own_library_supported():
             library_root_for_profile(import_profile_id(context))
-    return library_root_for_profile(owner) or shared_transfer_root()
+    own = library_root_for_profile(owner)
+    if own:
+        return own
+    # #2332: an album a secondary library rule matches (holiday music, a
+    # genre, an album title) goes to that folder instead of the main one
+    from core.library_rules import secondary_root_for_context
+    return secondary_root_for_context(context) or shared_transfer_root()
 
 
 # ── reverse lookup: which profile owns a path (#1504) ─────────────────────────

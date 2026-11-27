@@ -42,32 +42,62 @@ DEFAULT_END = "01-06"
 TAG_GENRE = "Holiday"
 SCOPES = ("track", "album", "artist")
 
-# a word or phrase in a track or album title. "holiday" alone is not here:
-# madonna's and green day's holiday are not christmas songs
+# a word or phrase in a track or album title, matched as a whole phrase. the
+# bare word "holiday" is never here (madonna's and green day's holiday are not
+# christmas songs), and neither is a word that is also a name on its own
+# ("noel" gallagher, "rudolph", "carol"): those need their seasonal context
 _TITLE_WORDS = (
-    r"christmas", r"x-?mas", r"navidad", r"no[eë]l", r"weihnacht\w*", r"natale",
-    r"hanukk?ah?", r"chanukk?ah", r"kwanzaa", r"yule(?:tide)?", r"mistletoe",
-    r"jingle bells?", r"silent night", r"o holy night", r"deck the halls?",
-    r"sleigh ride", r"sleigh bells?", r"winter wonderland", r"let it snow",
-    r"rudolph", r"frosty the snowman", r"little drummer boy", r"joy to the world",
-    r"santa claus", r"santa baby", r"here comes santa", r"feliz navidad",
-    r"carol of the bells", r"carols", r"happy holidays", r"holiday season",
-    r"holiday (?:album|songs?|classics|collection|favou?rites|hits|music|edition|special)",
+    r"christmas", r"x-?mas", r"navidad", r"noël", r"(?:first|joyeux|petit papa|the) no[eë]l",
+    r"weihnacht\w*", r"buon natale", r"hanukk?ah?", r"chanukk?ah", r"kwanzaa",
+    r"yule(?:tide)?", r"mistletoe", r"jingle bells?", r"silent night", r"o holy night",
+    r"deck the halls?", r"sleigh ride", r"sleigh bells?", r"winter wonderland",
+    r"let it snow", r"rudolph the red", r"frosty the snowman", r"little drummer boy",
+    r"joy to the world", r"santa claus", r"santa baby", r"here comes santa",
+    r"carol of the bells", r"christmas carols?", r"carols (?:from|for|of|at|by candlelight)",
+    r"happy holidays", r"holiday season",
+    r"holiday (?:album|songs?|classics|favou?rites|hits|music|edition|special|cheer|party)",
     r"twelve days of", r"12 days of", r"away in a manger", r"hark the herald",
-    r"o come all ye faithful", r"god rest ye", r"first noel", r"o tannenbaum",
-    r"stille nacht", r"have yourself a merry", r"merry little",
+    r"o come all ye faithful", r"god rest ye", r"o tannenbaum", r"stille nacht",
+    r"have yourself a merry", r"merry little", r"feliz navidad", r"villancicos?",
 )
 _TITLE_RE = re.compile(r"(?<![\w])(?:" + "|".join(_TITLE_WORDS) + r")(?![\w])", re.I)
+# a title that is only this word is a carol ("Noël", "Noel", "Yule")
+_TITLE_ALONE_RE = re.compile(r"\s*(?:no[eë]l(?: no[eë]l)*|natale|yule)\s*[!.]*\s*", re.I)
 
-# a genre or mood tag. these are tags, so "holiday" is safe here
-_GENRE_RE = re.compile(
-    r"(?<![\w])(?:christmas|x-?mas|holiday|holidays|navidad|no[eë]l|weihnacht\w*|"
-    r"hanukk?ah|chanukk?ah|kwanzaa|yule(?:tide)?|carols?)(?![\w])",
+# people whose name holds a holiday word. their names are taken out of titles
+# and tags before anything is matched, as is the track's own artist
+_NAMES_WITH_HOLIDAY_WORDS = ("billie holiday", "jennifer holiday", "doc holiday",
+                             "the holidays", "holiday sidewinder", "noel gallagher",
+                             "noel redding", "noel coward", "carol king", "carole king")
+
+# a featured or credited name inside a title: "(feat. X)", "[with X]", "ft. X"
+_CREDIT_RE = re.compile(
+    r"[\(\[](?:feat\.?|ft\.?|featuring|with|prod\.?(?: by)?)\s[^\)\]]*[\)\]]"
+    r"|\s(?:feat\.?|ft\.?|featuring)\s.*$", re.I)
+
+# a genre or mood tag. a word that can only mean the season counts anywhere in
+# a tag ("christmas", "christmas pop", "xmas jazz")
+_GENRE_STRONG_RE = re.compile(
+    r"(?<![\w])(?:christmas|x-?mas|navidad|noël|weihnacht\w*|hanukk?ah|chanukk?ah|kwanzaa|"
+    r"villancicos?|christmas carols?)(?![\w])",
+    re.I,
+)
+# a word that is also a name or an ordinary word ("billie holiday", "holiday
+# inn", "noel") counts only when the whole tag is a holiday genre: "holiday",
+# "holidays", "holiday music", "happy holidays", "yuletide", "carols"
+_GENRE_WHOLE_RE = re.compile(
+    r"\s*(?:happy |winter )?(?:holiday|holidays|yule|yuletide|noel|carols)(?: (?:music|songs?|pop|classics|jazz|standards|season|favou?rites|hits|soul|"
+    r"rock|album|special|cheer|spirit|carols?|choral))*\s*",
     re.I,
 )
 
-_GENRE_KEYS = ("genres", "genre", "_artist_genres_raw", "artist_genres", "album_genres",
-               "track_genres", "tags", "mood", "moods", "style", "styles")
+_GENRE_KEYS = ("genres", "genre", "album_genres", "track_genres", "tags", "mood", "moods",
+               "style", "styles")
+# the artist's genres say what the artist usually makes, not what this song
+# is: mariah carey is tagged christmas somewhere and still sings in july. only
+# the artist's first (main) genre counts, for an act that only makes holiday
+# music (mannheim steamroller)
+_ARTIST_GENRE_KEYS = ("_artist_genres_raw", "artist_genres")
 
 
 # ── reading a track, whatever its shape ─────────────────────────────────────
@@ -101,8 +131,9 @@ def _genre_list(value: Any) -> List[str]:
     return [str(value)]
 
 
-def fields(track: Any) -> Tuple[str, str, str, List[str]]:
-    """(title, album, artist, genres) from any track dict or object"""
+def fields_full(track: Any) -> Tuple[str, str, str, List[str], List[str]]:
+    """(title, album, artist, genres, artist genres) from any track dict or
+    object. the artist genres are each artist field's first genre only"""
     if not isinstance(track, dict):
         track = getattr(track, "__dict__", {}) or {}
     title = _text(track.get("track_name") or track.get("title") or track.get("name"))
@@ -112,6 +143,9 @@ def fields(track: Any) -> Tuple[str, str, str, List[str]]:
     genres: List[str] = []
     for key in _GENRE_KEYS:
         genres.extend(_genre_list(track.get(key)))
+    artist_genres: List[str] = []
+    for key in _ARTIST_GENRE_KEYS:
+        artist_genres.extend(_genre_list(track.get(key))[:1])
     album_value = track.get("album")
     if isinstance(album_value, dict):
         genres.extend(_genre_list(album_value.get("genres")))
@@ -122,26 +156,84 @@ def fields(track: Any) -> Tuple[str, str, str, List[str]]:
         except ValueError:
             rich = None
     if isinstance(rich, dict) and rich is not track:
-        r_title, r_album, r_artist, r_genres = fields({k: v for k, v in rich.items()
-                                                       if k != "track_data_json"})
+        r_title, r_album, r_artist, r_genres, r_artist_genres = fields_full(
+            {k: v for k, v in rich.items() if k != "track_data_json"})
         title, album, artist = title or r_title, album or r_album, artist or r_artist
         genres.extend(r_genres)
-    return title, album, artist, genres
+        artist_genres.extend(r_artist_genres)
+    return title, album, artist, genres, artist_genres
+
+
+def fields(track: Any) -> Tuple[str, str, str, List[str]]:
+    """(title, album, artist, genres) from any track dict or object"""
+    return fields_full(track)[:4]
 
 
 # ── detection (pure) ────────────────────────────────────────────────────────
 
-def title_says_holiday(*titles: Any) -> bool:
-    return any(_TITLE_RE.search(str(t or "")) for t in titles)
+def _without_names(text: Any, *names: Any) -> str:
+    """a title or tag with the credited names, the track's artists and the
+    people whose names hold a holiday word taken out. "The Billie Holiday
+    Collection" is not a holiday collection, and "Song (feat. Mike
+    Christmas)" is not a christmas song"""
+    out = _CREDIT_RE.sub(" ", str(text or ""))
+    for name in (*names, *_NAMES_WITH_HOLIDAY_WORDS):
+        name = str(name or "").strip()
+        if len(name) >= 3:
+            out = re.sub(r"(?<![\w])" + re.escape(name) + r"(?![\w])", " ", out, flags=re.I)
+    return out
 
 
-def genres_say_holiday(genres: Iterable[Any]) -> bool:
-    return any(_GENRE_RE.search(str(g or "")) for g in genres or ())
+def title_says_holiday(*titles: Any, artist: Any = "") -> bool:
+    """a holiday phrase in a track or album title, as a whole phrase. the
+    artist's name never counts (billie holiday, mike christmas)"""
+    for raw in titles:
+        text = _without_names(raw, artist)
+        if _TITLE_RE.search(text) or (text.strip() and _TITLE_ALONE_RE.fullmatch(text)):
+            return True
+    return False
 
 
-def detect(title: Any = "", album: Any = "", genres: Iterable[Any] = ()) -> bool:
-    """the automatic guess: a holiday genre or mood, or a holiday title"""
-    return genres_say_holiday(genres) or title_says_holiday(title, album)
+def _tag_says_holiday(tag: Any, artist: Any = "", title: Any = "") -> bool:
+    raw = str(tag or "").strip()
+    if not raw:
+        return False
+    # a tag that is the artist's name or the song's title says nothing about
+    # the season (last.fm tags billie holiday "billie holiday" and madonna's
+    # holiday "holiday")
+    if norm(raw) in {norm(artist), norm(title)} - {""}:
+        return False
+    text = _without_names(raw, artist).strip()
+    if not text:
+        return False
+    return bool(_GENRE_STRONG_RE.search(text) or _GENRE_WHOLE_RE.fullmatch(text))
+
+
+def genres_say_holiday(genres: Iterable[Any], *, artist: Any = "", title: Any = "") -> bool:
+    """a holiday genre or mood among these tags"""
+    return any(_tag_says_holiday(g, artist, title) for g in genres or ())
+
+
+def detect(title: Any = "", album: Any = "", genres: Iterable[Any] = (), *, artist: Any = "",
+           artist_genres: Iterable[Any] = ()) -> bool:
+    """the automatic guess. genre and mood evidence first: a holiday genre on
+    the track or album, or an artist whose main genre is holiday music. then a
+    holiday phrase in the track or album title. the artist's name never
+    counts, and neither does the bare word "holiday" in a title"""
+    return (genres_say_holiday(genres, artist=artist, title=title)
+            or genres_say_holiday(artist_genres, artist=artist, title=title)
+            or title_says_holiday(title, album, artist=artist))
+
+
+def album_says_holiday(album: Any = "", genres: Iterable[Any] = (), *, artist: Any = "",
+                       artist_genres: Iterable[Any] = ()) -> bool:
+    """the same guess for a whole album: only what is true of every track on
+    it (the album title, the album's genres, the artist's main genre). a
+    track title never decides for its album, so one carol on a pop record
+    doesn't move the record"""
+    return (genres_say_holiday(genres, artist=artist, title=album)
+            or genres_say_holiday(artist_genres, artist=artist, title=album)
+            or title_says_holiday(album, artist=artist))
 
 
 def norm(value: Any) -> str:
@@ -163,7 +255,8 @@ def match_key(scope: str, artist: Any = "", album: Any = "", title: Any = "") ->
 
 
 def resolve(title: Any, album: Any, artist: Any, genres: Iterable[Any],
-            overrides: Optional[Dict[Tuple[str, str], bool]] = None) -> Tuple[bool, str]:
+            overrides: Optional[Dict[Tuple[str, str], bool]] = None,
+            artist_genres: Iterable[Any] = ()) -> Tuple[bool, str]:
     """(is holiday, why). why is 'track', 'album' or 'artist' when a hand
     flag decided, else 'auto'"""
     if overrides:
@@ -171,7 +264,7 @@ def resolve(title: Any, album: Any, artist: Any, genres: Iterable[Any],
             key = match_key(scope, artist, album, title)
             if key.strip("|") and (scope, key) in overrides:
                 return overrides[(scope, key)], scope
-    return detect(title, album, genres), "auto"
+    return detect(title, album, genres, artist=artist, artist_genres=artist_genres), "auto"
 
 
 # ── the season (pure) ───────────────────────────────────────────────────────
@@ -231,8 +324,8 @@ class Policy:
         return self.mode != "never" and self.in_season
 
     def is_holiday(self, track: Any) -> bool:
-        title, album, artist, genres = fields(track)
-        return resolve(title, album, artist, genres, self.overrides)[0]
+        title, album, artist, genres, artist_genres = fields_full(track)
+        return resolve(title, album, artist, genres, self.overrides, artist_genres)[0]
 
     def keep(self, track: Any) -> bool:
         return self.allows_holiday or not self.is_holiday(track)
@@ -432,7 +525,7 @@ def status(database: Any = None, *, artist: Any = "", album: Any = "", title: An
         scope = "artist"
     own = overrides.get((scope, match_key(scope, artist, album, title)))
     return {"holiday": holiday, "decided_by": why, "scope": scope, "override": own,
-            "detected": detect(title, album, genres)}
+            "detected": detect(title, album, genres, artist=artist)}
 
 
 # ── the tag ─────────────────────────────────────────────────────────────────
@@ -540,8 +633,10 @@ def library_tracks(database: Any = None, *, limit: int = 0, use_cache: bool = Tr
     for row in conn_rows + extra:
         if row["id"] in found:
             continue
-        genres = [row.pop("album_genres"), row.pop("artist_genres"), row.pop("mood"), row.pop("style")]
-        if resolve(row["title"], row["album"], row["artist"], genres, overrides)[0]:
+        genres = _genre_list(row.pop("album_genres"))
+        artist_genres = [*_genre_list(row.pop("artist_genres"))[:1],
+                         *_genre_list(row.pop("mood"))[:1], *_genre_list(row.pop("style"))[:1]]
+        if resolve(row["title"], row["album"], row["artist"], genres, overrides, artist_genres)[0]:
             found[row["id"]] = row
     rows = sorted(found.values(), key=lambda r: (norm(r["artist"]), norm(r["album"]), r["id"]))
     with _cache_lock:

@@ -3837,6 +3837,20 @@
     "pending": 2,
     "success": true
   },
+  "/api/secondary-library": {
+    "check": {},
+    "rules": {
+      "active": false,
+      "album_titles": [],
+      "enabled": false,
+      "genres": [],
+      "match_holiday": true,
+      "name": "Holiday",
+      "path": "",
+      "problem": ""
+    },
+    "success": true
+  },
   "/api/server-activity/settings": {
     "ok": true,
     "settings": {

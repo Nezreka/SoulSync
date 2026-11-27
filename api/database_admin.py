@@ -276,6 +276,14 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
         summary += f" | {removed_artists} artists, {removed_albums} albums removed"
     add_activity_item("", "Database Update Complete", summary, "Now")
 
+    # #2332: a secondary library folder whose music the server stopped
+    # returning (its account lost access) gets a warning, once
+    try:
+        from core.library_rules import after_scan as _secondary_after_scan
+        _secondary_after_scan(get_database())
+    except Exception as e:
+        logger.debug("secondary library check after scan failed: %s", e)
+
     # the dashboard's library counts are cached; a scan just changed them
     try:
         from database.music_database import MusicDatabase

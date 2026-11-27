@@ -566,9 +566,32 @@ def on_server_sql(entity_type: str, alias: str, server_source: Optional[str]) ->
     sql = ("(EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
            f"WHERE m.entity_type='{entity_type}' AND m.entity_id={alias}.id "
            f"AND m.server_source=?) OR {alias}.server_source=?")
+    params: list = [server_source, server_source]
     if server_source == STANDALONE_SERVER:
         sql += f" OR {alias}.server_source IS NULL"
-    return sql + ")", [server_source, server_source]
+    # #2332: the secondary library folder (holiday music) is SoulSync's own
+    # library too. a server account that can't see it (navidrome with the
+    # library hidden off season) would otherwise make every album in it look
+    # missing, and the wishlist would download it all again into the main folder
+    secondary = _secondary_prefix()
+    if secondary and entity_type in ("album", "track"):
+        track_match = (f"f2.track_id = {alias}.id" if entity_type == "track" else
+                       f"f2.track_id IN (SELECT t2.id FROM lib2_tracks t2 WHERE t2.album_id = {alias}.id)")
+        sql += (f" OR EXISTS (SELECT 1 FROM lib2_track_files f2 WHERE {track_match}"
+                " AND COALESCE(f2.file_state, 'active') = 'active'"
+                " AND substr(f2.path, 1, ?) = ?)")
+        params += [len(secondary), secondary]
+    return sql + ")", params
+
+
+def _secondary_prefix() -> str:
+    """the secondary library folder as a path prefix, or '' when it's off"""
+    try:
+        from core.library_rules import secondary_root
+        from core.library2.library_roots import normalize_prefix
+        return normalize_prefix(secondary_root())
+    except Exception:  # noqa: BLE001 - no rules, no extra folder
+        return ""
 
 
 __all__ = ["ANY_OWNER", "in_library_sql", "library_index_artist_ids_sql", "owned_in_library_sql", "intent_profile_id", "library_artist_sql", "library_member_sql", "monitored_sql", "on_server_sql", "owned_sql",
