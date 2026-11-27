@@ -250,7 +250,7 @@ const ALBUM_MORE = (
     <code>$discalways</code> and <code>$discnumalways</code> appear on every album. They work in a
     folder as well as the file name: <code>$albumartist/$album/Disc $discnum/$track - $title</code>{' '}
     gives a disc folder only where there is more than one disc, and replaces the automatic disc
-    folder from Multi-disc folder label. <code>$quality</code> is for the file name only.{' '}
+    folder from Multi-disc folder label. <code>$quality</code> works in a folder too, where it is the album&apos;s quality so one album stays in one folder.{' '}
     <code>$disambiguation</code> is the release&apos;s edition note (like &ldquo;baby punk
     version&rdquo;) and <code>$track_disambiguation</code> the recording&apos;s version note (like
     &ldquo;acoustic&rdquo;); each is added on its own when the template leaves it out, unless

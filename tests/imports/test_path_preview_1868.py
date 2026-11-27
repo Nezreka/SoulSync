@@ -54,7 +54,7 @@ def saved(monkeypatch, tmp_path):
     return values
 
 
-def _import_destination(saved, root, album_path, disc_label="Disc"):
+def _import_destination(saved, root, album_path, disc_label="Disc", quality="FLAC 16bit"):
     """what a real import of the preview's multi-disc release writes."""
     saved["file_organization.templates"] = {"album_path": album_path}
     saved["file_organization.disc_label"] = disc_label
@@ -70,7 +70,7 @@ def _import_destination(saved, root, album_path, disc_label="Disc"):
                                    "clean_album": "The Beatles", "clean_artist": "The Beatles",
                                    "artists": [{"name": "The Beatles"}]},
         "source": "deezer", "is_album_download": True,
-        "_audio_quality": "FLAC 16bit",
+        "_audio_quality": quality,
     }
     path, _ = build_final_path_for_track(
         context, {"name": "The Beatles"},
@@ -83,6 +83,8 @@ def _import_destination(saved, root, album_path, disc_label="Disc"):
     ("$albumartist/$albumartist - $album/$track - $title", "Disc"),
     ("$albumartist/[$year] $album $contentrating/$track - $title [$quality]", "CD"),
     ("$albumartist/$album/$disc-$track $title", "Disc"),
+    # hrk_hrk: $quality in a folder
+    ("$albumartist/$year. $album. $quality/$track. $title", "Disc"),
     ("$albumartistletter/$albumartist/$album/Disc $discnum/$track - $title", "CD"),
 ])
 def test_preview_is_what_the_importer_writes(saved, tmp_path, album_path, disc_label):
@@ -207,3 +209,16 @@ def test_auto_disc_folder(template, total, disc, expected):
 
 def test_preview_module_never_imports_the_database():
     assert "music_database" not in open(path_preview.__file__, encoding="utf-8").read()
+
+
+def test_one_album_never_splits_across_quality_folders(saved, tmp_path, monkeypatch):
+    """a 24bit track after a 16bit one of the same album lands in the folder
+    the first one made, and keeps its own quality in the file name."""
+    import core.imports.paths as import_paths
+    monkeypatch.setattr(import_paths, "_ALBUM_QUALITY_PINS", {})
+    template = "$albumartist/$album [$quality]/$track - $title [$quality]"
+    first = _import_destination(saved, tmp_path / "T", template, quality="FLAC 16bit")
+    second = _import_destination(saved, tmp_path / "T", template, quality="FLAC 24bit")
+    assert "[FLAC 16bit]/" in first
+    assert first.rsplit("/", 1)[0] == second.rsplit("/", 1)[0]
+    assert second.endswith("[FLAC 24bit].flac")
