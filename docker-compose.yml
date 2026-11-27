@@ -163,6 +163,21 @@ services:
       # SAB / NZBGet's complete folder to /downloads/usenet (or whatever
       # in-container path you chose). Skip these if your downloader runs
       # outside Docker and writes to a path already mounted above.
+    # GPU video conversion (free, no subscription). the player converts video a
+    # screen can't play; a GPU does it many times faster than the CPU. pick one
+    # block, then check Player settings > Converting > Test GPU.
+    #
+    # Intel (Quick Sync / VA-API) or AMD (VA-API): pass the card in. the image
+    # has the drivers and soulsync joins the card's group by itself.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    #
+    # NVIDIA: install the NVIDIA Container Toolkit on the host, then either
+    # uncomment `runtime: nvidia` or add the GPU to the `deploy:` block below.
+    # runtime: nvidia
+    # environment additions for NVIDIA (append to the list above):
+    #   - NVIDIA_VISIBLE_DEVICES=all
+    #   - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
     extra_hosts:
       # Allow container to reach host services
       - "host.docker.internal:host-gateway"
@@ -188,6 +203,11 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
+          # NVIDIA GPU for video conversion (instead of runtime: nvidia above):
+          # devices:
+          #   - driver: nvidia
+          #     count: 1
+          #     capabilities: [gpu, video, compute, utility]
 
   ## ─── Optional: slskd (Soulseek client) ───────────────────────────────
   ## Uncomment below to run slskd alongside SoulSync.

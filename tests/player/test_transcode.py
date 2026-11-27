@@ -36,31 +36,95 @@ def test_a_smaller_quality_shrinks_and_hdr_is_tonemapped():
 def test_the_command():
     cpu = ("libx264", "CPU", [], "")
     copy = T.command("ffmpeg", "/m/a.mkv", T.plan("h264", "ac3"), 0, cpu)
-    assert copy[copy.index("-c:v") + 1] == "copy"
-    assert copy[copy.index("-c:a") + 1] == "aac" and "-ss" not in copy
-    assert copy[-3:] == ["-f", "mp4", "pipe:1"]
+    assert copy == ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", "/m/a.mkv",
+                    "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn", "-c:v", "copy",
+                    "-c:a", "aac", "-b:a", "192k", "-ac", "2",
+                    "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"]
     seek = T.command("ffmpeg", "/m/a.mkv", T.plan("hevc", "aac", quality="720p"), 754.5, cpu)
-    assert seek[seek.index("-ss") + 1] == "754.500" and seek.index("-ss") < seek.index("-i")
-    assert seek[seek.index("-c:v") + 1] == "libx264"
-    assert "min(720,ih)" in seek[seek.index("-vf") + 1]
-    assert seek[seek.index("-maxrate") + 1] == "4M"
+    assert seek == ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", "754.500",
+                    "-i", "/m/a.mkv", "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
+                    "-vf", "scale=-2:'min(720,ih)',format=yuv420p", "-c:v", "libx264",
+                    "-preset", "veryfast", "-crf", "21", "-profile:v", "high", "-maxrate", "4M", "-bufsize", "4M",
+                    "-g", "48", "-keyint_min", "48", "-sc_threshold", "0", "-c:a", "copy",
+                    "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"]
     hdr = T.plan("hevc", "aac", hdr="HDR10")
-    assert "tonemap" in T.command("ffmpeg", "x", hdr, 0, cpu, can_tonemap=True)[T.command("ffmpeg", "x", hdr, 0, cpu, can_tonemap=True).index("-vf") + 1]
+    mapped = T.command("ffmpeg", "x", hdr, 0, cpu, can_tonemap=True)
+    assert "tonemap" in mapped[mapped.index("-vf") + 1]
     # no zscale in this ffmpeg: it still plays, untouched
     assert "tonemap" not in " ".join(T.command("ffmpeg", "x", hdr, 0, cpu, can_tonemap=False))
-    gpu = ("h264_vaapi", "VA-API GPU", ["-vaapi_device", "/dev/dri/renderD128"], ",format=nv12,hwupload")
+    # an old-style VA-API tuple gets the backend's own device setup and the GPU scaler
+    gpu = ("h264_vaapi", "VA-API GPU", ["-vaapi_device", "/dev/dri/renderD129"], ",format=nv12,hwupload")
     vaapi = T.command("ffmpeg", "x", T.plan("hevc", "aac"), 0, gpu)
-    assert vaapi.index("-vaapi_device") < vaapi.index("-i")
-    assert vaapi[vaapi.index("-vf") + 1].endswith(",hwupload")
+    assert vaapi[:vaapi.index("-i")] == [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+        "-init_hw_device", "vaapi=va:/dev/dri/renderD129", "-filter_hw_device", "va",
+        "-hwaccel", "vaapi", "-hwaccel_device", "va", "-hwaccel_output_format", "vaapi"]
+    assert vaapi[vaapi.index("-vf") + 1] == "scale_vaapi=w=-2:h='min(1080,ih)':format=nv12"
 
 
 def test_the_first_working_encoder_wins_and_cpu_is_the_floor(monkeypatch):
-    monkeypatch.setattr(T, "_encoder_checked", False)
-    monkeypatch.setattr(T, "_works", lambda ff, name, pre, tail: name == "h264_qsv")
+    from core.player import hwaccel
+    monkeypatch.setattr(hwaccel, "settings", lambda: {"slots": 3, "gpu": "auto", "device": "auto"})
+    monkeypatch.setattr(hwaccel.sys, "platform", "linux")
+    monkeypatch.setattr(hwaccel, "render_devices", lambda: ["/dev/dri/renderD128"])
+    hwaccel.forget()
+    monkeypatch.setattr(hwaccel, "try_encode", lambda ff, enc: (enc.key == "qsv", "no"))
     assert T.encoder("ffmpeg")[0] == "h264_qsv"
-    monkeypatch.setattr(T, "_encoder_checked", False)
-    monkeypatch.setattr(T, "_works", lambda *a: False)
+    hwaccel.forget()
+    monkeypatch.setattr(hwaccel, "try_encode", lambda ff, enc: (False, "no device"))
     assert T.encoder("ffmpeg")[0] == "libx264"
+    hwaccel.forget()
+
+
+# ── the plan: 10-bit h264 and a bitrate ceiling on copies ───────────────
+
+def test_a_copy_over_the_quality_bitrate_is_converted_down_to_it():
+    big = {"bitrate_kbps": 30_000}
+    p = T.plan("h264", "aac", quality="1080p", height=1080, codec_facts=big)
+    assert p.copy_video is False
+    assert p.reasons == ["H264 video to H.264 at 1080p (the source's 30 Mbps is over 8 Mbps)"]
+    # under the ceiling: copied as before
+    assert T.plan("h264", "aac", quality="1080p", height=1080, codec_facts={"bitrate_kbps": 6_000}).copy_video
+    # original has no ceiling
+    assert T.plan("h264", "aac", quality="original", height=1080, codec_facts=big).copy_video
+    # a 720p source at 720p (no shrink) still gets the 4M ceiling
+    assert not T.plan("h264", "aac", quality="720p", height=720, codec_facts={"bitrate_kbps": 9_000}).copy_video
+    # and the conversion it gets is capped
+    cmd = T.command("ffmpeg", "x", p, 0)
+    assert cmd[cmd.index("-maxrate") + 1] == "8M"
+
+
+def test_h264_only_a_pc_decodes_is_converted():
+    ten = T.plan("h264", "aac", codec_facts={"bit_depth": 10})
+    assert ten.copy_video is False and ten.reasons == ["10-bit H.264 to 8-bit H.264"]
+    assert ten.src_bit_depth == 10
+    # the profile alone says so when the depth isn't known
+    assert not T.plan("h264", "aac", codec_facts={"profile": "High 10"}).copy_video
+    assert T.plan("h264", "aac", codec_facts={"profile": "High 4:4:4 Predictive"}).reasons == [
+        "4:4:4 H.264 to 4:2:0 H.264"]
+    assert T.plan("h264", "aac", codec_facts={"pix_fmt": "yuv422p"}).reasons == ["4:2:2 H.264 to 4:2:0 H.264"]
+    # 8-bit high profile plays
+    assert T.plan("h264", "aac", codec_facts={"bit_depth": 8, "profile": "High"}).copy_video
+    # hevc 10-bit isn't h264's business: the codec table decides
+    assert T.plan("hevc", "aac", codec_facts={"bit_depth": 10}).reasons == ["HEVC video to H.264"]
+
+
+def test_a_chromecast_plan_copies_what_it_plays():
+    cast = ({"h264"}, {"aac", "mp3"})
+    ok = T.plan("h264", "aac", quality="cast", height=1080, copyable=cast)
+    assert ok.needed is False
+    vp9 = T.plan("vp9", "opus", quality="cast", height=1080, copyable=cast)
+    assert (vp9.copy_video, vp9.copy_audio) == (False, False)
+    # 4k h264 comes down to 1080p, HDR is tone mapped
+    uhd = T.plan("hevc", "eac3", quality="cast", height=2160, hdr="HDR10", copyable=cast)
+    assert uhd.tonemap and uhd.reasons[0] == "HEVC video to H.264 at 1080p"
+    assert T.plan("h264", "aac", quality="cast", height=2160, copyable=cast).copy_video is False
+    # a cast of a file with no height on record copies it; a picked quality still shrinks
+    assert T.plan("h264", "aac", quality="cast", height=None, copyable=cast).copy_video
+    assert not T.plan("h264", "aac", quality="720p", height=None).copy_video
+    # hi10p on a chromecast: converted
+    assert not T.plan("h264", "aac", quality="cast", height=1080, copyable=cast,
+                      codec_facts={"bit_depth": 10}).copy_video
 
 
 class FakeProc:
@@ -160,7 +224,7 @@ def test_playable_offers_the_converted_stream_only_when_needed(client):
 
 def test_transcode_streams_and_says_when_it_is_full(client, monkeypatch):
     seen = []
-    monkeypatch.setattr(T, "stream", lambda cmd, owner=None: seen.append(cmd) or iter([b"mp4"]))
+    monkeypatch.setattr(T, "stream", lambda job, owner=None: seen.append(job.cmd) or iter([b"mp4"]))
     res = client.get("/api/player/transcode/movie/ac3?t=90&q=original")
     assert res.status_code == 200 and res.data == b"mp4" and res.mimetype == "video/mp4"
     assert seen[0][seen[0].index("-ss") + 1] == "90.000"
@@ -289,3 +353,113 @@ def test_a_stopped_screen_item_is_not_served_for_a_while(client, monkeypatch):
     finally:
         presence._sessions.clear()
         presence._stops.clear()
+
+
+# ── a GPU that fails before the first byte: the CPU's turn ──────────────
+
+class DeadProc(FakeProc):
+    """a GPU ffmpeg that wrote nothing and exited with an error"""
+
+    def __init__(self):
+        super().__init__([])
+        self.returncode = 1
+
+
+def _gpu_job(cmd=("gpu",), hw_decode=None):
+    from core.player import hwaccel
+    return T.Job(cmd=list(cmd), enc=hwaccel.make("nvenc"), hw_decode=hw_decode, cpu_cmd=["cpu"], ffmpeg="ffmpeg")
+
+
+def test_a_gpu_job_that_dies_first_runs_again_on_the_cpu(monkeypatch):
+    from core.player import hwaccel
+    started, marked = [], []
+    monkeypatch.setattr(T, "_slots", __import__("threading").BoundedSemaphore(1))
+    monkeypatch.setattr(T, "_owners", {})
+
+    def popen(argv, **k):
+        started.append(argv[0])
+        return DeadProc() if argv[0] == "gpu" else FakeProc([b"cpu-bytes"])
+
+    monkeypatch.setattr(T.subprocess, "Popen", popen)
+    monkeypatch.setattr(hwaccel, "mark_failed",
+                        lambda ff, enc, dec, reason, tester=None: marked.append((enc.key, dec)) or "NVIDIA GPU fell over")
+    run = T.stream(_gpu_job(hw_decode=("h264", 10)), owner="1:tv")
+    assert T.running("1:tv") == {"encoder": "NVIDIA GPU", "hw_decode": True, "fell_back": None}
+    assert b"".join(run) == b"cpu-bytes"
+    assert started == ["gpu", "cpu"] and marked == [("nvenc", ("h264", 10))]
+    # the slot it held is free again, once
+    T.stream(["x"]).close()
+
+
+def test_the_cpu_retry_shows_in_server_activity(monkeypatch):
+    from core.player import hwaccel
+    monkeypatch.setattr(T, "_slots", __import__("threading").BoundedSemaphore(1))
+    monkeypatch.setattr(T, "_owners", {})
+    monkeypatch.setattr(T.subprocess, "Popen",
+                        lambda argv, **k: DeadProc() if argv[0] == "gpu" else FakeProc([b"a", b"b"]))
+    monkeypatch.setattr(hwaccel, "mark_failed", lambda *a, **k: "NVIDIA GPU stopped working")
+    run = T.stream(_gpu_job(), owner="1:tv")
+    assert next(run) == b"ab"
+    assert T.running("1:tv") == {"encoder": "CPU", "hw_decode": False, "fell_back": "NVIDIA GPU stopped working"}
+    from core.server_activity import soulsync as A
+    got = A._transcoder({"transcode": {"video": "h264", "audio": "copy", "encoder": "NVIDIA GPU"}},
+                        "transcode", "1:tv")
+    assert got["hw"] is False and got["fell_back"] == "NVIDIA GPU stopped working"
+    run.close()
+
+
+def test_a_file_that_fails_on_the_cpu_too_is_not_blamed_on_the_gpu(monkeypatch):
+    from core.player import hwaccel
+    monkeypatch.setattr(T, "_slots", __import__("threading").BoundedSemaphore(1))
+    monkeypatch.setattr(T, "_owners", {})
+    started = []
+    monkeypatch.setattr(T.subprocess, "Popen", lambda argv, **k: started.append(argv[0]) or DeadProc())
+    monkeypatch.setattr(hwaccel, "mark_failed", lambda *a, **k: pytest.fail("the GPU isn't to blame"))
+    assert b"".join(T.stream(_gpu_job())) == b""
+    assert started == ["gpu", "cpu"]
+
+
+def test_no_retry_once_bytes_went_out_or_on_the_cpu(monkeypatch):
+    from core.player import hwaccel
+    monkeypatch.setattr(T, "_slots", __import__("threading").BoundedSemaphore(2))
+    monkeypatch.setattr(T, "_owners", {})
+    monkeypatch.setattr(hwaccel, "mark_failed", lambda *a, **k: pytest.fail("no retry expected"))
+    big = b"x" * T.PRIME_BYTES
+
+    class LateDeath(FakeProc):
+        def __init__(self):
+            super().__init__([big])
+            self.returncode = 1
+
+    monkeypatch.setattr(T.subprocess, "Popen", lambda argv, **k: LateDeath())
+    assert b"".join(T.stream(_gpu_job())) == big
+    # a CPU job that fails just ends
+    monkeypatch.setattr(T.subprocess, "Popen", lambda argv, **k: DeadProc())
+    assert b"".join(T.stream(T.Job(cmd=["cpu"]))) == b""
+
+
+def test_the_admin_slots_setting_is_the_limit(monkeypatch):
+    from core.player import hwaccel
+    monkeypatch.setattr(T, "_slots", T._Slots())
+    monkeypatch.setattr(T, "_owners", {})
+    monkeypatch.setattr(hwaccel, "settings", lambda: {"slots": 1, "gpu": "auto", "device": "auto"})
+    monkeypatch.setattr(T.subprocess, "Popen", lambda *a, **k: FakeProc([b"ab"]))
+    first = T.stream(["ffmpeg"])
+    with pytest.raises(T.Busy):
+        T.stream(["ffmpeg"])
+    monkeypatch.setattr(hwaccel, "settings", lambda: {"slots": 2, "gpu": "auto", "device": "auto"})
+    T.stream(["ffmpeg"]).close()  # raised without a restart
+    first.close()
+    assert T._slots.in_use == 0
+
+
+def test_build_keeps_a_cpu_twin_only_for_gpu_jobs():
+    from core.player import hwaccel
+    hevc = T.plan("hevc", "aac", quality="720p")
+    job = T.build("ffmpeg", "x.mkv", hevc, 30, hwaccel.make("nvenc"))
+    assert job.hw_decode == ("hevc", 8) and job.label == "NVIDIA GPU"
+    assert job.cpu_cmd == T.command("ffmpeg", "x.mkv", hevc, 30)
+    assert "-hwaccel" not in job.cpu_cmd
+    # a copied picture has nothing to fall back from
+    assert T.build("ffmpeg", "x", T.plan("h264", "ac3"), 0, hwaccel.make("nvenc")).cpu_cmd is None
+    assert T.build("ffmpeg", "x", hevc, 0).cpu_cmd is None

@@ -228,7 +228,7 @@ Every page is there: **Home, Movies, TV, Music, YouTube, Audiobooks, Podcasts, H
 
 ## Watching
 
-- **Plays anything**: files a browser can't play are converted on the fly by the server (on the GPU when it works), with seeking.
+- **Plays anything**: files a browser can't play are converted on the fly by the server, with seeking. Free hardware conversion (NVIDIA, Intel Quick Sync, VA-API for Intel and AMD, Apple, AMD AMF, Raspberry Pi): decoded, scaled and encoded on the GPU, and a GPU that fails hands the stream to the CPU before you notice. Only what has to change is converted, and a picked quality caps copied video too.
 - **Chapters and skip intro**: a file's own chapter marks show in the chapter menu, and a chapter named intro, recap or credits gets a skip button. Nothing is guessed.
 - **Chapter pictures**: every movie and episode with chapters gets a picture per chapter, made in the background while nobody's watching. Never a black frame or a fade: a few moments are tried and the sharpest well-lit one wins. They show in the player's chapter strip, over the seek bar as you scrub, and in a Chapters row on the detail page that plays from any chapter. Kept in the image cache, never beside your files; switch it off per library.
 - **Skip intro, recap and credits**: SoulSync finds intros by matching a season's episodes (one new episode works, it uses the season before), credits by the end song and the picture (movies too, with a hint when a scene follows them), and recaps if you want. It also reads Plex's and Jellyfin's markers, Kodi `.edl` files and chapter names, and can save its own as `.edl` beside each video. Each profile picks ask, skip automatically or never for each, and the next episode can count down from the credits. Admins can adjust or remove any marker from the title's page.
@@ -949,6 +949,16 @@ The image runs as a non-root user with `PUID` / `PGID` / `UMASK` support, and bu
 | **Snapshot** | `ghcr.io/nezreka/soulsync:dev-YYYYMMDD-<sha>` | An exact dev build to pin to |
 
 To switch, change `image:` in `docker-compose.yml`, then `docker compose pull && docker compose up -d`.
+
+### GPU video conversion
+
+The player converts video a screen can't play as it streams, on a GPU when there is one. No subscription. In Docker:
+
+- **Intel or AMD**: add `devices: - /dev/dri:/dev/dri` to the soulsync service. The image ships the free VA-API and Quick Sync drivers and joins the card's group on its own (any host gid), still running as your `PUID`.
+- **NVIDIA**: install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) on the host, then add `runtime: nvidia` with `NVIDIA_DRIVER_CAPABILITIES=compute,video,utility`, or the `deploy` GPU block. Both are in `docker-compose.yml`, commented.
+- Older Intel chips (before Ice Lake) may need Debian's non-free driver to encode: build with `--build-arg INTEL_NONFREE=1`.
+
+Then open the player's **Settings → Converting** and press **Test GPU**. It says what it found, and why anything didn't work. `docker exec soulsync-webui vainfo` lists what an Intel or AMD card offers.
 
 ### Unraid
 

@@ -7,6 +7,7 @@ import type { ReactNode } from 'react';
 
 import {
   BellIcon,
+  CamcorderIcon,
   DownloadIcon,
   GearIcon,
   GridIcon,
@@ -29,6 +30,7 @@ export type SectionId =
   | 'notifications'
   | 'setup'
   | 'downloads'
+  | 'converting'
   | 'guide'
   | 'issues';
 
@@ -57,6 +59,7 @@ export const SECTION_IDS: readonly SectionId[] = [
   'notifications',
   'setup',
   'downloads',
+  'converting',
   'guide',
   'issues',
 ];
@@ -158,6 +161,16 @@ const SERVER: SectionInfo[] = [
     scope: 'Admin',
   },
   {
+    id: 'converting',
+    group: 'server',
+    icon: <CamcorderIcon />,
+    title: 'Converting',
+    inside: 'GPU, how many at once',
+    description:
+      "Video a screen can't play is converted as it streams. Pick the GPU, how many run at once, and test it.",
+    scope: 'Admin',
+  },
+  {
     id: 'guide',
     group: 'server',
     icon: <GuideIcon />,
@@ -181,7 +194,7 @@ const SERVER: SectionInfo[] = [
 
 /** a member's own reports sit with their things; the queue is the admin's */
 const MY_REPORTS: SectionInfo = {
-  ...SERVER[3],
+  ...SERVER.find((x) => x.id === 'issues')!,
   group: 'you',
   inside: 'What you flagged',
   description:

@@ -529,11 +529,16 @@ Refusals are `{error, message}`: `403 restricted` for something over the profile
 
 #### Converting video for a browser
 
-A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is converted by ffmpeg as it streams. Only what has to change is converted: a stream a browser already plays is copied untouched, so a common H.264 file with AC3 sound only has its sound converted. Video is converted to H.264 (on the GPU when there's one that works: NVIDIA, Intel Quick Sync, VA-API or Apple; the CPU otherwise), at 1080p at most, and HDR is tone mapped so it doesn't come out washed out. Sound becomes stereo AAC.
+A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is converted by ffmpeg as it streams. Only what has to change is converted: a stream a browser already plays is copied untouched, so a common H.264 file with AC3 sound only has its sound converted. Video is converted to 8-bit H.264 at 1080p at most, and HDR is tone mapped so it doesn't come out washed out. Sound becomes stereo AAC. A copied picture is converted after all when it's 10-bit or 4:2:2 H.264 (browsers, phones and Chromecasts can't decode it), or when its bitrate is over the picked quality's ceiling (1080p 8 Mbps, 720p 4 Mbps, 480p 1.5 Mbps).
+
+The GPU is the admin's choice (auto, off, or one of NVIDIA, Intel Quick Sync, VA-API, Apple VideoToolbox, AMD AMF, Raspberry Pi), checked with a real test encode. On a GPU the file is decoded and scaled on the card too, where it can be. A GPU job that fails before its first bytes runs again on the CPU in the same stream, and the GPU is tested again and marked off (with ffmpeg's reason) when that fails too.
 
 - `playable` for a movie, episode or YouTube video adds, when it's converted, `transcode: {video, audio, reasons, quality, tonemap, encoder}` (`video` and `audio` are `copy` or what they become; `reasons` reads like "AC3 audio to AAC"), and `url` points at the converted stream. A file that may play (`verdict: maybe`) keeps its direct `url` and adds `fallback_url`, the converted stream to switch to if the browser can't play it. `?q=1080p|720p|480p` asks for a smaller picture, converted. `transcode_unavailable` says why a file that needs converting can't be (no ffmpeg).
 - `GET /api/player/transcode/<item_type>/<item_id>?q=&part=&t=`: the converted stream, fragmented MP4, from `t` seconds. It can't seek by `Range`: to seek, start a new one at the new `t`. A few run at once; past that it answers `503 busy`.
 - `GET /api/player/transcode/<item_type>/<item_id>/start?t=`: where a stream asked to start at `t` really starts, `{start, seek}`. Copied video can only start at a keyframe, so request `t=seek` and count the stream's time from `start`.
+
+- `GET /api/player/converting/settings` (admin): `{slots, gpu, device, using: {key, label, device}, tried: [{key, label, works, reason}], broken: [{key, label, reason}], decode_cpu: [{key, codec, bit_depth, reason}], last_fallback, devices, in_use}`. `PUT` the same path with any of `slots` (1-16), `gpu` (`auto`, `off`, `nvenc`, `qsv`, `vaapi`, `videotoolbox`, `amf`, `v4l2m2m`) and `device` (`auto` or a `/dev/dri/renderD*` path); the GPU is found again at once.
+- `POST /api/player/converting/test` (admin): finds the GPU again (clearing anything marked off) and runs a real 1 second 1080p clip through it, decoded, scaled to 720p and encoded. The same answer as the GET, plus `test: {ok, label, hw_decode, seconds, reason, note}`.
 
 #### Downloads
 
