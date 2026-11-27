@@ -104,6 +104,24 @@ def save_quality_profile():
         logger.error(f"Error saving quality profile: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@bp.route('/api/quality-profile/album-upgrades', methods=['GET'])
+@requires("music.access")
+def list_album_upgrades():
+    """What the whole-album upgrades did lately: upgraded, or left as they
+    were and why."""
+    try:
+        from core.library2.album_upgrade import recent_attempts
+        from database.music_database import MusicDatabase
+        try:
+            limit = max(1, min(int(request.args.get('limit', 50)), 200))
+        except (TypeError, ValueError):
+            limit = 50
+        return jsonify({"success": True, "attempts": recent_attempts(MusicDatabase(), limit=limit)})
+    except Exception as e:
+        logger.error(f"Error listing album upgrades: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/quality-profile/presets', methods=['GET'])
 @requires("music.access")
 def get_quality_presets():
@@ -146,6 +164,7 @@ def apply_quality_preset(preset_name):
         preset['upgrade_cutoff_index'] = current.get('upgrade_cutoff_index', 0)
         # Quick Sets change quality targets, preserving profile import scope.
         preset['release_import_mode'] = normalize_release_import_mode(current.get('release_import_mode'))
+        preset['upgrade_whole_albums'] = bool(current.get('upgrade_whole_albums'))
         success = db.set_quality_profile(preset)
 
         if success:
@@ -182,6 +201,7 @@ def reset_quality_preset(preset_name):
         preset['upgrade_cutoff_index'] = current.get('upgrade_cutoff_index', 0)
         # Quick Sets change quality targets, preserving profile import scope.
         preset['release_import_mode'] = normalize_release_import_mode(current.get('release_import_mode'))
+        preset['upgrade_whole_albums'] = bool(current.get('upgrade_whole_albums'))
         success = db.set_quality_profile(preset)
 
         if success:

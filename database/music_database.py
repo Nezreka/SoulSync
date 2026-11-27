@@ -15991,6 +15991,7 @@ class MusicDatabase:
             "rank_candidates_by_quality": bool(row["rank_candidates_by_quality"]),
             "ranked_targets": ranked_targets,
             "release_import_mode": normalize_release_import_mode(_row_value(row, "release_import_mode")),
+            "upgrade_whole_albums": bool(_row_value(row, "upgrade_whole_albums")),
             "acoustid_required": bool(row["acoustid_required"]),
             "downsample_enabled": bool(row["downsample_enabled"]),
             "deep_audio_verify": bool(row["deep_audio_verify"]),
@@ -16034,6 +16035,9 @@ class MusicDatabase:
             "lossy_copy_bitrate": str(profile.get("lossy_copy_bitrate") or "320"),
             "lossy_copy_delete_original": 1 if profile.get("lossy_copy_delete_original") else 0,
             "release_import_mode": normalize_release_import_mode(profile.get("release_import_mode")),
+            # None when the caller never named it: an update keeps what the row has
+            "upgrade_whole_albums": ((1 if profile.get("upgrade_whole_albums") else 0)
+                                     if "upgrade_whole_albums" in profile else None),
         }
 
     # SQLite has no native boolean type — these columns are stored as 0/1.
@@ -16047,6 +16051,7 @@ class MusicDatabase:
         "is_default", "fallback_enabled", "rank_candidates_by_quality",
         "acoustid_required", "downsample_enabled", "deep_audio_verify",
         "replace_lower_quality", "lossy_copy_enabled", "lossy_copy_delete_original",
+        "upgrade_whole_albums",
     )
 
     def list_quality_profiles(self) -> list:
@@ -16086,12 +16091,14 @@ class MusicDatabase:
                         search_mode, rank_candidates_by_quality, upgrade_policy,
                         upgrade_cutoff_index, acoustid_required, downsample_enabled, deep_audio_verify,
                         replace_lower_quality, lossy_copy_enabled, lossy_copy_codec,
-                        lossy_copy_bitrate, lossy_copy_delete_original, release_import_mode, is_default)
+                        lossy_copy_bitrate, lossy_copy_delete_original, release_import_mode,
+                        upgrade_whole_albums, is_default)
                    VALUES (:name, :description, :ranked_targets, :fallback_enabled,
                            :search_mode, :rank_candidates_by_quality, :upgrade_policy,
                            :upgrade_cutoff_index, :acoustid_required, :downsample_enabled, :deep_audio_verify,
                            :replace_lower_quality, :lossy_copy_enabled, :lossy_copy_codec,
-                           :lossy_copy_bitrate, :lossy_copy_delete_original, :release_import_mode, 0)""",
+                           :lossy_copy_bitrate, :lossy_copy_delete_original, :release_import_mode,
+                           COALESCE(:upgrade_whole_albums, 0), 0)""",
                 {"name": name, "description": "Custom profile", **params},
             )
             conn.commit()
@@ -16120,6 +16127,7 @@ class MusicDatabase:
                           lossy_copy_codec=:lossy_copy_codec, lossy_copy_bitrate=:lossy_copy_bitrate,
                           lossy_copy_delete_original=:lossy_copy_delete_original,
                           release_import_mode=:release_import_mode,
+                          upgrade_whole_albums=COALESCE(:upgrade_whole_albums, upgrade_whole_albums),
                           updated_at=CURRENT_TIMESTAMP
                     WHERE id=:profile_id""",
                 {"profile_id": profile_id, **params},
@@ -16605,6 +16613,7 @@ class MusicDatabase:
         "acoustid_required", "downsample_enabled", "deep_audio_verify",
         "replace_lower_quality", "lossy_copy_enabled", "lossy_copy_codec",
         "lossy_copy_bitrate", "lossy_copy_delete_original", "release_import_mode",
+        "upgrade_whole_albums",
     )
 
     def _write_default_quality_profile_row(self, profile: dict) -> None:

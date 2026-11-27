@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS quality_profiles (
     upgrade_policy TEXT NOT NULL DEFAULT 'acceptable', -- 'none'|'acceptable'|'until_cutoff'|'until_top'
     upgrade_cutoff_index INTEGER NOT NULL DEFAULT 0,
     release_import_mode TEXT NOT NULL DEFAULT 'requested_tracks',
+    upgrade_whole_albums INTEGER NOT NULL DEFAULT 0,
     acoustid_required INTEGER NOT NULL DEFAULT 0,
     downsample_enabled INTEGER NOT NULL DEFAULT 0,
     deep_audio_verify INTEGER NOT NULL DEFAULT 0,
@@ -121,6 +122,9 @@ _ADDED_COLUMNS = (
      "ALTER TABLE quality_profiles ADD COLUMN repair_job_id TEXT NOT NULL DEFAULT 'quality_upgrade'"),
     ("quality_profiles", "repair_settings",
      "ALTER TABLE quality_profiles ADD COLUMN repair_settings TEXT NOT NULL DEFAULT '{}'"),
+    # upgrade an album as one release instead of track by track (off by default)
+    ("quality_profiles", "upgrade_whole_albums",
+     "ALTER TABLE quality_profiles ADD COLUMN upgrade_whole_albums INTEGER NOT NULL DEFAULT 0"),
 )
 
 # Columns removed after shipping -- dropped via a PRAGMA-probe ALTER, mirroring
@@ -234,6 +238,10 @@ def ensure_quality_profiles_schema(connection: Any) -> None:
                 logger.debug("column migration %s.%s: %s", table, column, e)
     _seed_quality_profiles(cursor)
     _restore_default_upgrade_policy(cursor)
+    # what each whole-album upgrade did, for the upgrade activity
+    from core.library2.album_upgrade import ATTEMPTS_DDL, ATTEMPTS_INDEX
+    cursor.execute(ATTEMPTS_DDL)
+    cursor.execute(ATTEMPTS_INDEX)
     # Removed-column cleanup for installs that ran an intermediate version.
     for table, column in _DROPPED_COLUMNS:
         cursor.execute(f"PRAGMA table_info({table})")

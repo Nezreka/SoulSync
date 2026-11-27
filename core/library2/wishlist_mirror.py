@@ -254,6 +254,13 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             # Unknown quality must enter the existing probe/upgrade pipeline;
             # silently treating it as satisfied would suppress re-evaluation.
             should_queue = candidate is not False
+            # a profile that upgrades whole albums never fetches one track of
+            # an album it already has: the album upgrade does the whole
+            # release, or nothing (no fallback to single tracks)
+            from core.library2.album_upgrade import upgrades_whole_albums
+            if should_queue and upgrades_whole_albums(profile_info):
+                should_queue = False
+                quality_evaluation = "album_upgrade"
         except Exception as e:  # noqa: BLE001
             logger.debug("quality-profile upgrade check failed (track %s): %s", track_id, e)
             should_queue = False
@@ -478,7 +485,8 @@ def mirror_projected_tracks_wishlist(
 def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
                                 track_ids: Optional[List[int]] = None,
                                 quality_profile: Optional[Dict[str, Any]] = None,
-                                definite_only: bool = False) -> List[int]:
+                                definite_only: bool = False,
+                                whole_albums: Optional[bool] = None) -> List[int]:
     """Wanted tracks with files whose profile permits upgrades -- or, given
     ``track_ids``, exactly those whatever their monitoring (Enhance Quality).
     ``quality_profile`` judges every track against that one profile instead
@@ -486,6 +494,8 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
     ``definite_only`` leaves out the files whose quality could not be read:
     nothing downloaded can be shown to be better than a file that cannot be
     measured, so the unattended pass does not try (#2060).
+    ``whole_albums`` True keeps only tracks whose profile upgrades whole
+    albums, False leaves them out (the per-track passes), None keeps both.
     The per-track upgrade re-check happens in
     ``mirror_tracks_wishlist`` (only genuine candidates queue)."""
     import json
@@ -531,6 +541,7 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
                            {owner_clause(library, column="f.owner_profile_id")})""",
         scope_params,
     ).fetchall()
+    from core.library2.album_upgrade import upgrades_whole_albums
     from core.library2.manual_skips import active_skip_paths
     from core.library2.quality_eval import is_upgrade_policy
     protected = active_skip_paths(
@@ -584,6 +595,8 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
         except (LookupError, ValueError):
             continue
         if not is_upgrade_policy(profile.get("upgrade_policy")):
+            continue
+        if whole_albums is not None and upgrades_whole_albums(profile) != whole_albums:
             continue
         # Same verdict the payload reaches, from the stored quality columns:
         # a file that already meets its cutoff is no candidate (unknown is).

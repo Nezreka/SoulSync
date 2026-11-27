@@ -2123,7 +2123,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2142,7 +2142,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2161,7 +2161,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2180,7 +2180,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2199,7 +2199,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2218,7 +2218,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":false,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":false,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2237,7 +2237,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"none\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"none\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2256,11 +2256,30 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":0,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":0,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
       "asked": "0",
+      "showsEndpoint": "/api/quality-profile/custom"
+    },
+    "#quality-whole-albums": {
+      "sel": "#quality-whole-albums",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/quality-profile/custom/1/update",
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":true,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+          }
+        ]
+      },
+      "asked": true,
       "showsEndpoint": "/api/quality-profile/custom"
     },
     "#quality-search-mode": {
@@ -2275,7 +2294,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"best_quality\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"best_quality\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2294,7 +2313,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":false,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":false,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2313,7 +2332,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":true,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":true,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2332,7 +2351,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":false,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":false,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2351,7 +2370,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"opus\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"opus\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2370,7 +2389,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"320\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"320\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2389,7 +2408,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":true}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":true}"
           }
         ]
       },
@@ -2408,7 +2427,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":true,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":true,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2427,7 +2446,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":false,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":false,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2463,7 +2482,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":false,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":false,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2482,7 +2501,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"album_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"album_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -11090,7 +11109,7 @@
               {
                 "method": "POST",
                 "url": "/api/quality-profile/custom/1/update",
-                "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+                "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
               }
             ]
           }
@@ -11103,7 +11122,7 @@
               {
                 "method": "POST",
                 "url": "/api/quality-profile/custom/1/update",
-                "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+                "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
               }
             ]
           }
@@ -11116,7 +11135,7 @@
               {
                 "method": "POST",
                 "url": "/api/quality-profile/custom/1/update",
-                "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"alac\",\"label\":\"ALAC\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+                "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"alac\",\"label\":\"ALAC\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
               }
             ]
           }
@@ -11334,7 +11353,7 @@
               {
                 "method": "POST",
                 "url": "/api/quality-profile/custom",
-                "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false,\"name\":\"Guard\"}"
+                "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"upgrade_whole_albums\":false,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false,\"name\":\"Guard\"}"
               }
             ]
           }
@@ -12737,6 +12756,13 @@
     "#quality-upgrade-policy \"Selected target or better\"": {
       "label": "Selected target or better",
       "anchor": "quality-upgrade-policy",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#quality-whole-albums-group \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "quality-whole-albums-group",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -14504,6 +14530,12 @@
     "#ppl-screen-people \"Needs a look1\"": {
       "label": "Needs a look1",
       "anchor": "ppl-screen-people",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#ppl-plex-import": {
+      "id": "ppl-plex-import",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"

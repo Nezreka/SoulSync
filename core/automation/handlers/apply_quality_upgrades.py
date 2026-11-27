@@ -4,6 +4,11 @@ The native quality audit files proposals. This action applies current proposals
 for already-wanted tracks in the automation owner's library, whose live profile
 asks to keep upgrading until cutoff. Unmonitored audit subjects stay for review.
 Preserved pre-v2 findings remain actionable for the shared library.
+
+Albums whose profile upgrades whole albums are not applied track by track:
+after the per-track pass, up to ``album_limit`` of them are upgraded as one
+release each (core.library2.album_upgrade), or left as they are with the
+reason in this run's log.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from core.automation.deps import AutomationDeps
 from core.quality.upgrades import until_cutoff_finding_ids
 
 DEFAULT_LIMIT = 100
+DEFAULT_ALBUM_LIMIT = 5
 
 
 def auto_apply_quality_upgrades(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
@@ -24,7 +30,18 @@ def auto_apply_quality_upgrades(config: Dict[str, Any], deps: AutomationDeps) ->
         limit = DEFAULT_LIMIT
 
     owner = int(config.get('_profile_id') or getattr(deps, 'get_current_profile_id', lambda: 1)())
+    albums = _apply_whole_album_upgrades(config, deps, automation_id, owner)
     ids = until_cutoff_finding_ids(deps.get_database(), limit=limit, profile_id=owner)
+    if not ids and albums is not None:
+        upgraded = sum(1 for o in albums if o.upgraded)
+        deps.update_progress(
+            automation_id, status='finished', progress=100, phase='Applied',
+            log_line=(f'Upgraded {upgraded} of {len(albums)} album'
+                      f'{"s" if len(albums) != 1 else ""} as whole releases'),
+            log_type='success' if upgraded else 'info',
+        )
+        return {'status': 'completed', 'applied': 0, 'albums_upgraded': upgraded,
+                'albums_tried': len(albums), '_manages_own_progress': True}
     if not ids:
         deps.update_progress(
             automation_id, status='finished', progress=100, phase='Nothing to apply',
@@ -55,3 +72,48 @@ def auto_apply_quality_upgrades(config: Dict[str, Any], deps: AutomationDeps) ->
     )
     return {'status': 'completed', 'applied': fixed, 'failed': failed,
             '_manages_own_progress': True}
+
+
+def _apply_whole_album_upgrades(config, deps, automation_id, owner):
+    """The whole-album upgrades due for this owner, or None when there were none.
+
+    Each album is its own log line: upgraded, or left as it is and why."""
+    from core.library2 import album_upgrade
+
+    try:
+        album_limit = max(0, int(config.get('album_limit', DEFAULT_ALBUM_LIMIT)))
+    except (TypeError, ValueError):
+        album_limit = DEFAULT_ALBUM_LIMIT
+    if not album_limit:
+        return None
+    database = deps.get_database()
+    try:
+        conn = database._get_connection()
+    except Exception as exc:  # noqa: BLE001 - no library to look at: the per-track pass decides
+        deps.logger.debug('whole-album upgrade lookup skipped: %s', exc)
+        return None
+    try:
+        pending = album_upgrade.pending_album_ids(conn, profile_id=owner, limit=album_limit)
+    except Exception as exc:  # noqa: BLE001 - the per-track pass still runs
+        deps.logger.warning('whole-album upgrade lookup failed: %s', exc)
+        pending = []
+    finally:
+        conn.close()
+    if not pending:
+        return None
+
+    def _say(line):
+        deps.update_progress(automation_id, phase='Upgrading whole albums', log_line=line,
+                             log_type='info')
+
+    def _rescan(_outcome):
+        scanner = getattr(deps, 'web_scan_manager', None)
+        if scanner is not None and hasattr(scanner, 'request_scan'):
+            scanner.request_scan('Whole-album quality upgrade')
+
+    outcomes = album_upgrade.run_album_upgrades(
+        database, profile_id=owner, album_ids=pending, progress=_say, on_upgraded=_rescan)
+    for outcome in outcomes:
+        deps.update_progress(automation_id, log_line=outcome.log_line(),
+                             log_type='success' if outcome.upgraded else 'warning')
+    return outcomes

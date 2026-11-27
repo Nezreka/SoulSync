@@ -26641,6 +26641,14 @@ def start_runtime_services():
             # Recovery must not crash startup — the files are still on disk.
             logger.warning("[Startup] Atomic staging reconciliation failed: %s", _recover_err)
 
+        # a whole-album quality upgrade cut short mid-swap: its old files go
+        # back (or on to deleted files when the library already moved)
+        try:
+            from core.library2.album_upgrade import all_library_roots, recover_interrupted_swaps
+            recover_interrupted_swaps(all_library_roots(get_database()), get_database())
+        except Exception as _album_up_err:
+            logger.warning("[Startup] Album upgrade swap recovery failed: %s", _album_up_err)
+
         # lidarr_download.import_through_lidarr: hand Lidarr the downloads a
         # previous session left waiting for it (a batch that never finished).
         # In the background: it waits on Lidarr's imports.
