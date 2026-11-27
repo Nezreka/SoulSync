@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any, Tuple
 import re
+import unicodedata
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from functools import lru_cache
@@ -318,7 +319,7 @@ class MusicMatchingEngine:
         # Include hyphen in separator replacement for artist names like "AC/DC" vs "AC-DC"
         # Include '&' so "Pig&Dan" becomes "Pig Dan" (matches "Pig & Dan" on Soulseek)
         # Include ':' so "T:T" becomes "T T" (matches "T_T" stored with underscores on Soulseek)
-        text = re.sub(r'[._/&:\-]', ' ', text)
+        text = re.sub(r'[._/\\&:\-]', ' ', text)
 
         # Keep alphanumeric characters, spaces, AND the '$' sign.
         # When CJK was detected upstream, also preserve CJK Unified
@@ -1756,22 +1757,18 @@ class MusicMatchingEngine:
                 # and never returns empty, so this is fail-safe.
                 _wanted_artist = (getattr(spotify_track, 'artists', None)
                                   or [''])[0]
-                _wanted_base = self.base_title_of(spotify_track.name,
-                                                  _wanted_artist)
-                _cand_base = self.base_title_of(candidate_text,
-                                                _wanted_artist,
-                                                from_filename=not is_youtube)
-                if _wanted_base and _cand_base:
-                    _base_sim = SequenceMatcher(
-                        None, _wanted_base, _cand_base).ratio()
-                    if _base_sim < 0.30:
-                        logger.debug(
-                            f"Base-title veto: '{spotify_track.name}' vs "
-                            f"'{slskd_track.filename[:60]}' (base "
-                            f"'{_wanted_base}' vs '{_cand_base}', "
-                            f"sim={_base_sim:.2f})"
-                        )
-                        return 0.0, 'rejected_base_title_mismatch'
+                (_agree, _wanted_base, _cand_base,
+                 _base_sim) = self.base_titles_agree(
+                    spotify_track.name, candidate_text, _wanted_artist,
+                    from_filename=not is_youtube)
+                if not _agree:
+                    logger.debug(
+                        f"Base-title veto: '{spotify_track.name}' vs "
+                        f"'{slskd_track.filename[:60]}' (base "
+                        f"'{_wanted_base}' vs '{_cand_base}', "
+                        f"sim={_base_sim:.2f})"
+                    )
+                    return 0.0, 'rejected_base_title_mismatch'
 
         # Check if Spotify track title contains version indicators
         spotify_title_lower = spotify_track.name.lower()
@@ -1913,7 +1910,7 @@ class MusicMatchingEngine:
     # tempo edits: never a stand-in for the original, nor the original for them
     TEMPO_EDITS = ('slowed', 'sped_up')
 
-    _BRACKET_GROUP = re.compile(r'[\(\[][^\)\]]*[\)\]]')
+    _BRACKET_GROUP = re.compile(r'[\(\[【][^\)\]】]*[\)\]】]')
 
     @staticmethod
     def _preferred_version() -> str:
@@ -1947,12 +1944,13 @@ class MusicMatchingEngine:
         would never meet. Same trap as stripping "99 Luftballons" in the
         library path resolver.
         """
-        stem = str(text or '')
+        # nfkc first: full-width letters, digits and brackets become plain ones
+        stem = unicodedata.normalize('NFKC', str(text or ''))
         if from_filename:
             if '/' in stem or '\\' in stem:
                 stem = re.split(r'[\\/]', stem)[-1]
             stem = re.sub(r'\.[A-Za-z0-9]{2,5}$', '', stem)      # file extension
-        stem = self._BRACKET_GROUP.sub(' ', stem)                # (Extended Mix), [2004], [FLAC]
+        stem = self._BRACKET_GROUP.sub(' ', stem)                # (Extended Mix), [2004], [FLAC], 【MV】
         stem = re.sub(r'\s+', ' ', stem).strip(' -_.')
         if from_filename:
             stem = strip_track_prefix(stem).strip()
@@ -1962,7 +1960,115 @@ class MusicMatchingEngine:
             head, tail = stem.rsplit(' - ', 1)
             if is_trailing_version_qualifier(tail):
                 stem = head
-        return re.sub(r'[^a-z0-9 ]', '', stem.lower()).strip()
+        return self._fold_base(stem)
+
+    @staticmethod
+    def _fold_base(text: str) -> str:
+        """letters and digits of every script, casefolded, accents off.
+
+        this used to keep only a-z and 0-9 (#2329), so 魔法少女A came out as
+        "a" and a cyrillic title lost everything but its english tail. the
+        veto then compared those leftovers and threw out correct files.
+        ascii input folds the same as before: anything that isn't a letter,
+        digit or space is dropped, underscores too.
+        """
+        out = []
+        for ch in unicodedata.normalize('NFC', text or ''):
+            # accents come off latin letters only: й, ё and が keep theirs
+            if not ch.isascii() and 'LATIN' in unicodedata.name(ch, ''):
+                ch = ''.join(c for c in unicodedata.normalize('NFKD', ch)
+                             if unicodedata.category(c) != 'Mn')
+            out.append(ch)
+        t = ''.join(out).casefold()
+        t = re.sub(r'[^\w ]', '', t).replace('_', '')
+        return re.sub(r' {2,}', ' ', t).strip()
+
+    @staticmethod
+    def _bracket_titles(text: str) -> list:
+        """titles given in brackets, like the translation in
+        "Когда душе твоей больно (When Your Soul Hurts)". version words
+        ("Remastered", "Live") are not titles and are left out."""
+        out = []
+        t = unicodedata.normalize('NFKC', str(text or ''))
+        for m in MusicMatchingEngine._BRACKET_GROUP.finditer(t):
+            inner = m.group(0)[1:-1].strip()
+            if not inner or is_trailing_version_qualifier(inner):
+                continue
+            folded = MusicMatchingEngine._fold_base(inner)
+            if len(folded) >= 3:
+                out.append(folded)
+        return out
+
+    @staticmethod
+    def _main_nonlatin_run(base: str) -> str:
+        """the longest stretch of non-latin letters in a folded base title
+        (spaces inside the stretch kept). "魔法少女a" gives "魔法少女",
+        "когда душе твоей больно arknights image song" gives the russian
+        part. empty when the title is all latin."""
+        best = ''
+        cur = []
+        for ch in base or '':
+            if ch.isalpha() and not ch.isascii() and 'LATIN' not in unicodedata.name(ch, ''):
+                cur.append(ch)
+            elif ch == ' ' and cur:
+                cur.append(ch)
+            else:
+                run = ''.join(cur).strip()
+                if len(run) > len(best):
+                    best = run
+                cur = []
+        run = ''.join(cur).strip()
+        if len(run) > len(best):
+            best = run
+        return best
+
+    def base_titles_agree(self, wanted_name: str, candidate_text: str,
+                          artist: str = '', *, from_filename: bool = False,
+                          floor: float = 0.30) -> tuple:
+        """(agree, wanted_base, candidate_base, best_sim) for the base-title
+        veto. agree is False only when the bare titles are nowhere near
+        each other. one side reducing to nothing never disagrees (fail
+        open). a title whose main non-latin part shows up in the candidate
+        agrees (#2329): youtube and soulseek names wrap the song in the
+        artist, feat credits and labels, and that drags the ratio under
+        the floor even when the song is right there. a bracketed alternate
+        title (a translation) counts as a wanted title too."""
+        wanted_base = self.base_title_of(wanted_name, artist)
+        cand_base = self.base_title_of(candidate_text, artist,
+                                       from_filename=from_filename)
+        if not wanted_base or not cand_base:
+            return True, wanted_base, cand_base, 1.0
+        wanted_forms = [wanted_base]
+        # only a title with non-latin letters in it gets the extra forms, so
+        # all-latin titles veto exactly as before: the bare part before a
+        # " - tail" (game, show, album), and a bracketed title in another
+        # script (the translation)
+        own_run = self._main_nonlatin_run(wanted_base)
+        if own_run:
+            nfkc = unicodedata.normalize('NFKC', str(wanted_name or ''))
+            bare = self._BRACKET_GROUP.sub(' ', nfkc)
+            if ' - ' in bare:
+                head_text = bare.split(' - ', 1)[0]
+                if artist:
+                    head_text = strip_artist_prefix(head_text, artist)
+                head = self._fold_base(head_text)
+                if head and head != wanted_base:
+                    wanted_forms.append(head)
+            for alt in self._bracket_titles(wanted_name):
+                if not self._main_nonlatin_run(alt):
+                    wanted_forms.append(alt)
+        best = 0.0
+        for form in wanted_forms:
+            best = max(best, SequenceMatcher(None, form, cand_base).ratio())
+        if best >= floor:
+            return True, wanted_base, cand_base, best
+        # the main non-latin run, spaces ignored, inside the candidate
+        squashed = cand_base.replace(' ', '')
+        for form in wanted_forms:
+            run = self._main_nonlatin_run(form).replace(' ', '')
+            if len(run) >= 2 and run in squashed:
+                return True, wanted_base, cand_base, best
+        return False, wanted_base, cand_base, best
 
     def preferred_match_ids(self, spotify_track, results, preferred: str) -> set:
         """ids of the candidates that really are the asked-for version OF THIS TRACK.
