@@ -1696,3 +1696,171 @@
     width: 100%;
   }
 }
+
+/* ── skip markers (markers-editor.tsx) ─────────────────────────────────── */
+
+.mkPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.epCards .mkPanel {
+  margin-top: 14px;
+}
+
+.mkLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--vlt-card, var(--white-a04));
+}
+
+.mkLine[data-open='true'] {
+  align-items: flex-start;
+}
+
+.mkKind {
+  min-width: 64px;
+  font-weight: 600;
+}
+
+.mkSpan {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.mkNone {
+  color: var(--vlt-muted, var(--white-a50));
+}
+
+.mkNote {
+  font-size: 12px;
+  color: var(--vlt-muted, var(--white-a50));
+}
+
+.mkActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.mkStatus {
+  font-size: 13px;
+  color: var(--vlt-muted, var(--white-a50));
+}
+
+.mkFoot {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--vlt-muted, var(--white-a50));
+}
+
+.mkFile {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--vlt-soft, var(--white-a75));
+}
+
+.mkEditor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-width: min(100%, 320px);
+}
+
+.mkField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mkFieldLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vlt-muted, var(--white-a50));
+}
+
+.mkFieldRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.mkNudge {
+  height: 30px;
+  min-width: 44px;
+  padding: 0 8px;
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--vlt-soft, var(--white-a75));
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.mkNudge:hover {
+  color: var(--text-1);
+  background: var(--white-a08);
+}
+
+.mkTime {
+  width: 112px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--white-a15);
+  border-radius: var(--radius-sm);
+  background: var(--white-a04);
+  color: var(--text-1);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.mkPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mkVideo {
+  width: min(100%, 420px);
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+  background: var(--black-a60);
+}
+
+.mkPreviewNote {
+  font-size: 12px;
+  color: var(--vlt-muted, var(--white-a50));
+}
+
+.mkCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.mkWarn {
+  margin: 0;
+  font-size: 13px;
+  color: var(--warning);
+}
+
+.mkEditorActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

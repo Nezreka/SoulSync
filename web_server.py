@@ -717,6 +717,13 @@ _set_bulk_emit(socketio.emit)
 from core.video.repair.worker import get_video_repair_worker as _get_video_repair
 _get_video_repair().set_emitter(socketio.emit)
 _get_video_repair().start()
+# skip markers (intro / credits / recap): the background job that finds them
+# (core/video/markers/job.py). it waits for scans, syncs and anyone watching
+try:
+    from core.video.markers.job import get_job as _get_marker_job
+    _get_marker_job().start()
+except Exception:   # noqa: BLE001 - no markers is still a working server
+    logger.exception("the skip marker job didn't start")
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}

@@ -154,6 +154,10 @@ describe('settings: more libraries', () => {
       auto_search: true,
       upgrades: true,
       chapter_thumbs: true,
+      // skip markers: found, no recaps, and a new library saves .edl files
+      markers: true,
+      markers_recaps: false,
+      markers_write: true,
     });
   });
 
@@ -183,6 +187,10 @@ describe('settings: more libraries', () => {
       auto_search: true,
       upgrades: true,
       chapter_thumbs: true,
+      // a library from before skip markers doesn't write .edl files until asked
+      markers: true,
+      markers_recaps: false,
+      markers_write: false,
     });
   });
 

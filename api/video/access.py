@@ -311,7 +311,10 @@ ADMIN_ANY = ("/api/video/overlays", "/api/video/import", "/api/video/collections
              # server operations the notification panel shows an admin
              # (#2170): disk, roots and monitor health, and the library
              # manager's bulk job. members never see either
-             "/api/video/health", "/api/video/bulk")
+             "/api/video/health", "/api/video/bulk",
+             # skip markers: setting, removing and finding them is the
+             # admin's; the player reads its markers from /api/player/tracks
+             "/api/video/markers")
 
 # config the Settings page writes but content views read: the writes are admin's
 ADMIN_WRITES = ("/api/video/server", "/api/video/downloads/config",

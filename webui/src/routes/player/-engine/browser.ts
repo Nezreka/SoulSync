@@ -114,6 +114,8 @@ async function tracks(item: PlayItem): Promise<Tracks> {
       ...c,
       thumb: c.thumb ? appURL(c.thumb) : null,
     })),
+    // the skip markers (intro, credits, recap) the server picked
+    markers: body.markers ?? [],
   };
 }
 

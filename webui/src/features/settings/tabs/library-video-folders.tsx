@@ -171,6 +171,9 @@ interface Library {
     auto_search?: boolean;
     upgrades?: boolean;
     chapter_thumbs?: boolean;
+    markers?: boolean;
+    markers_recaps?: boolean;
+    markers_write?: boolean;
   };
 }
 interface Indexer {
@@ -305,6 +308,12 @@ function LibraryRow({
     if (auto) out.auto_search = auto.checked;
     if (upg) out.upgrades = upg.checked;
     if (chap) out.chapter_thumbs = chap.checked;
+    const mk = r.querySelector<HTMLInputElement>('.video-library-markers');
+    const mkRecaps = r.querySelector<HTMLInputElement>('.video-library-markers-recaps');
+    const mkWrite = r.querySelector<HTMLInputElement>('.video-library-markers-write');
+    if (mk) out.markers = mk.checked;
+    if (mkRecaps) out.markers_recaps = mkRecaps.checked;
+    if (mkWrite) out.markers_write = mkWrite.checked;
     // the indexers: what's ticked once the list loaded, else what it had
     out.indexer_ids = r.querySelector('.video-library-idx')
       ? [...r.querySelectorAll<HTMLInputElement>('.video-library-idx:checked')].map((c) =>
@@ -597,6 +606,42 @@ function LibraryRow({
               Chapter pictures
               <small>
                 A picture for every chapter, made in the background while nobody is watching
+                </small>
+            </span>
+          </label>
+          <label className={s.libCheck}>
+            <Switch
+              aria-label="Find intros and credits"
+              className="video-library-markers"
+              defaultChecked={options.markers !== false}
+            />
+            <span>
+              Find intros and credits
+              <small>For the skip buttons. Runs in the background when nobody is watching</small>
+            </span>
+          </label>
+          <label className={s.libCheck}>
+            <Switch
+              aria-label="Find recaps too"
+              className="video-library-markers-recaps"
+              defaultChecked={options.markers_recaps === true}
+            />
+            <span>
+              Find recaps too
+              <small>Listens to each previous episode in full once, so it takes longer</small>
+            </span>
+          </label>
+          <label className={s.libCheck}>
+            <Switch
+              aria-label="Save skip markers beside the videos"
+              className="video-library-markers-write"
+              defaultChecked={options.markers_write ?? Boolean(isNew)}
+            />
+            <span>
+              Save skip markers beside the videos
+              <small>
+                A small .edl file next to each one, so Kodi skips them too. The videos are never
+                changed
               </small>
             </span>
           </label>

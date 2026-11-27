@@ -597,7 +597,7 @@ What's new for this profile (new episodes of shows it watches, well-rated films,
 
 #### Audio and subtitle tracks
 
-- `GET /api/player/tracks/<item_type>/<item_id>?part=`: `{audio, subtitles}`, read from the file (with ffprobe, its header only) and the subtitle files beside it (`Movie.en.srt`, `Movie.es.forced.srt`). An audio track is `{index, language, title, codec, channels, layout, default, plays}`; a subtitle is `{id, language, title, codec, kind, forced, sdh, default, external}`, where `id` is `s<n>` (in the file) or `x<n>` (a file beside it), and `kind` is `text` or `image` (PGS, VobSub).
+- `GET /api/player/tracks/<item_type>/<item_id>?part=`: `{audio, subtitles, chapters, markers}` (skip markers: see Skip markers below), read from the file (with ffprobe, its header only) and the subtitle files beside it (`Movie.en.srt`, `Movie.es.forced.srt`). An audio track is `{index, language, title, codec, channels, layout, default, plays}`; a subtitle is `{id, language, title, codec, kind, forced, sdh, default, external}`, where `id` is `s<n>` (in the file) or `x<n>` (a file beside it), and `kind` is `text` or `image` (PGS, VobSub).
 - `GET /api/player/subtitle/<item_type>/<item_id>?sub=s0`: a text subtitle as WebVTT. Made once and cached: an embedded one means reading the whole file the first time.
 - To play another audio track, ask `playable` (or `transcode`) with `&audio=<index>`; to draw an image subtitle into the picture, `&burn=<n>` (its number among the file's subtitles). Both go through the converter: a browser only plays a file's first audio track.
 
@@ -3370,4 +3370,14 @@ Public playlists by name, from the services that can be searched without anyone'
 
 ### Video chapters
 
-`GET /api/player/tracks/<type>/<id>` also returns `chapters`: the file's own chapter marks as `[{start, end, title}]` in seconds (empty when the file has fewer than two). The web player lists them in its chapter menu and offers Skip intro, Skip recap or Skip credits while a chapter with that name plays.
+`GET /api/player/tracks/<type>/<id>` also returns `chapters`: the file's own chapter marks as `[{start, end, title}]` in seconds (empty when the file has fewer than two). The web player lists them in its chapter menu.
+
+### Skip markers (intro, recap, credits)
+
+`GET /api/player/tracks/<type>/<id>` also returns `markers`: `[{kind, start, end, source, label, confidence?, post_credits?}]`, one per kind (`intro`, `recap`, `credits`, `preview`; `commercial` spans only from an .edl). `source` says who found it, and the best one wins: `user` (set by an admin), `sidecar` (a Kodi `.edl` beside the file), `detected` (SoulSync's own analysis), `plex`, `jellyfin`, then `chapter` (a chapter named Intro, Recap or Credits). `post_credits` on credits is a scene after them, `{start, end}`. `GET /api/player/markers/<type>/<id>` returns only `{markers}`.
+
+Each profile's player settings (`GET/PUT /api/player/settings`) carry `skip_intro`, `skip_credits` and `skip_recap` (`ask`, `auto` or `never`) and `next_at_credits` (up next counts down from the credits).
+
+SoulSync finds the markers itself in the background: intros by matching the audio of a season's episodes (one new episode is matched against the season before), credits by the shared end song and the picture, recaps when a library asks for them. It waits while a scan runs or anyone is watching. Each library has three switches (`markers`, `markers_recaps`, `markers_write` in its options): find them, find recaps too, and save them beside each video as an `.edl` (on for a new library, off for one from before). A user's own `.edl` is read and never overwritten.
+
+Admin routes: `GET /api/video/markers/<movie|episode>/<id>` (every file's markers, each source's answer, what was removed, the analysis state), `PUT` the same path `{kind, start, end, file_id?, scope?: "file"|"season"}` to set one, `DELETE ?kind=&file_id=` to remove one for good, `POST .../reset {kind, file_id?}` to go back to automatic, `POST /api/video/markers/find {show_id, season?} | {movie_id} | {episode_id}` to look now, `GET /api/video/markers/status` and `POST /api/video/markers/settings {enabled?, when?: "idle"|"night"|"always"}`.

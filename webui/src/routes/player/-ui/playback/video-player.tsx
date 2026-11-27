@@ -8,7 +8,8 @@
  *
  * keys while full screen: space or k play/pause, j/l or arrows 10 seconds,
  * up/down volume, f full screen, m mute, n next, e episodes, h chapters,
- * i stats, c subtitles, escape closes what's open, then leaves.
+ * i stats, c subtitles, s skips an intro / recap / credits, escape closes
+ * what's open, then leaves.
  */
 
 import { useQueryClient } from '@tanstack/react-query';
@@ -18,7 +19,7 @@ import type { PlayerState } from '../../-engine/engine';
 
 import { converting } from '../../-engine/describe';
 import { current, nextIndex } from '../../-engine/queue';
-import { clock, skippableAt } from '../../-engine/timeline';
+import { clock } from '../../-engine/timeline';
 import { NextIcon, PauseIcon, PlayIcon } from '../icons';
 import { ReportIssueButton } from '../report-issue';
 import { inPlayer } from '../trailer';
@@ -54,6 +55,7 @@ import {
 } from './party-reactions';
 import s from './playback.module.css';
 import { SeekBar } from './seek-bar';
+import { SkipButton } from './skip-button';
 import { StatsOverlay } from './stats';
 import { SubtitleOverlay } from './subtitles';
 import { ChannelButtons } from './tuner';
@@ -248,7 +250,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
       ) : null}
 
       <PartyReactionsOverlay hudVisible={!idle} />
-      <SkipMark state={state} />
+      <SkipButton state={state} />
       <div className={s.fullTop}>
         <button
           type="button"
@@ -324,6 +326,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
           duration={state.duration}
           buffered={state.buffered}
           chapters={state.chapters}
+          spans={state.tracks?.markers}
           marks={marks}
           onSeek={(t) => engine.seek(t)}
         />
@@ -505,20 +508,5 @@ export function VideoPlayer() {
     ) : (
       <MiniPlayer onOpen={() => setOpen(true)} />
     ),
-  );
-}
-
-/**
- * "Skip intro" (or recap, or credits) while the file's own chapter of that
- * name plays. only a video whose file marks it gets one: nothing is guessed.
- */
-function SkipMark({ state }: { state: PlayerState }) {
-  if (state.kind !== 'video' || state.status === 'error') return null;
-  const skip = skippableAt(state.chapters, state.position, state.duration);
-  if (!skip) return null;
-  return (
-    <button type="button" className={s.skipMark} onClick={() => getEngine().seek(skip.to)} data-nav>
-      {skip.label}
-    </button>
   );
 }

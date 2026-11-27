@@ -1,6 +1,7 @@
 """a video's audio and subtitle tracks for the player, and its subtitles.
 
-    GET /api/player/tracks/<item_type>/<item_id>?part=     {audio, subtitles}
+    GET /api/player/tracks/<item_type>/<item_id>?part=     {audio, subtitles, chapters, markers}
+    GET /api/player/markers/<item_type>/<item_id>?part=    {markers}
     GET /api/player/subtitle/<item_type>/<item_id>?part=&sub=s0|x0
                                                            WebVTT
     GET /api/player/chapters/<item_type>/<item_id>?part=   {chapters}
@@ -76,11 +77,13 @@ def tracks(item_type, item_id):
         return _refused(e)
     found = source_tracks(source)
     if found is None:
-        return jsonify({"success": True, "audio": [], "subtitles": [], "unavailable": "no ffmpeg"})
+        return jsonify({"success": True, "audio": [], "subtitles": [], "unavailable": "no ffmpeg",
+                        "markers": _markers(item_type, source, [])})
     out = K.public(found[0])
+    found_markers = _markers(item_type, source, out.get("chapters") or [])
     if out.get("chapters"):
         out["chapters"] = _with_thumbs(item_type, item_id, source, out["chapters"])
-    return jsonify({"success": True, **out})
+    return jsonify({"success": True, **out, "markers": found_markers})
 
 
 def _thumb_key(item_type, source):
@@ -155,6 +158,40 @@ def chapter_thumb(item_type, item_id, index):
     res.headers["Cache-Control"] = ("private, max-age=31536000, immutable" if request.args.get("v")
                                     else "private, max-age=3600")
     return res
+
+
+def _markers(item_type, source, chapters):
+    """skip markers beside the chapters (core/video/markers): intro,
+    credits, recap, from the best source each. a home video or a youtube
+    clip has only what its chapters say."""
+    from core.video.markers import merge, service
+    duration = source.duration
+    if not duration:
+        duration = (source.extra.get("file") or {}).get("runtime_seconds")
+    if item_type not in ("movie", "episode") or not source.extra.get("file_id"):
+        return [merge.public(m) for m in merge.best(merge.from_chapters(chapters, duration), (), duration)]
+    from api.video import get_video_db
+    return service.player_markers(get_video_db(), source.extra["file_id"], chapters, duration,
+                                  source.path if source.mode == "file" else None)
+
+
+@bp.route("/api/player/markers/<item_type>/<path:item_id>", methods=["GET"])
+@requires_any(*SECTIONS)
+@device_playback
+def markers(item_type, item_id):
+    """only the skip markers, for a client that reads tracks elsewhere. the
+    chapters count when the file was already probed (a play reads them)."""
+    from core.player import tracks as K
+    from core.player.playable import Refused
+    try:
+        source = _resolve(item_type, item_id)
+    except Refused as e:
+        return _refused(e)
+    origin = source.path if source.mode == "file" else source.url
+    key = K.file_key(source.path, ("media-file", source.extra.get("file_id"),
+                                   origin if source.mode == "file" else None))
+    probed = K.cached(key) or {}
+    return jsonify({"success": True, "markers": _markers(item_type, source, probed.get("chapters") or [])})
 
 
 @bp.route("/api/player/subtitle/<item_type>/<path:item_id>", methods=["GET"])

@@ -12,6 +12,7 @@ import { pad2 } from './format';
 import { ReassignDialog } from './library-dialogs';
 import { invalidate, onInvalidate, seasonLibrary } from './library-store';
 import { bridge, type FileActions, FileCards, refreshPage, useFileActions } from './library-tab';
+import { MarkersPanel } from './markers-editor';
 import s from './video-library.module.css';
 
 export function EpisodeFiles({
@@ -78,6 +79,7 @@ export function EpisodeFiles({
   return (
     <div className={s.epCards}>
       <FileCards files={ep.files} actions={actions} label={`${label} file`} />
+      <MarkersPanel kind="episode" itemId={ep.id} canManage={show.can_manage} />
       {dialogs}
       {moving ? (
         <ReassignDialog
