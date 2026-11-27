@@ -343,8 +343,10 @@ def create_code():
     except Exception:  # noqa: BLE001
         logger.debug("connect rendezvous register failed", exc_info=True)
     _audit("device_code_created", detail=note.strip()[:80] or None)
+    _remember_browser_address()
     out = {"success": True, "code": C.display(code), **row}
     out.update(_pairing(C.display(code)))
+    out["connect"] = _connect_view()
     return jsonify(out), 201
 
 
@@ -355,6 +357,36 @@ def cancel_code(code_id):
     if not C.cancel(get_database(), code_id):
         return jsonify({"success": False, "error": "Not found, used or already cancelled"}), 404
     return jsonify({"success": True})
+
+
+def _remember_browser_address():
+    """the admin's browser reached this server at a home ip: in docker that
+    is the host's address, the one a phone can use (#2328)."""
+    try:
+        from urllib.parse import urlsplit
+
+        from core.connect import rendezvous
+
+        rendezvous.remember_lan_hint(urlsplit(request.host_url).hostname, config_manager)
+    except Exception:  # noqa: BLE001
+        logger.debug("could not keep the browser address", exc_info=True)
+
+
+def _connect_view():
+    """whether a phone can find this server with a code right now, and the
+    addresses it will try (#2328)."""
+    from core.connect import rendezvous as RV
+    try:
+        status = RV.pairing_status(get_database, config_manager)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("pairing status failed", exc_info=True)
+        status = {"state": "off", "ready": False, "words": f"Pairing status unavailable: {exc}",
+                  "error": None, "listening": False, "listener_error": None, "tls_port": None}
+    try:
+        targets = RV.app_targets(config_manager)
+    except Exception:  # noqa: BLE001
+        targets = []
+    return {**status, "targets": targets, "upnp": RV.upnp_status(config_manager)}
 
 
 # ── redemption (the app, with its code) ──────────────────────────────────
@@ -431,7 +463,7 @@ def _server_payload():
     conf = configured(config_manager.get)
     return {**public_view(_identity()), "addresses": addrs, **conf, "warnings": warnings(addrs),
             "probe": _probe_view(R.latest(), conf["remote_url"]), "guidance": R.GUIDANCE,
-            "upnp": RV.upnp_status(config_manager)}
+            "upnp": RV.upnp_status(config_manager), "connect": _connect_view()}
 
 
 def _probe_view(probe, remote_url):
@@ -446,6 +478,7 @@ def server_view():
     """this server for Settings > Devices: fingerprint, addresses (local
     first), the saved remote and extra addresses, plain-http warnings, the
     last reachability probe and the guidance for getting in from outside."""
+    _remember_browser_address()
     return jsonify({"success": True, **_server_payload()})
 
 

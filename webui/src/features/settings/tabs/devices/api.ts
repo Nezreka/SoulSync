@@ -102,6 +102,27 @@ export interface Address {
   url: string;
 }
 
+/** where pairing stands (#2328): can a phone find this server right now */
+export interface PairingTarget {
+  ip: string;
+  port: number;
+  /** a home address; the others are for away from home */
+  home: boolean;
+}
+
+export interface PairingStatus {
+  state: 'connected' | 'connecting' | 'setting_up' | 'displaced' | 'off';
+  ready: boolean;
+  words: string;
+  error: string | null;
+  /** the https port the app connects to is open on this machine */
+  listening: boolean;
+  listener_error: string | null;
+  tls_port: number | null;
+  targets: PairingTarget[];
+  upnp?: UpnpStatus;
+}
+
 export interface NewCode {
   id: number;
   code: string;
@@ -113,6 +134,8 @@ export interface NewCode {
   /** what the QR shows: a soulsync://pair link (older servers: missing) */
   qr_text?: string;
   warnings: string[];
+  /** older servers: missing */
+  connect?: PairingStatus;
 }
 
 export const getCodes = (signal?: AbortSignal) =>
@@ -164,6 +187,7 @@ export interface ServerInfo extends ServerIdentity {
   probe: Probe | null;
   guidance: Guidance[];
   upnp?: UpnpStatus;
+  connect?: PairingStatus;
 }
 
 export interface CheckResult {
