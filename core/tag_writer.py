@@ -883,6 +883,11 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
                 'total_tracks', _current.get('total_tracks'), total_tracks, db_data):
             total_tracks = _current.get('total_tracks')
 
+        # #2332: "Holiday" rides along when the setting is on (a no-op off,
+        # and when it is already there)
+        from core.holiday_music import tag_genres
+        genres = tag_genres(genres, {'title': title, 'album': album, 'artist': album_artist or artist})
+
         # Genre: list → comma string
         genre_str = None
         if genres:

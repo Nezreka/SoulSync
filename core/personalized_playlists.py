@@ -583,7 +583,11 @@ class PersonalizedPlaylistsService:
         `max_per_artist`. Stops once `limit` tracks have been accepted.
 
         Returns a new list, already trimmed to at most `limit` items.
+        Holiday songs out of season go first (#2332), before the limit,
+        so the playlist still fills.
         """
+        from core.holiday_music import filter_tracks
+        tracks = filter_tracks(tracks, database=self.database)
         tracks_by_album: Dict[str, int] = {}
         tracks_by_artist: Dict[str, int] = {}
         diverse_tracks: List[Dict] = []

@@ -153,6 +153,30 @@ Both can be synced to your media server with live progress tracking.
 `
         },
         {
+            id: 'disc-holiday',
+            title: 'Holiday Music',
+            lede: 'Christmas songs only when it is the season, in every mix.',
+            body: `
+Christmas songs usually carry everyday genres (pop, soul, jazz), so they used to turn up in genre mixes and daily mixes all year. SoulSync now knows which songs are holiday music and keeps them to their season.
+
+**What counts as holiday music**
+- a holiday genre or mood from your metadata sources: Christmas, Holiday, Xmas, Navidad, Hanukkah
+- a holiday title on the track or album: Jingle Bells, Silent Night, Feliz Navidad, Noël, Hanukkah, "A Charlie Brown Christmas" and so on
+- what you set yourself: an artist, album or track has a **Holiday music** picker (Automatic, On, Off) in its settings or edit form. Your choice wins, a track over its album over its artist, and a rescan or a retag never undoes it
+
+**Settings > Discovery > Holiday music**
+- **In season** (the default): holiday songs play only between two dates you pick, November 15 to January 6 to begin with. In season a **Holiday** mix of the holiday music you own shows up on Discover and in the player
+- **Always**: holiday songs can play in any mix, all year
+- **Never**: they stay out of every mix and radio, and there is no Holiday mix
+
+It covers daily mixes, genre and decade mixes, discovery playlists, recipe mixes, stations, library radio, Last.fm radio, the player's music rows and a music app's shuffle. Radio started from a Christmas song still plays Christmas songs, the Christmas seasonal playlist keeps its songs, and so does a recipe that asks for Christmas.
+
+**For other apps**: turn on **Write a Holiday genre to your files** and holiday music gets a Holiday genre tag (new downloads, Write Tags and retags), so Navidrome, AudioMuse and others can filter it too.
+
+**In the library**: the album list's filter has **Hide holiday** and **Only holiday**.
+`
+        },
+        {
             id: 'disc-timemachine',
             title: 'Time Machine',
             lede: 'Browse your discovery pool by decade, from the 1950s to today.',

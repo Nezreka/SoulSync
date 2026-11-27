@@ -189,6 +189,7 @@ type LibraryFilterSearch = {
   source: string;
   quality: '' | 'upgradable';
   review: '' | 'reviewed' | 'unreviewed';
+  holiday: '' | 'only' | 'hide';
   completion: LibraryV2CompletionFilter;
   missingMin: number | undefined;
   missingMax: number | undefined;
@@ -337,6 +338,7 @@ export function LibraryFilterMenu({ albums = false }: { albums?: boolean }) {
     (search.source ? 1 : 0) +
     (!albums && search.quality === 'upgradable' ? 1 : 0) +
     (search.review ? 1 : 0) +
+    (albums && search.holiday ? 1 : 0) +
     (!albums && search.completion ? 1 : 0) +
     (!albums && (search.missingMin !== undefined || search.missingMax !== undefined) ? 1 : 0) +
     (!albums && (search.pctMin !== undefined || search.pctMax !== undefined) ? 1 : 0) +
@@ -488,6 +490,29 @@ export function LibraryFilterMenu({ albums = false }: { albums?: boolean }) {
               ))}
             </div>
           </section>
+          {albums && (
+            <section>
+              <h4>Holiday music</h4>
+              <div className={extras.segmented} role="group" aria-label="Holiday music">
+                {(
+                  [
+                    ['', 'All'],
+                    ['hide', 'Hide holiday'],
+                    ['only', 'Only holiday'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value || 'all'}
+                    type="button"
+                    aria-pressed={search.holiday === value}
+                    onClick={() => set({ holiday: value })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
           <section>
             <h4>Metadata match</h4>
             <select
@@ -550,6 +575,13 @@ export function LibraryActiveFilters({
       key: 'review',
       label: reviewLabels(albums)[search.review],
       clear: { review: '' },
+    });
+  }
+  if (albums && search.holiday) {
+    chips.push({
+      key: 'holiday',
+      label: search.holiday === 'only' ? 'Only holiday music' : 'No holiday music',
+      clear: { holiday: '' },
     });
   }
   if (!albums && search.completion) {

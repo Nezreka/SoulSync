@@ -194,7 +194,15 @@ def _walk(node: Any, path: List[str], owner=None) -> List[Tuple[Any, Any, Any]]:
     return _walk(child, rest, owner)
 
 
-def hide_blocked(payload: Any, spec: Dict[str, str], blocked: BlockedArtists) -> int:
+def _holiday_path(path: str, kind: str) -> bool:
+    """#2332: a generated track list (a path ending in tracks) also loses
+    holiday songs out of season. album lists and saved items are what you
+    own or asked for, so they stay"""
+    return kind == WORKS and path.split('.')[-1].rstrip('[]') == 'tracks'
+
+
+def hide_blocked(payload: Any, spec: Dict[str, str], blocked: BlockedArtists,
+                 holiday: Any = None) -> int:
     """Filter ``payload`` in place. ``spec`` maps dotted paths (``[]`` marks
     a list to descend into) to ARTISTS / WORKS / NAMES. Returns how many
     entries were removed. Deeper paths run first, so a section's tracks are
@@ -204,7 +212,9 @@ def hide_blocked(payload: Any, spec: Dict[str, str], blocked: BlockedArtists) ->
     rather than rendering as a heading over nothing. An emptied name list
     (a station's "with") is not the station's content, so the station stays,
     and a list that was already empty stays: that isn't the block's doing."""
-    if blocked.is_empty or not isinstance(payload, dict):
+    # holiday: a core.holiday_music.Policy, or None for no holiday check
+    holiday_off = holiday is None or holiday.allows_holiday
+    if not isinstance(payload, dict) or (blocked.is_empty and holiday_off):
         return 0
     removed = 0
     top_level_removed = 0
@@ -219,6 +229,11 @@ def hide_blocked(payload: Any, spec: Dict[str, str], blocked: BlockedArtists) ->
             WORKS: blocked.blocks_work,
             NAMES: blocked.blocks_artist,  # plain names, or {name, id} dicts
         }[kind]
+        if not holiday_off and _holiday_path(path, kind):
+            work_test = test
+
+            def test(item: Any, _blocks=work_test) -> bool:
+                return _blocks(item) or holiday.is_holiday(item)
         emptied = []
         for container, key, owner in _walk(payload, path.split('.')):
             items = container.get(key)
@@ -244,15 +259,17 @@ def hide_blocked(payload: Any, spec: Dict[str, str], blocked: BlockedArtists) ->
     return removed
 
 
-def hide_blocked_in_response(spec: Dict[str, str]):
+def hide_blocked_in_response(spec: Dict[str, str], holiday: bool = True):
     """Decorator for a Flask view that returns jsonify(...): drop blocked
-    artists from the listed paths for the current profile."""
+    artists from the listed paths for the current profile, and holiday songs
+    out of season from its track lists (#2332). holiday=False is for a view
+    that serves holiday music on purpose (the Christmas playlist)."""
     def decorate(view):
         @functools.wraps(view)
         def wrapper(*args, **kwargs):
             response = view(*args, **kwargs)
             try:
-                return _filter_response(response, spec)
+                return _filter_response(response, spec, holiday)
             except Exception as exc:  # noqa: BLE001 - the page matters more
                 logger.warning("blocked-artist filter skipped for %s, serving unfiltered: %s",
                                view.__name__, exc)
@@ -265,7 +282,19 @@ def hide_blocked_in_response(spec: Dict[str, str]):
     return decorate
 
 
-def _filter_response(response, spec):
+def _holiday_policy(spec):
+    if not any(_holiday_path(path, kind) for path, kind in spec.items()):
+        return None
+    try:
+        from core.holiday_music import policy
+        found = policy()
+    except Exception as exc:  # noqa: BLE001 - no policy, no holiday check
+        logger.debug("holiday policy unreadable: %s", exc)
+        return None
+    return None if found.allows_holiday else found
+
+
+def _filter_response(response, spec, holiday=True):
     status = 200
     body = response
     if isinstance(response, tuple):
@@ -277,9 +306,10 @@ def _filter_response(response, spec):
     from database.music_database import get_database
 
     blocked = BlockedArtists.load(get_database(), get_current_profile_id())
-    if blocked.is_empty:
+    season = _holiday_policy(spec) if holiday else None
+    if blocked.is_empty and season is None:
         return response
     payload = body.get_json(silent=True)
-    if hide_blocked(payload, spec, blocked):
+    if hide_blocked(payload, spec, blocked, season):
         body.set_data(json.dumps(payload))
     return response

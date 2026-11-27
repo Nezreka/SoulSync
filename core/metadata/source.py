@@ -1666,6 +1666,15 @@ def _lastfm_artist_genre_fallback(lf_client, artist_name: str, cfg) -> list[str]
     return genres
 
 
+def _with_holiday_genre(genres: list[str], metadata: dict) -> list[str]:
+    """#2332: "Holiday" added when the setting is on and this is holiday
+    music, so Navidrome and AudioMuse can filter it too. off: unchanged"""
+    from core.holiday_music import tag_genres
+    meta = metadata if isinstance(metadata, dict) else {}
+    return tag_genres(list(genres), {"title": meta.get("title"), "album": meta.get("album"),
+                                     "artist": meta.get("album_artist") or meta.get("artist")})
+
+
 def _write_genre_frame(audio_file, genres: list[str], cfg, symbols, source: str = "merged") -> None:
     """Write a genre list to the audio file's genre frame (ID3/TCON, Vorbis GENRE, MP4 ©gen)."""
     if not genres:
@@ -1951,6 +1960,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
                     merged.append(_genre_case(genre))
                 if len(merged) >= 5:
                     break
+            merged = _with_holiday_genre(merged, metadata)
             if merged:
                 _write_genre_frame(audio_file, merged, cfg, symbols)
         elif cfg.get("lastfm.tags.artist_genre_fallback", False):
@@ -1975,6 +1985,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
                         merged_fallback.append(_genre_case(genre))
                     if len(merged_fallback) >= 5:
                         break
+                merged_fallback = _with_holiday_genre(merged_fallback, metadata)
                 if merged_fallback:
                     _write_genre_frame(audio_file, merged_fallback, cfg, symbols, source="fallback")
 

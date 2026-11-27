@@ -1065,6 +1065,16 @@ class ConfigManager:
                 "enabled": True,
                 "poll_interval": 30
             },
+            # #2332 holiday music: when christmas songs may play in mixes,
+            # radio and generated playlists. mode is "season" (only between
+            # season_start and season_end, MM-DD), "always" or "never".
+            # write_tag adds a "Holiday" genre to the files (core/holiday_music.py)
+            "holiday_music": {
+                "mode": "season",
+                "season_start": "11-15",
+                "season_end": "01-06",
+                "write_tag": False,
+            },
             "library": {
                 "music_paths": [],
                 # live folder watching (core/library/folder_watch.py): a change

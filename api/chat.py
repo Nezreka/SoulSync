@@ -1998,12 +1998,23 @@ def create_blueprint() -> Blueprint:
         if not artist and not track and not vibe:
             return jsonify({"query": None, "why": "no seed"})
 
+        # #2332: holiday songs out of season, unless the room is on one
+        try:
+            from core.holiday_music import policy as _holiday_policy
+            _season = _holiday_policy()
+            if _season.allows_holiday or _season.is_holiday({"title": track, "artist": artist}):
+                _season = None
+        except Exception:  # noqa: BLE001 - radio degrades, never breaks the room
+            _season = None
+
         def _fresh(a, t=""):
             """Skip anything the room just heard (either field matching)."""
             al, tl = str(a or "").strip().lower(), str(t or "").strip().lower()
             if al and al in avoid:
                 return False
             if tl and tl in avoid:
+                return False
+            if t and _season is not None and _season.is_holiday({"title": t, "artist": a}):
                 return False
             return bool(al or tl)
 

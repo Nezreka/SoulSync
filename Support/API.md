@@ -207,6 +207,15 @@ After the music library folder moves, these point the library's file records at 
 
 Settings: `library.watch_folders` (default true), `library.watch_poll_minutes` (15), `library.watch_root_modes` (`{folder: mode}`), `library.watch_max_live_folders` (100000). A change reaches open pages as the `library:changed` socket event.
 
+### Holiday music (web UI routes, #2332)
+
+- `GET /api/library/v2/holiday/<artist|album|track>/<id>`: `{holiday, decided_by: "track"|"album"|"artist"|"auto", override: true|false|null, detected, scope, season: {mode, season_start, season_end, write_tag, in_season, allows_holiday, shows_holiday_mix}}`.
+- `POST` the same `{holiday: true|false|null}` (admin): on, off, or automatic (null removes the hand flag). Flags are kept by artist, album and track names, so a rescan or a retag never undoes them.
+- `GET /api/library/v2/holiday/overrides`: every hand flag, newest first.
+- `GET /api/library/v2/albums?holiday=only|hide`: holiday albums only, or none (half or more of an album's owned tracks are holiday music).
+
+Settings: `holiday_music.mode` (`season` default, `always`, `never`), `holiday_music.season_start` (`11-15`), `holiday_music.season_end` (`01-06`), `holiday_music.write_tag` (false). Out of season, every Discover track list, personalized playlist, radio, recipe mix, the player's rows and a Subsonic app's `getRandomSongs` leave holiday songs out; the personalized kind `holiday_mix` is the in-season Holiday mix.
+
 ### Library coverage and folder overrides (web UI routes, admins only)
 
 How much of the media server's music SoulSync can read directly, folder by folder. Each folder is sampled (up to 40 real files, opened and size-checked), never scanned whole.

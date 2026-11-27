@@ -93,8 +93,12 @@ class RadioCollector:
     each tier's fetched rows through :meth:`collect`.
     """
 
-    def __init__(self, limit: int, exclude_ids: Optional[Iterable[Any]] = None):
+    def __init__(self, limit: int, exclude_ids: Optional[Iterable[Any]] = None,
+                 holiday: Any = None):
         self.limit = limit
+        # #2332: a core.holiday_music.Policy. out of season it keeps holiday
+        # songs out of the radio; None lets everything through
+        self._holiday = holiday
         self._collected: List[Dict[str, Any]] = []
         # seen_ids seeds with the exclude set so excluded tracks never collect
         # AND so the placeholders/values used in WHERE ... NOT IN stay in sync.
@@ -143,6 +147,8 @@ class RadioCollector:
         """
         target = min(self.limit, len(self._collected) + cap) if cap else self.limit
         fresh = [dict(r) for r in rows if str(r["id"]) not in self._seen]
+        if self._holiday is not None:
+            fresh = self._holiday.filter(fresh)
         if rank:
             fresh = rank_candidates(fresh)
         for r in fresh:
