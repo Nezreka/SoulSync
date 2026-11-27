@@ -180,7 +180,7 @@ export function PlexImportDialog({
             {load.message}
           </p>
         ) : results ? (
-          <ul className={css.rows} aria-label="Import results">
+          <ul className={`${css.rows} ${css.scrollRows}`} aria-label="Import results">
             {results.map((x) => (
               <li key={x.plex_id} className={css.lrow}>
                 <div className={css.lrowMain}>
@@ -221,7 +221,7 @@ export function PlexImportDialog({
                 Pick everyone new
               </label>
             </div>
-            <ul className={css.rows} aria-label="Plex users">
+            <ul className={`${css.rows} ${css.scrollRows}`} aria-label="Plex users">
               {shown.map((u) => {
                 const linked = u.match === 'linked';
                 const guess = !linked && u.profile;

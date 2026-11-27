@@ -1390,3 +1390,11 @@
     margin-left: 0;
   }
 }
+
+/* a long list in a dialog scrolls on its own, so the search and the
+   import button stay in view (#2323) */
+.scrollRows {
+  max-height: min(52vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
