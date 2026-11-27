@@ -174,6 +174,29 @@ Help warns when SoulSync can read less than half of the media server's music.
 `
         },
         {
+            id: 'lib-secondary',
+            title: 'Secondary Library',
+            lede: 'Holiday music, kids\' music or anything else filed in a folder of its own.',
+            body: `
+Some music belongs in its own media server library: holiday music listeners only see in December, kids' music, a second collection. **Settings → Library → Folders → Music → Secondary library** (off by default) files matching albums in a separate folder instead of the Music Library Folder.
+
+**The rules** (any one is enough):
+- **Holiday music**: an album with a Christmas or holiday genre, a holiday album title (A Very Special Christmas), an artist whose main genre is holiday music, or your **Holiday music** flag on the album or artist. Names never count: Billie Holiday, Madonna's Holiday, Green Day's Holiday
+- **Genre contains**: words split by | or commas, checked against the album's genres and the artist's main genre
+- **Album title matches**: whole words split by | or commas, like \`christmas|xmas\`
+
+**The album decides, never the track.** Only what is true of every track counts, so one carol on a pop record leaves the record where it is, and an album you already have stays where its files are when more of its tracks download. An album is never split across two folders.
+
+**New downloads** keep your naming template: only the folder they land in changes. A profile with a library of its own, Lidarr imports and artists filed as audiobooks keep their own folders.
+
+**Albums you already have**: **Preview** lists the albums in your Music Library Folder that match, and **Move** moves each album's folder to the same place inside the secondary folder (nothing is overwritten), updates SoulSync's paths and asks your media server to rescan. An album whose files sit loose in an artist folder next to other albums is listed as a shared folder and left alone.
+
+**Your media server**: add the secondary folder to it as its own library. Listener accounts can lose access off season. **SoulSync's own media server account must keep access all year** (on Navidrome an admin always sees every library). SoulSync adds the folder to its Additional Music Libraries and counts albums in it as owned from its own files, so the wishlist and watchlist never download them again, even while the server can't see them. After each scan it checks: when the folder has music but the server returned none of it, you get a notification, a banner on the card and a warning in Help.
+
+The folder must be outside the Music Library Folder, or the main library would show the same albums.
+`
+        },
+        {
             id: 'lib-watch',
             title: 'Live Folder Watching',
             lede: 'Music you add, retag, move or delete by hand shows up on its own, one album at a time.',

@@ -858,6 +858,14 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     keywords: 'transfer library folder output music path destination',
   },
   {
+    label: 'Secondary library',
+    tab: 'library',
+    anchor: id('secondary-enabled'),
+    file: 'library-secondary.tsx',
+    hint: 'holiday music in a folder of its own',
+    keywords: 'secondary library holiday christmas xmas kids folder route rules second library navidrome',
+  },
+  {
     label: 'Import folder',
     tab: 'library',
     anchor: id('staging-path'),

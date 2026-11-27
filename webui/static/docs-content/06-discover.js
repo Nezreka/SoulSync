@@ -160,8 +160,8 @@ Both can be synced to your media server with live progress tracking.
 Christmas songs usually carry everyday genres (pop, soul, jazz), so they used to turn up in genre mixes and daily mixes all year. SoulSync now knows which songs are holiday music and keeps them to their season.
 
 **What counts as holiday music**
-- a holiday genre or mood from your metadata sources: Christmas, Holiday, Xmas, Navidad, Hanukkah
-- a holiday title on the track or album: Jingle Bells, Silent Night, Feliz Navidad, Noël, Hanukkah, "A Charlie Brown Christmas" and so on
+- a holiday genre or mood from your metadata sources: Christmas, Holiday, Xmas, Navidad, Hanukkah. A genre that only names someone (Billie Holiday) or is the song's own title doesn't count, and an artist's genres only count when holiday music is their main genre
+- a holiday phrase in the track or album title: Jingle Bells, Silent Night, Feliz Navidad, Noël, Hanukkah, "A Charlie Brown Christmas" and so on. The bare word Holiday never counts (Madonna's and Green Day's Holiday stay everyday songs), and neither does an artist's name: Billie Holiday, Noel Gallagher or someone called Christmas
 - what you set yourself: an artist, album or track has a **Holiday music** picker (Automatic, On, Off) in its settings or edit form. Your choice wins, a track over its album over its artist, and a rescan or a retag never undoes it
 
 **Settings > Discovery > Holiday music**
@@ -174,6 +174,8 @@ It covers daily mixes, genre and decade mixes, discovery playlists, recipe mixes
 **For other apps**: turn on **Write a Holiday genre to your files** and holiday music gets a Holiday genre tag (new downloads, Write Tags and retags), so Navidrome, AudioMuse and others can filter it too.
 
 **In the library**: the album list's filter has **Hide holiday** and **Only holiday**.
+
+**A library of its own**: Settings > Library > Folders > **Secondary library** files holiday albums (or albums by a genre or album title you pick) in a separate folder, so your media server can show it as its own library and hide it from listeners off season. See the Library guide.
 `
         },
         {

@@ -332,7 +332,11 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
         # A routed artist's files belong in the audiobook folder, not the music library.
         from core.audiobook_routing import routed_root_for_context
         from core.imports.paths import lidarr_root_for_context
+        # #2332: an album a secondary library rule matches lands in that folder
+        from core.library_rules import secondary_root_for_context
+        _shared_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.transfer_path', './Transfer'))
         transfer_dir = (routed_root_for_context(context) or lidarr_root_for_context(context)
+                        or (secondary_root_for_context(context) if transfer_dir == _shared_dir else None)
                         or transfer_dir)
 
         expected_final_path = (context or {}).get('_final_processed_path')

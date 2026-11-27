@@ -3372,6 +3372,102 @@
       "asked": "copy",
       "shows": ["playlists.materialize_mode"]
     },
+    "#secondary-enabled": {
+      "sel": "#secondary-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "library": {
+            "secondary_enabled": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["library.secondary_enabled"]
+    },
+    "#secondary-path": {
+      "sel": "#secondary-path",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": null,
+      "saves": null,
+      "disabled": true,
+      "noSave": "NOT REVIEWED"
+    },
+    "#secondary-name": {
+      "sel": "#secondary-name",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "Holiday",
+      "to": "Holiday-guard",
+      "saves": {
+        "settings": {
+          "library": {
+            "secondary_name": "Holiday-guard"
+          }
+        }
+      },
+      "asked": "Holiday-guard",
+      "shows": ["library.secondary_name"]
+    },
+    "#secondary-match-holiday": {
+      "sel": "#secondary-match-holiday",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "library": {
+            "secondary_match_holiday": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["library.secondary_match_holiday"]
+    },
+    "#secondary-genres": {
+      "sel": "#secondary-genres",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "library": {
+            "secondary_genres": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["library.secondary_genres"]
+    },
+    "#secondary-album-titles": {
+      "sel": "#secondary-album-titles",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "library": {
+            "secondary_album_titles": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["library.secondary_album_titles"]
+    },
     "input[type=\"text\"][aria-label=\"Sample folder\"][placeholder=\"/samples or C:\\\\Samples\"]": {
       "sel": "input[type=\"text\"][aria-label=\"Sample folder\"][placeholder=\"/samples or C:\\\\Samples\"]",
       "weak": "context",
@@ -13290,6 +13386,26 @@
       "label": "Add path",
       "anchor": "stg-library-folders-music",
       "count": 2,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#secondary-library \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "secondary-library",
+      "count": 5,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#secondary-library \"Unlock\"": {
+      "label": "Unlock",
+      "anchor": "secondary-library",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#secondary-preview": {
+      "id": "secondary-preview",
+      "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },

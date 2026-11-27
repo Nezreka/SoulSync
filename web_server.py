@@ -4820,9 +4820,17 @@ def handle_settings():
                 except Exception as _cc_err:
                     logger.debug("concert cache clear after settings save failed: %s", _cc_err)
 
-            if 'soulseek' in new_settings or 'active_media_server' in new_settings:
+            if 'soulseek' in new_settings or 'active_media_server' in new_settings or 'library' in new_settings:
                 # the shared folder or the server's own-library support may have
-                # moved: every file's library follows its folder (#1199)
+                # moved: every file's library follows its folder (#1199). the
+                # secondary library folder (#2332) is a shared folder too
+                try:
+                    from core.library_rules import ensure_library_folder as _rules_folder
+                    from core.library_rules import forget_decisions as _rules_forget
+                    _rules_forget()
+                    _rules_folder(config_manager)
+                except Exception as _rules_err:
+                    logger.debug("secondary library decisions not cleared: %s", _rules_err)
                 try:
                     from core.library_scope import library_config_changed
                     library_config_changed()
@@ -24846,6 +24854,8 @@ _cfg_qp(get_database=get_database, add_activity_item=add_activity_item)
 app.register_blueprint(_bp_qp())
 from api.audiobook_routes import create_blueprint as _bp_abr
 app.register_blueprint(_bp_abr())
+from api.secondary_library import create_blueprint as _bp_seclib
+app.register_blueprint(_bp_seclib())
 from api.auto_import import configure as _cfg_ai, create_blueprint as _bp_ai
 def _get_auto_import_worker():
     # the worker handle lives (and is rebound) in api.import_routes

@@ -1,7 +1,7 @@
 {
   "probes": [
     {
-      "match": "^#(download-path|transfer-path|staging-path|music-videos-path|playlists-materialize-path|m3u-entry-base-path|audiobooks-path|podcasts-path|video-download-path|video-import-folder-path|video-movies-path|video-tv-path|video-anime-path|video-youtube-path|video-movies-4k-path|video-tv-4k-path)$",
+      "match": "^#(download-path|transfer-path|staging-path|music-videos-path|playlists-materialize-path|m3u-entry-base-path|audiobooks-path|podcasts-path|secondary-path|video-download-path|video-import-folder-path|video-movies-path|video-tv-path|video-anime-path|video-youtube-path|video-movies-4k-path|video-tv-4k-path)$",
       "before": ["Unlock"],
       "why": "a path field is read-only until its Unlock button is clicked"
     },
