@@ -1408,6 +1408,62 @@ def _catalog_twin_evidence(conn: Any, survivor: Any, duplicate: Any) -> Optional
     return None
 
 
+def _link_alias_named_twins(conn: Any, stats: Dict[str, Any]) -> int:
+    """a row named for one of the names musicbrainz knows an identified artist
+    by, linked to that artist as its alias (#2321).
+
+    98 Degrees sat beside 98\u00b0 as its own artist: a catalogue page with the
+    spelled out name and no musicbrainz id. the identified row lists 98 Degrees
+    among its aliases, and that is the evidence. it is a link, never a fold, so
+    nothing moves and an unlink puts it back. left alone: a row with its own
+    musicbrainz id (it is someone musicbrainz tells apart), an alias two
+    identified artists both claim, ids that say two artists, and a pair a
+    person kept apart."""
+    from core.library2.artist_aliases import AliasLinkError, link_artist_alias
+    from core.library2.artist_merges import kept_apart
+    rows = conn.execute(
+        "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
+        "canonical_artist_id, aliases FROM lib2_artists").fetchall()
+    by_id = {int(row["id"]): row for row in rows}
+    owners: Dict[str, set] = {}
+    for row in rows:
+        if row["canonical_artist_id"] is not None or "musicbrainz" not in _stored_ids(row):
+            continue
+        own = normalize_name(row["name"])
+        try:
+            names = json.loads(row["aliases"] or "[]")
+        except (TypeError, ValueError):
+            continue
+        for alias in names if isinstance(names, list) else []:
+            key = normalize_name(alias) if isinstance(alias, str) else ""
+            if key and key != own:
+                owners.setdefault(key, set()).add(int(row["id"]))
+    linked = 0
+    for row in rows:
+        claimed = owners.get(normalize_name(row["name"]))
+        if not claimed or len(claimed) != 1 or row["canonical_artist_id"] is not None:
+            continue
+        owner = by_id[next(iter(claimed))]
+        mine = _stored_ids(row)
+        if int(owner["id"]) == int(row["id"]) or "musicbrainz" in mine:
+            continue
+        if _provably_different(mine, _stored_ids(owner)):
+            continue
+        if kept_apart(conn, owner["id"], row["id"]) or _reviewed(conn, "artist", owner["id"], row["id"]):
+            continue
+        try:
+            link_artist_alias(conn, row["id"], owner["id"])
+        except AliasLinkError as link_error:
+            logger.info("alias-named artist %s %r: could not link to %s: %s",
+                        row["id"], row["name"], owner["id"], link_error)
+            continue
+        linked += 1
+        logger.info("Linked artist %s %r to %s %r: a musicbrainz alias of it",
+                    row["id"], row["name"], owner["id"], owner["name"])
+    stats["alias_linked"] = int(stats.get("alias_linked") or 0) + linked
+    return linked
+
+
 def merge_artist_twins(conn: Any, stats: Dict[str, Any]) -> set:
     """Fold artist rows that are one artist, by name and then by catalogue id;
     alias-link the same-named ones that are not. Returns the kept artists that
@@ -1478,6 +1534,8 @@ def merge_artist_twins(conn: Any, stats: Dict[str, Any]) -> set:
                 "Merged duplicate artist %s into %s (%r)",
                 duplicate["id"], survivor["id"], survivor["name"])
         touched_artists.add(int(survivor["id"]))
+
+    _link_alias_named_twins(conn, stats)
 
     # A spelling/parser fragment can receive the exact same catalog id as
     # the real artist during later enrichment while retaining a different

@@ -837,7 +837,10 @@ def _fold_artist_twins_once(database: Any, conn: Any, *,
     state = get_state(database)
     if state.get("status") != "done":
         return {}
-    key = f"{state.get('finished_at') or ''}|artist-twins"
+    # "|2321": the name key now folds a unicode hyphen or ordinal sign and
+    # an alias-named row links to its artist, so a library merged before
+    # that runs it once more
+    key = f"{state.get('finished_at') or ''}|artist-twins|2321"
     conn.execute(f"CREATE TABLE IF NOT EXISTS {_SHARED_FILES_MARKER} "
                  "(import_finished_at TEXT PRIMARY KEY, "
                  "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
