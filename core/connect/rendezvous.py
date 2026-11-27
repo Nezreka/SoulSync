@@ -35,6 +35,10 @@ DEFAULT_SERVICE_URL = "https://connect.ssync.net"
 ZONE = "connect.ssync.net"
 DEFAULT_TLS_PORT = 8443
 UPNP_CONFIG_KEY = "connect.upnp_enabled"
+# the home address the admin's browser used to make a code (#2328): inside
+# docker the container only sees its own bridge address, which no phone can
+# reach, so the host's address comes from the browser instead
+LAN_HINT_KEY = "connect.lan_hint"
 _RENEW_INTERVAL_SECONDS = 12 * 3600
 
 _LIVE_SQL = "used_at IS NULL AND cancelled_at IS NULL AND locked_at IS NULL AND expires_at > ?"
@@ -44,6 +48,10 @@ _https_server = None
 _upnp_mapper = None
 _runtime_thread: threading.Thread | None = None
 _runtime_lock = threading.Lock()
+# why setup or the https listener last failed, for Settings > Devices
+_runtime_error: str | None = None
+_listener_error: str | None = None
+_lan_hint: str | None = None
 
 
 def connect_tls_port(config_manager=None) -> int:
@@ -147,6 +155,58 @@ def _best_public_ip(observed: str | None = None) -> str | None:
     return None
 
 
+def _docker_bridge(ip_text: str) -> bool:
+    """docker's default bridge (172.17.0.0/16): the container's own
+    address, which nothing outside the host can reach."""
+    try:
+        return ipaddress.ip_address(ip_text) in ipaddress.ip_network("172.17.0.0/16")
+    except ValueError:
+        return False
+
+
+def usable_lan_hint(host: str | None) -> str | None:
+    """a browser's host when it is a home ip a phone could reach: private
+    or tailnet, not loopback, not docker's bridge. names are left out."""
+    text = (host or "").strip().strip("[]")
+    try:
+        addr = ipaddress.ip_address(text)
+    except ValueError:
+        return None
+    if addr.is_loopback or addr.is_link_local or addr.is_unspecified or _docker_bridge(text):
+        return None
+    from .addresses import is_home_address
+
+    return str(addr) if is_home_address(str(addr)) else None
+
+
+def remember_lan_hint(host: str | None, config_manager=None) -> None:
+    """keep the browser's home address for the sealed answers (#2328)."""
+    global _lan_hint
+    ip = usable_lan_hint(host)
+    if not ip or ip == _lan_hint:
+        return
+    _lan_hint = ip
+    if config_manager is not None:
+        try:
+            if config_manager.get(LAN_HINT_KEY, "") != ip:
+                config_manager.set(LAN_HINT_KEY, ip)
+        except Exception:  # noqa: BLE001 - the hint is a nicety
+            log.debug("could not save the lan hint", exc_info=True)
+
+
+def _lan_ips_with_hint(config_manager=None) -> list[str]:
+    ips = _local_lan_ips()
+    hint = _lan_hint
+    if hint is None and config_manager is not None:
+        try:
+            hint = usable_lan_hint(config_manager.get(LAN_HINT_KEY, "") or "")
+        except Exception:  # noqa: BLE001
+            hint = None
+    if hint and hint not in ips:
+        ips.append(hint)
+    return ips
+
+
 def _local_lan_ips() -> list[str]:
     ips: set[str] = set()
     try:  # the primary outbound address, the LAN IP other devices use
@@ -169,7 +229,8 @@ def _local_lan_ips() -> list[str]:
             ips.add(str(addr))
     except OSError:
         pass
-    return sorted(ips)
+    # docker's bridge address can't be reached from a phone (#2328)
+    return sorted(ip for ip in ips if not _docker_bridge(ip))
 
 
 # -- invite store providers ---------------------------------------------------
@@ -237,7 +298,7 @@ def start(get_database, config_manager, *, port: int | None = None) -> PresenceC
         address_provider=lambda observed: build_address_list(
             identity,
             observed_public_ip=_best_public_ip(observed),
-            lan_ips=_local_lan_ips(),
+            lan_ips=_lan_ips_with_hint(config_manager),
             port=tls_port,
             external_port=_upnp_mapper.external_port if _upnp_mapper else None,
         ),
@@ -250,7 +311,7 @@ def start(get_database, config_manager, *, port: int | None = None) -> PresenceC
 
 def _start_https_listener(app, store: CertificateStore, host: str, port: int) -> None:
     """Start (or restart on cert renewal) the dedicated Connect HTTPS listener."""
-    global _https_server
+    global _https_server, _listener_error
     if _https_server is not None:
         try:
             _https_server.shutdown()
@@ -262,7 +323,12 @@ def _start_https_listener(app, store: CertificateStore, host: str, port: int) ->
     ctx.load_cert_chain(certfile=str(store.chain_path), keyfile=str(store.key_path))
     from werkzeug.serving import make_server
 
-    srv = make_server(host, port, app, threaded=True, ssl_context=ctx)
+    try:
+        srv = make_server(host, port, app, threaded=True, ssl_context=ctx)
+    except OSError as exc:
+        _listener_error = f"port {port} could not be opened: {exc}"[:200]
+        raise
+    _listener_error = None
     _https_server = srv
     threading.Thread(target=srv.serve_forever, daemon=True, name="ConnectHttpsListener").start()
     log.info("connect https: listening on https://%s:%s (cert %s)", host, port, store.fingerprint()[:12])
@@ -333,7 +399,7 @@ def start_runtime(app, get_database, config_manager) -> None:
             return
 
         def _worker() -> None:
-            global _upnp_mapper
+            global _upnp_mapper, _runtime_error
             host = os.environ.get("SOULSYNC_WEB_BIND_HOST", "0.0.0.0")
             tls_port = connect_tls_port(config_manager)
             backoff = 15
@@ -353,10 +419,12 @@ def start_runtime(app, get_database, config_manager) -> None:
                             )
                             _upnp_mapper.start()
                         start(get_database, config_manager, port=tls_port)
+                        _runtime_error = None
                         backoff = 15
                         time.sleep(_RENEW_INTERVAL_SECONDS)
                         continue
                 except Exception as exc:  # noqa: BLE001
+                    _runtime_error = (str(exc).strip() or type(exc).__name__)[:200]
                     log.warning("connect runtime: setup attempt failed (%s); retrying in %ss", exc, backoff)
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 600)
@@ -377,12 +445,73 @@ def current_addresses(get_database, config_manager) -> list[str]:
         return build_address_list(
             identity,
             observed_public_ip=observed,
-            lan_ips=_local_lan_ips(),
+            lan_ips=_lan_ips_with_hint(config_manager),
             port=tls_port,
             external_port=ext_port,
         )
     except Exception:  # noqa: BLE001
         return []
+
+
+def pairing_status(get_database, config_manager) -> dict:
+    """where pairing stands, in words, for Settings > Devices (#2328).
+
+    state is one of: connected, connecting (no link to the pairing
+    service right now), setting_up (no certificate yet), displaced
+    (another copy of this server took over), off (turned off, or the
+    pairing runtime never started). ``ready`` is true only when a phone can
+    find this server with a code right now. ``listening`` says whether the
+    https port the app connects to is open on this machine."""
+    tls_port = connect_tls_port(config_manager)
+    base = {"tls_port": tls_port, "listening": _https_server is not None,
+            "listener_error": _listener_error, "error": None}
+    if os.environ.get("SOULSYNC_CONNECT_DISABLE") == "1":
+        return {**base, "state": "off", "ready": False,
+                "words": "Pairing is turned off on this server (SOULSYNC_CONNECT_DISABLE=1). "
+                         "Remove that setting and restart SoulSync."}
+    if _client is not None:
+        st = _client.state()
+        if st["state"] == "connected":
+            return {**base, "state": "connected", "ready": True,
+                    "words": "Connected to the pairing service."}
+        if st["state"] == "displaced":
+            return {**base, "state": "displaced", "ready": False,
+                    "words": "Another copy of this server took over pairing (a restored backup "
+                             "running alongside this one?). Stop the other copy, then restart SoulSync."}
+        return {**base, "state": "connecting", "ready": False, "error": st.get("error"),
+                "words": "Not connected to the pairing service right now, so the app can't find "
+                         "this server. SoulSync keeps trying; codes made now start working once it "
+                         "connects. Check this server can reach connect.ssync.net."}
+    try:
+        _, store = _identity_and_store(get_database, config_manager)
+        has_cert = bool(store.fingerprint())
+    except Exception:  # noqa: BLE001
+        has_cert = False
+    if _runtime_thread is None and not has_cert:
+        return {**base, "state": "off", "ready": False,
+                "words": "Pairing hasn't started on this server. Restart SoulSync."}
+    return {**base, "state": "setting_up", "ready": False, "error": _runtime_error,
+            "words": "Still setting up pairing: getting this server's certificate. This takes a "
+                     "minute after the first start; it needs to reach connect.ssync.net."}
+
+
+def app_targets(config_manager) -> list[dict]:
+    """the addresses a paired app will try, as plain ip and port, home ones
+    first: what the sealed answer carries, for the admin to read (#2328)."""
+    tls_port = connect_tls_port(config_manager)
+    out: list[dict] = []
+    for ip in _lan_ips_with_hint(config_manager):
+        try:
+            if isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address):
+                continue  # the v4 ones are the readable, likely ones
+        except ValueError:
+            continue
+        out.append({"ip": ip, "port": tls_port, "home": True})
+    public = _best_public_ip()
+    if public:
+        ext = _upnp_mapper.external_port if _upnp_mapper else None
+        out.append({"ip": public, "port": ext or tls_port, "home": False})
+    return out
 
 
 def register_created(code_hash_hex: str, ttl_seconds: int) -> None:
@@ -422,5 +551,8 @@ def check_ct(get_database, config_manager) -> list[dict]:
 
 
 def _reset_for_tests() -> None:
-    global _client
+    global _client, _lan_hint, _runtime_error, _listener_error
     _client = None
+    _lan_hint = None
+    _runtime_error = None
+    _listener_error = None

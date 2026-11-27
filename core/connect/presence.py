@@ -74,6 +74,10 @@ class PresenceClient:
         self._stopped = threading.Event()
         self._displaced = False
         self._thread: threading.Thread | None = None
+        # for Settings > Devices: is the service reachable right now, and if
+        # not, the last reason in words (#2328)
+        self.connected = False
+        self.last_error: str | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -91,7 +95,9 @@ class PresenceClient:
         while not self._stopped.is_set():
             try:
                 self._connect_once()
-            except Exception:  # noqa: BLE001 - the loop must survive any transport failure
+            except Exception as exc:  # noqa: BLE001 - the loop must survive any transport failure
+                self.connected = False
+                self.last_error = _words(exc)
                 log.exception("connect presence: connection attempt failed")
             if self._displaced:
                 log.error(
@@ -127,10 +133,13 @@ class PresenceClient:
         self._send({"type": "hello", "versions": PROTOCOL_VERSIONS})
 
     def _on_close(self, ws, code, reason) -> None:
+        self.connected = False
         if code == DISPLACED_CLOSE_CODE:
             self._displaced = True
 
     def _on_error(self, ws, error) -> None:
+        self.connected = False
+        self.last_error = _words(error)
         log.warning("connect presence: websocket error: %s", error)
 
     def _on_message(self, ws, message: str) -> None:
@@ -146,6 +155,8 @@ class PresenceClient:
         mtype = data.get("type")
         if mtype == "welcome":
             self.observed_public_ip = data.get("observed_ip")
+            self.connected = True
+            self.last_error = None
             self._register_all()
         elif mtype == "lookup":
             self._send(self.handle_lookup(data))
@@ -179,6 +190,14 @@ class PresenceClient:
         )
         return {"type": "answer", "request_id": request_id, "sealed": b64url_encode(sealed)}
 
+    def state(self) -> dict:
+        """where this connection stands, for Settings > Devices."""
+        if self._displaced:
+            return {"state": "displaced", "error": None}
+        if self.connected:
+            return {"state": "connected", "error": None}
+        return {"state": "connecting", "error": self.last_error}
+
     # -- outbound API used by the rest of SoulSync ---------------------------
 
     def register_code(self, code_hash_hex: str, ttl_seconds: int) -> None:
@@ -199,3 +218,9 @@ class PresenceClient:
                 ws.send(json.dumps(payload))
             except Exception:  # noqa: BLE001 - a dead socket is the reconnect loop's problem
                 log.debug("connect presence: send failed (connection down?)", exc_info=True)
+
+
+def _words(exc) -> str:
+    """an error as one short line, never a traceback."""
+    text = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+    return text[:200]
