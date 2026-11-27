@@ -139,6 +139,7 @@ export const Route = createFileRoute('/library')({
     source: search.source,
     quality: search.quality,
     review: search.review,
+    holiday: search.holiday,
     dir: search.dir,
     completion: search.completion,
     missingMin: search.missingMin,

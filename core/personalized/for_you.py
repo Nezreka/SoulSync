@@ -176,16 +176,11 @@ def interleave(streams: Sequence[Sequence[Dict[str, Any]]], size: int,
     return out
 
 
-_HOLIDAY = ('christmas', 'xmas', 'x-mas', 'navidad', 'noel', 'jingle', 'santa', 'holiday')
-
-
 def in_season(row: Dict[str, Any], now: datetime) -> bool:
-    """a christmas song is for november and december. flow served colbie
-    caillat's merry little christmas in september."""
-    if now.month in (11, 12):
-        return True
-    text = f"{row.get('title', '')} {row.get('album', '')}".lower()
-    return not any(word in text for word in _HOLIDAY)
+    """a holiday song plays only in its season. flow served colbie caillat's
+    merry little christmas in september (#2332, core/holiday_music.py)"""
+    from core.holiday_music import policy, today_for
+    return policy(today=today_for(now)).keep(row)
 
 
 # ── the mixes ───────────────────────────────────────────────────────────────
@@ -415,9 +410,25 @@ def build_for_you(database, profile_id: int, *, now: Optional[datetime] = None) 
             them = names.get(other, 'Someone')
             mixes.append(_card(f'blend_{other}', f'{me} + {them}',
                                f'A blend of what you and {them} play', blend(conn, owner, other, now=now)))
+        mixes.append(holiday_card(database, conn, now))
     finally:
         conn.close()
     return {'mixes': [m for m in mixes if m]}
+
+
+def holiday_card(database, conn, now: Optional[datetime] = None) -> Optional[Dict[str, Any]]:
+    """#2332: in season, the holiday music you own as its own mix"""
+    from core.holiday_music import holiday_mix, policy, today_for
+    try:
+        if not policy(database, today=today_for(now)).shows_holiday_mix:
+            return None
+        ids = [str(r['id']) for r in holiday_mix(database)]
+        owned = _owned(conn, ids)
+    except Exception as e:  # noqa: BLE001 - the shelf matters more
+        logger.debug("holiday mix failed: %s", e)
+        return None
+    return _card('holiday', 'Holiday', 'The holiday music in your library',
+                 [owned[i] for i in ids if i in owned])
 
 
 def build_flow(database, profile_id: int) -> Dict[str, Any]:

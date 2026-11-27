@@ -255,6 +255,7 @@ import {
   historyTree,
   summarizeRecentHistory,
 } from './history-groups';
+import { HolidayFlag } from './holiday-flag';
 import { InteractiveSearchModal } from './interactive-search';
 import { ArtistBulkBar, SelectBox, useArtistSelection, type ArtistSelection } from './library-bulk';
 import bulkStyles from './library-bulk.module.css';
@@ -2620,6 +2621,11 @@ export function ArtistSettingsModal({
               onPreviewRetag={onPreviewRetag}
             />
             <ArtistSettingsIdentity artist={artist} watchlist={watchlist} />
+            {canWrite ? (
+              <div className={styles.metadataEditGrid}>
+                <HolidayFlag entity="artist" id={artist.id} />
+              </div>
+            ) : null}
             <AudiobookRouteSetting name={artist.name} />
           </aside>
         </div>
@@ -3280,6 +3286,7 @@ function AlbumMetadataForm({
           {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
+      <HolidayFlag entity="album" id={album.id} disabled={busy} />
     </div>
   );
 }
@@ -5551,6 +5558,7 @@ function AlbumIndexView() {
       letter: search.letter,
       source: search.source,
       review: search.review,
+      holiday: search.holiday,
     }),
   );
   const albums = albumsQuery.data?.albums ?? [];
@@ -5560,7 +5568,8 @@ function AlbumIndexView() {
     search.monitored !== 'all' ||
     search.letter !== 'all' ||
     Boolean(search.source) ||
-    Boolean(search.review);
+    Boolean(search.review) ||
+    Boolean(search.holiday);
 
   return (
     <div className={styles.page}>
@@ -14309,6 +14318,7 @@ function TrackMetadataForm({ track, onSaved }: { track: LibraryV2Track; onSaved:
           {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
+      {track.id != null ? <HolidayFlag entity="track" id={track.id} disabled={busy} /> : null}
     </div>
   );
 }

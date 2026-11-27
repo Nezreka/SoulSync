@@ -183,13 +183,20 @@ def read(conn, *, hide_explicit: bool = False) -> List[Dict[str, Any]]:
         GROUP BY t.album_id, t.mood
     """).fetchall()  # noqa: S608
     channels = plan([tuple(r) for r in albums], [tuple(r) for r in track_moods])
+    # #2332: out of season, no christmas channel and no carols on the others
+    from core.holiday_music import genres_say_holiday, policy
+    holiday = policy()
+    season = None if holiday.allows_holiday else holiday
+    if season is not None:
+        channels = [c for c in channels if not genres_say_holiday([c["name"]])]
     wanted = sorted({a for c in channels for a in c["albums"]})
     tracks_by_album: Dict[int, List[list]] = {}
     track_vibe: Dict[Any, str] = {}
     for start in range(0, len(wanted), 500):
         chunk = wanted[start:start + 500]
         rows = conn.execute(f"""
-            SELECT t.id, t.title, COALESCE(ar.name, ''), t.duration, t.album_id, t.mood
+            SELECT t.id, t.title, COALESCE(ar.name, ''), t.duration, t.album_id, t.mood,
+                   al.title, al.genres, ar.genres
             FROM lib2_tracks t
             JOIN lib2_albums al ON al.id = t.album_id
             LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
@@ -197,6 +204,9 @@ def read(conn, *, hide_explicit: bool = False) -> List[Dict[str, Any]]:
         """, chunk).fetchall()  # noqa: S608
         for r in rows:
             seconds = int(r[3] / 1000) if r[3] else 0
+            if season is not None and season.is_holiday(
+                    {"title": r[1], "album": r[6], "artist": r[2], "genres": [r[7], r[8], r[5]]}):
+                continue
             if seconds >= 60:
                 tracks_by_album.setdefault(r[4], []).append([r[0], r[1] or "", r[2], seconds, r[4]])
                 vibe = vibe_for(r[5])

@@ -1925,7 +1925,7 @@ def get_seasonal_albums(season_key):
 @bp.route('/api/discover/seasonal-playlist', methods=['GET'])
 @bp.route('/api/discover/seasonal/<season_key>/playlist', methods=['GET'])
 @requires("music.discover")
-@_hide_blocked({'tracks': WORKS})
+@_hide_blocked({'tracks': WORKS}, holiday=False)
 def get_seasonal_playlist(season_key='current'):
     """Get curated playlist for a specific season (or current season)."""
     try:
@@ -2017,6 +2017,11 @@ def get_seasonal_playlist(season_key='current'):
                         tracks.append(track_dict)
 
         config = SEASONAL_CONFIG[season_key]
+        if season_key != 'christmas':
+            # #2332: the christmas playlist is holiday music on purpose, the
+            # other seasons follow the holiday setting
+            from core.holiday_music import filter_tracks
+            tracks = filter_tracks(tracks)
 
         return jsonify({
             "success": True,

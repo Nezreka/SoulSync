@@ -4775,7 +4775,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'flaresolverr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'fanart', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'seerr_compat', 'mcp', 'server_activity']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'flaresolverr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'fanart', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'holiday_music', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'seerr_compat', 'mcp', 'server_activity']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -4791,6 +4791,15 @@ def handle_settings():
             # default profile so "the page edits the active profile" holds —
             # without this, a checkbox change here would never reach the
             # pipeline (see MusicDatabase.sync_default_quality_profile_from_config).
+            if 'holiday_music' in new_settings:
+                # #2332: the season and the mode reach every mix now, not in a minute
+                try:
+                    from core.holiday_music import forget_cache as _holiday_forget
+                    from api.discover_routes import invalidate_discover_shelf_cache as _shelf_forget
+                    _holiday_forget()
+                    _shelf_forget()
+                except Exception as _hm_err:
+                    logger.debug("holiday caches not cleared: %s", _hm_err)
             if 'image_cache' in new_settings:
                 # The cache is a singleton built from config on first use, so a
                 # new size limit would otherwise not apply until a restart.
@@ -12256,7 +12265,8 @@ from core.discovery.blocked import WORKS as _BLOCKED_WORKS, hide_blocked_in_resp
 
 @app.route('/api/library/radio')
 @requires("music.access")
-@_hide_blocked_artists({'tracks': _BLOCKED_WORKS})
+# radio keeps its own holiday check: a christmas seed plays christmas (#2332)
+@_hide_blocked_artists({'tracks': _BLOCKED_WORKS}, holiday=False)
 def library_radio():
     """Get a smart queue of similar tracks for radio mode auto-play.
 

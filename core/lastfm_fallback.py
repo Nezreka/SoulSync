@@ -244,11 +244,24 @@ def similar_tracks(artist_name: str, track_title: str, limit: int = 25, *,
         return [], ''
     rows = _from_lastfm(_client(lastfm), lambda c: c.get_similar_tracks(artist, track, limit=limit))
     if rows:
-        return rows, 'lastfm'
+        return _in_season(rows, artist, track), 'lastfm'
     rows = _deezer_radio(artist, track, limit)
     if rows:
-        return rows, 'deezer'
+        return _in_season(rows, artist, track), 'deezer'
     return [], ''
+
+
+def _in_season(rows: Rows, artist: str, track: str) -> Rows:
+    """#2332: a radio off an everyday song leaves holiday songs out of
+    season. a radio off a christmas song plays christmas"""
+    try:
+        from core.holiday_music import policy
+        season = policy()
+        if season.allows_holiday or season.is_holiday({'title': track, 'artist': artist}):
+            return rows
+        return [r for r in rows if not season.is_holiday(r)]
+    except Exception:  # noqa: BLE001 - the radio matters more
+        return rows
 
 
 def similar_artists(artist_name: str, limit: int = 30, *, lastfm: Any = _UNSET) -> Tuple[Rows, str]:

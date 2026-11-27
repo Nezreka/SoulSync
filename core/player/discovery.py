@@ -38,7 +38,7 @@ KEY_RE = re.compile(r"^[a-z0-9_-]{1,80}$")
 _PROVIDERS = ("spotify", "deezer", "itunes", "musicbrainz", "discogs", "hydrabase", "jiosaavn", "bandcamp")
 
 # personalized_playlists kinds the other sections already show from their own store
-_PICKS_ELSEWHERE = {"fresh_tape", "archives", "listening_mix", "seasonal_mix", "daily_mix"}
+_PICKS_ELSEWHERE = {"fresh_tape", "archives", "listening_mix", "seasonal_mix", "daily_mix", "holiday_mix"}
 _PICKS_ORDER = ("hidden_gems", "popular_picks", "discovery_shuffle", "time_machine", "genre_playlist")
 _PICKS_BLURB = {
     "hidden_gems": "Deeper cuts you might have missed",
@@ -536,10 +536,26 @@ def _blocked(db: Any, pid: int):
     return BlockedArtists.load(db, pid)
 
 
-def _without_blocked(cards: List[Dict[str, Any]], blocked) -> List[Dict[str, Any]]:
-    """the discover page's rule: a blocked artist's songs go, and a playlist
-    whose songs all went goes with them"""
-    if blocked.is_empty:
+# holiday music on purpose (#2332): these keep their christmas songs
+_HOLIDAY_CARDS = ("holiday", "seasonal-christmas")
+
+
+def _holiday(db: Any):
+    """the holiday policy when it takes songs out today, else None"""
+    try:
+        from core.holiday_music import policy
+        found = policy(db)
+    except Exception:  # noqa: BLE001 - no policy, nothing taken out
+        logger.debug("holiday policy unreadable", exc_info=True)
+        return None
+    return None if found.allows_holiday else found
+
+
+def _without_blocked(cards: List[Dict[str, Any]], blocked, holiday: Any = None) -> List[Dict[str, Any]]:
+    """the discover page's rule: a blocked artist's songs go, holiday songs
+    out of season go (#2332), and a playlist whose songs all went goes with
+    them"""
+    if blocked.is_empty and holiday is None:
         return cards
     out = []
     for c in cards:
@@ -547,7 +563,9 @@ def _without_blocked(cards: List[Dict[str, Any]], blocked) -> List[Dict[str, Any
         if tracks is None:
             out.append(c)
             continue
-        kept = [t for t in tracks if not blocked.blocks_work(t)]
+        season = None if c["key"] in _HOLIDAY_CARDS else holiday
+        kept = [t for t in tracks if not blocked.blocks_work(t)
+                and not (season is not None and season.is_holiday(t))]
         if not kept:
             continue
         if len(kept) != len(tracks):
@@ -555,6 +573,23 @@ def _without_blocked(cards: List[Dict[str, Any]], blocked) -> List[Dict[str, Any
                       owned=c["owned"], updated_at=c["updated_at"])
         out.append(c)
     return out
+
+
+def _holiday_card(db: Any, pid: int) -> List[Dict[str, Any]]:
+    """#2332: in season, a mix of the holiday music you own"""
+    from core.holiday_music import holiday_mix, policy
+    if not policy(db).shows_holiday_mix:
+        return []
+    from core.personalized.for_you import _owned
+    ids = [str(r["id"]) for r in holiday_mix(db)]
+    if not ids:
+        return []
+    with db._get_connection() as conn:
+        owned = _owned(conn, ids)
+    tracks = [_owned_row(owned[i]) for i in ids if i in owned]
+    if not tracks:
+        return []
+    return [_card("holiday", "Holiday", "The holiday music in your library", "made", tracks, owned=True)]
 
 
 def _flow_card(db: Any, pid: int) -> List[Dict[str, Any]]:
@@ -566,6 +601,7 @@ def _flow_card(db: Any, pid: int) -> List[Dict[str, Any]]:
 # every family in shelf order, and the key prefix each one answers for
 _FAMILIES: Tuple[Tuple[str, Callable[[Any, int], List[Dict[str, Any]]]], ...] = (
     ("flow", _flow_card),
+    ("holiday", _holiday_card),
     ("daily-", _daily),
     ("for-you", _for_you_shelf),
     ("mood-", _moods),
@@ -591,7 +627,7 @@ def list_for(db: Any, profile_id: int) -> List[Dict[str, Any]]:
             cards.extend(family(db, pid))
         except Exception:  # noqa: BLE001 - one broken source never empties the shelf
             logger.warning("discovery playlists: %s failed", name, exc_info=True)
-    cards = _without_blocked(cards, _blocked(db, pid))
+    cards = _without_blocked(cards, _blocked(db, pid), _holiday(db))
     out = []
     for sid, label in SECTIONS:
         shelf = [_public(c) for c in cards if c["section"] == sid]
@@ -626,9 +662,10 @@ def _find(db: Any, pid: int, key: str) -> Optional[Dict[str, Any]]:
     if card is None:
         return None
     blocked = _blocked(db, pid)
-    if blocked.is_empty:
+    holiday = _holiday(db)
+    if blocked.is_empty and holiday is None:
         return card
-    kept = _without_blocked([card], blocked)
+    kept = _without_blocked([card], blocked, holiday)
     if kept:
         return kept[0]
     # every song blocked: an empty playlist, not a missing one

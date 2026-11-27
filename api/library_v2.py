@@ -1731,7 +1731,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 review_filter=request.args.get("review", ""),
                 # the player's genre and label pages
                 genre=request.args.get("genre", ""),
-                label=request.args.get("label", ""))
+                label=request.args.get("label", ""),
+                # #2332: holiday music only | hide it
+                holiday=request.args.get("holiday", ""))
         for album in albums:
             _apply_artwork_urls(album, "album")
         total_pages = (total + limit - 1) // limit
@@ -2308,6 +2310,66 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({"success": True, "artist_id": artist_id,
                         "album_id": album_id, "track_id": track_id,
                         "monitored": monitor})
+
+    def _holiday_names(conn, entity: str, eid: int) -> Optional[Dict[str, Any]]:
+        """the names (and genres) a holiday flag is keyed by, for one row"""
+        if entity == "artist":
+            row = conn.execute("SELECT name, genres, mood, style FROM lib2_artists WHERE id = ?",
+                               (eid,)).fetchone()
+            return row and {"artist": row[0], "genres": [row[1], row[2], row[3]]}
+        if entity == "album":
+            row = conn.execute(
+                "SELECT ar.name, al.title, al.genres, ar.genres FROM lib2_albums al"
+                " JOIN lib2_artists ar ON ar.id = al.primary_artist_id WHERE al.id = ?",
+                (eid,)).fetchone()
+            return row and {"artist": row[0], "album": row[1], "genres": [row[2], row[3]]}
+        if entity == "track":
+            row = conn.execute(
+                "SELECT ar.name, al.title, t.title, al.genres, ar.genres FROM lib2_tracks t"
+                " JOIN lib2_albums al ON al.id = t.album_id"
+                " JOIN lib2_artists ar ON ar.id = al.primary_artist_id WHERE t.id = ?",
+                (eid,)).fetchone()
+            return row and {"artist": row[0], "album": row[1], "title": row[2],
+                            "genres": [row[3], row[4]]}
+        return None
+
+    @_route("/api/library/v2/holiday/<entity>/<int:eid>", methods=["GET", "POST"])
+    def lib2_holiday_flag(entity, eid):
+        """#2332: is this artist, album or track holiday music, and why. POST
+        {"holiday": true | false | null} sets it by hand (null: automatic).
+        kept by name, so a rescan or a retag never undoes it."""
+        from core import holiday_music as H
+        if entity not in H.SCOPES:
+            return _fail("entity must be artist, album or track")
+        with closing(_conn()) as conn:
+            names = _holiday_names(conn, entity, eid)
+        if not names:
+            return _fail("Not found", 404)
+        db = get_database()
+        if request.method == "POST":
+            body = request.get_json(silent=True) or {}
+            value = body.get("holiday", None)
+            if value not in (True, False, None):
+                return _fail("holiday must be true, false or null")
+            try:
+                H.set_override(db, entity, value, artist=names.get("artist"),
+                               album=names.get("album", ""), title=names.get("title", ""))
+            except ValueError as exc:
+                return _fail(str(exc))
+            try:
+                from api.discover_routes import invalidate_discover_shelf_cache
+                invalidate_discover_shelf_cache()
+            except Exception as exc:  # noqa: BLE001 - the shelf catches up on its own
+                logger.debug("discover shelf cache not cleared: %s", exc)
+        state = H.status(db, artist=names.get("artist"), album=names.get("album", ""),
+                         title=names.get("title", ""), genres=names.get("genres") or [])
+        return jsonify({"success": True, **state, "season": H.policy(db).to_json()})
+
+    @_route("/api/library/v2/holiday/overrides")
+    def lib2_holiday_overrides():
+        """every holiday flag set by hand, newest first"""
+        from core import holiday_music as H
+        return jsonify({"success": True, "overrides": H.list_overrides(get_database())})
 
     @_route("/api/library/v2/artists/<int:artist_id>")
     @device_playback

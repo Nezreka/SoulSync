@@ -579,6 +579,12 @@ def _build_variant(database, variant: Recipe, profile_id: int, circle: Sequence[
         'discovery': discovery_pool(database, variant, profile_id, circle, owned, rows, rng),
         'trending': trending_pool(variant, owned, rows, circle),
     }
+    # #2332: holiday songs only in season, before the mix is cut to size. a
+    # recipe that asks for christmas by genre or tag gets it
+    from core.holiday_music import filter_tracks, genres_say_holiday
+    asked = [*(getattr(variant, 'genres', None) or []), *(getattr(variant, 'tags', None) or [])]
+    if not genres_say_holiday(asked):
+        pools = {k: filter_tracks(v, database=database) for k, v in pools.items()}
     return build_mix(pools, variant, skip_artist=skip_artist)
 
 

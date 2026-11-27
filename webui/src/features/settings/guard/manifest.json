@@ -7274,6 +7274,114 @@
       "asked": "northern",
       "showsEndpoint": "/api/discovery/hemisphere"
     },
+    "#holiday-music-mode": {
+      "sel": "#holiday-music-mode",
+      "kind": "radiogroup",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "season",
+      "to": "always",
+      "saves": {
+        "settings": {
+          "holiday_music": {
+            "mode": "always"
+          }
+        }
+      },
+      "asked": "always",
+      "shows": ["holiday_music.mode"]
+    },
+    "#holiday-season-start-month": {
+      "sel": "#holiday-season-start-month",
+      "kind": "select",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "11",
+      "to": "1",
+      "saves": {
+        "settings": {
+          "holiday_music": {
+            "season_start": "01-15"
+          }
+        }
+      },
+      "asked": "1",
+      "shows": ["holiday_music.season_start"]
+    },
+    "#holiday-season-start-day": {
+      "sel": "#holiday-season-start-day",
+      "kind": "select",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "15",
+      "to": "1",
+      "saves": {
+        "settings": {
+          "holiday_music": {
+            "season_start": "11-01"
+          }
+        }
+      },
+      "asked": "1",
+      "shows": ["holiday_music.season_start"]
+    },
+    "#holiday-season-end-month": {
+      "sel": "#holiday-season-end-month",
+      "kind": "select",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "1",
+      "to": "2",
+      "saves": {
+        "settings": {
+          "holiday_music": {
+            "season_end": "02-06"
+          }
+        }
+      },
+      "asked": "2",
+      "shows": ["holiday_music.season_end"]
+    },
+    "#holiday-season-end-day": {
+      "sel": "#holiday-season-end-day",
+      "kind": "select",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "6",
+      "to": "1",
+      "saves": {
+        "settings": {
+          "holiday_music": {
+            "season_end": "01-01"
+          }
+        }
+      },
+      "asked": "1",
+      "shows": ["holiday_music.season_end"]
+    },
+    "#holiday-write-tag": {
+      "sel": "#holiday-write-tag",
+      "kind": "checkbox",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "holiday_music": {
+            "write_tag": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["holiday_music.write_tag"]
+    },
     "#playlist-sync-mode": {
       "sel": "#playlist-sync-mode",
       "kind": "radiogroup",
@@ -13895,7 +14003,7 @@
     "#stg-view-discovery-recommendations \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "stg-view-discovery-recommendations",
-      "count": 3,
+      "count": 6,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -13909,6 +14017,27 @@
     "#discovery-hemisphere \"Southern\"": {
       "label": "Southern",
       "anchor": "discovery-hemisphere",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#holiday-music-mode \"In season\"": {
+      "label": "In season",
+      "anchor": "holiday-music-mode",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#holiday-music-mode \"Always\"": {
+      "label": "Always",
+      "anchor": "holiday-music-mode",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#holiday-music-mode \"Never\"": {
+      "label": "Never",
+      "anchor": "holiday-music-mode",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"

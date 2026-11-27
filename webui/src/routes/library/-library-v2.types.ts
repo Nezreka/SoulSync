@@ -83,6 +83,8 @@ const libraryV2SearchObject = z.object({
   /** #2046: artists whose albums are all reviewed and locked, or not yet;
    *  #2223: on the album list, locked albums or unlocked ones */
   review: z.enum(['', 'reviewed', 'unreviewed']).default('').catch(''),
+  /** #2332: on the album list, holiday music only, or everything else */
+  holiday: z.enum(['', 'only', 'hide']).default('').catch(''),
   view: z.enum(['table', 'cards', 'discovery']).default('cards').catch('cards'),
   /** #2107: turn the artist sort around */
   dir: z.enum(LIBRARY_V2_SORT_DIRS).default('').catch(''),
