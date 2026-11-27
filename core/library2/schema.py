@@ -1177,12 +1177,27 @@ def _backfill_artist_name_keys(cursor: Any) -> int:
     ``name_key IS NULL``, which the index answers as a seek, so it costs
     nothing once the library is keyed.
     """
-    from core.library2.importer import normalize_name
+    from core.library2.importer import NAME_FOLD_CHARS, NAME_FOLD_VERSION, normalize_name
 
     rows = cursor.execute(
         "SELECT id, name FROM lib2_artists WHERE name_key IS NULL"
     ).fetchall()
     updates = [(normalize_name(row[1]), row[0]) for row in rows if row[1]]
+    # #2321: keys made before the fold still hold the hyphen or ordinal sign
+    # as typed. re-keyed once per fold version, so the scan is not every start
+    cursor.execute("CREATE TABLE IF NOT EXISTS _lib2_name_key_fold "
+                   "(version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    if cursor.execute("SELECT 1 FROM _lib2_name_key_fold WHERE version=?",
+                      (NAME_FOLD_VERSION,)).fetchone() is None:
+        glob = "*[" + NAME_FOLD_CHARS + "]*"
+        for row in cursor.execute(
+                "SELECT id, name, name_key FROM lib2_artists "
+                "WHERE name_key IS NOT NULL AND name GLOB ?", (glob,)).fetchall():
+            key = normalize_name(row[1])
+            if key != row[2]:
+                updates.append((key, row[0]))
+        cursor.execute("INSERT OR IGNORE INTO _lib2_name_key_fold(version) VALUES(?)",
+                       (NAME_FOLD_VERSION,))
     if not updates:
         return 0
     cursor.executemany("UPDATE lib2_artists SET name_key=? WHERE id=?", updates)
