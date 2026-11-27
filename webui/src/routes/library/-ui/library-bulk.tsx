@@ -18,6 +18,7 @@ import type { LibraryV2ArtistSummary } from '../-library-v2.types';
 
 import {
   LIBRARY_V2_QUERY_KEY,
+  deleteLibraryV2ArtistsWithFiles,
   deleteLibraryV2Entity,
   fetchLibraryV2ArtistIds,
   fetchLibraryV2JobStatus,
@@ -26,9 +27,11 @@ import {
   setLibraryV2QualityProfile,
   startLibraryV2DiscographyRefresh,
   startLibraryV2ScopedSearch,
+  type LibraryV2BulkFileDeletePreview,
   type LibraryV2ListFilters,
 } from '../-library-v2.api';
 import { LOCK_QUERY_KEY, setLocksBulk } from '../-review-lock.api';
+import { BulkDeleteFilesDialog } from './library-bulk-delete-files';
 import css from './library-bulk.module.css';
 import styles from './library-v2-page.module.css';
 
@@ -275,6 +278,7 @@ export function ArtistBulkBar({
   const run = useBulkRun();
   const [profile, setProfile] = useState('');
   const [loadingAll, setLoadingAll] = useState(false);
+  const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
   const profiles = useQuery({ ...libraryV2QualityProfilesQueryOptions(), enabled: canWrite });
   const count = selection.selected.size;
   const pageIds = pageArtists.map((a) => a.id);
@@ -422,6 +426,31 @@ export function ArtistBulkBar({
       await deleteLibraryV2Entity('artists', id);
       return 'done';
     });
+    selection.clear();
+    finish(result);
+  };
+
+  // #2333: delete the files too. the dialog says what goes and asks; then
+  // each artist takes the single delete's path, one at a time, its files
+  // into the deleted-files folder and the artist off the library
+  const deleteFiles = async (list: number[], preview: LibraryV2BulkFileDeletePreview) => {
+    setDeleteIds(null);
+    const refused = new Set(preview.blocked.map((b) => b.id));
+    const result = await runBulk(
+      'Delete files',
+      list,
+      async (id) => {
+        if (refused.has(id)) return 'skipped';
+        const answer = await deleteLibraryV2ArtistsWithFiles([id]);
+        const failed = answer.results.find((r) => !r.ok);
+        if (failed) {
+          const name = known.get(id)?.name ?? `Artist ${id}`;
+          throw new Error(`${name}: ${failed.error ?? 'not deleted'}`);
+        }
+        return 'done';
+      },
+      1,
+    );
     selection.clear();
     finish(result);
   };
@@ -601,6 +630,14 @@ export function ArtistBulkBar({
               >
                 Remove from library
               </button>
+              <button
+                type="button"
+                className={styles.btnDangerGhost}
+                disabled={busy || !canWrite}
+                onClick={() => setDeleteIds(ids())}
+              >
+                Delete files…
+              </button>
             </>
           ) : null}
           {canWrite ? (
@@ -630,6 +667,13 @@ export function ArtistBulkBar({
             </button>
           ) : null}
         </div>
+      ) : null}
+      {deleteIds ? (
+        <BulkDeleteFilesDialog
+          ids={deleteIds}
+          onCancel={() => setDeleteIds(null)}
+          onConfirm={(preview) => void deleteFiles(deleteIds, preview)}
+        />
       ) : null}
     </div>
   );

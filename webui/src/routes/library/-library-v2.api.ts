@@ -1215,6 +1215,50 @@ export async function deleteLibraryV2Entity(
   await lib2Json(apiClient.delete(`library/v2/${entity}/${id}`), 'Delete failed');
 }
 
+/** #2333: what deleting the files of several artists would do. */
+export interface LibraryV2BulkFileDeletePreview {
+  artists: number;
+  albums: number;
+  files: number;
+  total_size: number;
+  /** files already gone from disk: only their rows go */
+  missing: number;
+  /** artists a file delete refuses (a file outside the library folders) */
+  blocked: { id: number; name: string; reason: string }[];
+  not_found: number;
+  /** quarantine: into the deleted-files folder, restorable */
+  mode: 'quarantine' | 'permanent';
+  /** how long the deleted-files folder keeps them; 0 keeps them until emptied */
+  keep_days: number;
+}
+
+export async function previewLibraryV2BulkFileDelete(
+  ids: number[],
+): Promise<LibraryV2BulkFileDeletePreview> {
+  return lib2Json<Ok & LibraryV2BulkFileDeletePreview>(
+    apiClient.post('library/v2/artists/delete-files/preview', { json: { ids } }),
+    'Delete preview failed',
+  );
+}
+
+export interface LibraryV2BulkFileDeleteResult {
+  deleted: number;
+  failed: number;
+  files_deleted: number;
+  results: { id: number; ok: boolean; error?: string; files_deleted?: number }[];
+}
+
+/** #2333: each artist's files into the deleted-files folder, then the artist
+ *  off the library, the way the single delete does it. */
+export async function deleteLibraryV2ArtistsWithFiles(
+  ids: number[],
+): Promise<LibraryV2BulkFileDeleteResult> {
+  return lib2Json<Ok & LibraryV2BulkFileDeleteResult>(
+    apiClient.post('library/v2/artists/delete-files', { json: { ids } }),
+    'Delete failed',
+  );
+}
+
 /** Impact preview for artist delete: owned releases cascade, featured
  *  appearances on other artists' releases are only detached. */
 export interface LibraryV2ArtistDeletePreview {
