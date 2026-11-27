@@ -134,13 +134,33 @@ def scan_finding_options(details: Dict[str, Any], *, fill_only: bool = False) ->
     return retag_options({'fields': fields, 'cover_art': 'fill_missing', 'lyrics': 'skip'})
 
 
+def keeps_various_artists(file_value: Any, db_data: Dict[str, Any]) -> bool:
+    """the file says Various Artists and the library files the track under its
+    own performer: a compilation the old wishlist add split over its
+    performers. the file is right, so it is never offered the performer."""
+    from core.imports.compilation import is_various_artists_name
+    album_artist = db_data.get('artist_name')
+    if not is_various_artists_name(file_value) or not album_artist:
+        return False
+    if is_various_artists_name(album_artist):
+        return False
+    try:
+        from core.tag_writer import _artist_name_set
+        return bool(_artist_name_set(album_artist)
+                    & _artist_name_set(db_data.get('track_artist') or ''))
+    except Exception:  # noqa: BLE001 - unsure: the file keeps its tag
+        return True
+
+
 def _policy_diff(file_tags, db_data, options):
     from core.tag_writer import build_tag_diff
     selected = options.get('fields')
     diff = build_tag_diff(file_tags, db_data)
     for item in diff:
         key = item['file_key']
-        if selected is not None and key not in selected and _POLICY_DATA_KEYS.get(key) not in selected:
+        if key == 'album_artist' and keeps_various_artists(item.get('file_value'), db_data):
+            item['changed'] = False
+        elif selected is not None and key not in selected and _POLICY_DATA_KEYS.get(key) not in selected:
             item['changed'] = False
         elif key == 'cover_art':
             item['changed'] = (options['cover_art'] != 'skip' and bool(db_data.get('thumb_url'))
