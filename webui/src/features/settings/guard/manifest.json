@@ -3698,7 +3698,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/1",
-            "body": "{\"name\":\"Movies-guard\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies-guard\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3719,7 +3719,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/1",
-            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[\"guard-probe\"],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[\"guard-probe\"],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3740,7 +3740,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/1",
-            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[\"guard-probe\"]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[\"guard-probe\"]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3761,7 +3761,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/1",
-            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":3,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":3,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3782,7 +3782,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/1",
-            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"guard-probe\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"guard-probe\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3803,7 +3803,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/1",
-            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"guard-probe\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"guard-probe\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3824,7 +3824,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/1",
-            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":false,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":false,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3845,7 +3845,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/1",
-            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":false,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":false,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3866,11 +3866,74 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/1",
-            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":false,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":false,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
       "asked": false,
+      "click": ["Save"],
+      "showsEndpoint": "/api/video/libraries/folders"
+    },
+    "[data-library-id=\"1\"][data-kind=\"movie\"][data-builtin=\"main\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find intros and credits\"]": {
+      "sel": "[data-library-id=\"1\"][data-kind=\"movie\"][data-builtin=\"main\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find intros and credits\"]",
+      "weak": "context",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/video/libraries/folders/1",
+            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":false,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
+          }
+        ]
+      },
+      "asked": false,
+      "click": ["Save"],
+      "showsEndpoint": "/api/video/libraries/folders"
+    },
+    "[data-library-id=\"1\"][data-kind=\"movie\"][data-builtin=\"main\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find recaps too\"]": {
+      "sel": "[data-library-id=\"1\"][data-kind=\"movie\"][data-builtin=\"main\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find recaps too\"]",
+      "weak": "context",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/video/libraries/folders/1",
+            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":true,\"markers_write\":false,\"indexer_ids\":[]}"
+          }
+        ]
+      },
+      "asked": true,
+      "click": ["Save"],
+      "showsEndpoint": "/api/video/libraries/folders"
+    },
+    "[data-library-id=\"1\"][data-kind=\"movie\"][data-builtin=\"main\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Save skip markers beside the videos\"]": {
+      "sel": "[data-library-id=\"1\"][data-kind=\"movie\"][data-builtin=\"main\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Save skip markers beside the videos\"]",
+      "weak": "context",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/video/libraries/folders/1",
+            "body": "{\"name\":\"Movies\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":true,\"indexer_ids\":[]}"
+          }
+        ]
+      },
+      "asked": true,
       "click": ["Save"],
       "showsEndpoint": "/api/video/libraries/folders"
     },
@@ -3887,7 +3950,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/2",
-            "body": "{\"name\":\"Movies 4K-guard\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies 4K-guard\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3908,7 +3971,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/2",
-            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[\"guard-probe\"],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[\"guard-probe\"],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3929,7 +3992,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/2",
-            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[\"guard-probe\"]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[\"guard-probe\"]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3950,7 +4013,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/2",
-            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":3,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":3,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3971,7 +4034,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/2",
-            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"guard-probe\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"guard-probe\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -3992,7 +4055,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/2",
-            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"guard-probe\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"guard-probe\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -4013,7 +4076,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/2",
-            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":false,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":false,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -4034,7 +4097,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/2",
-            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":false,\"chapter_thumbs\":true,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":false,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
@@ -4055,11 +4118,74 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/2",
-            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":false,\"indexer_ids\":[]}"
+            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":false,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
           }
         ]
       },
       "asked": false,
+      "click": ["Save"],
+      "showsEndpoint": "/api/video/libraries/folders"
+    },
+    "[data-library-id=\"2\"][data-kind=\"movie\"][data-builtin=\"4k\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find intros and credits\"]": {
+      "sel": "[data-library-id=\"2\"][data-kind=\"movie\"][data-builtin=\"4k\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find intros and credits\"]",
+      "weak": "context",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/video/libraries/folders/2",
+            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":false,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[]}"
+          }
+        ]
+      },
+      "asked": false,
+      "click": ["Save"],
+      "showsEndpoint": "/api/video/libraries/folders"
+    },
+    "[data-library-id=\"2\"][data-kind=\"movie\"][data-builtin=\"4k\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find recaps too\"]": {
+      "sel": "[data-library-id=\"2\"][data-kind=\"movie\"][data-builtin=\"4k\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find recaps too\"]",
+      "weak": "context",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/video/libraries/folders/2",
+            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":true,\"markers_write\":false,\"indexer_ids\":[]}"
+          }
+        ]
+      },
+      "asked": true,
+      "click": ["Save"],
+      "showsEndpoint": "/api/video/libraries/folders"
+    },
+    "[data-library-id=\"2\"][data-kind=\"movie\"][data-builtin=\"4k\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Save skip markers beside the videos\"]": {
+      "sel": "[data-library-id=\"2\"][data-kind=\"movie\"][data-builtin=\"4k\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Save skip markers beside the videos\"]",
+      "weak": "context",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/video/libraries/folders/2",
+            "body": "{\"name\":\"Movies 4K\",\"rules\":{\"genres\":[],\"keywords\":[]},\"quality_profile_id\":0,\"sources\":[],\"torrent_category\":\"\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":true,\"indexer_ids\":[]}"
+          }
+        ]
+      },
+      "asked": true,
       "click": ["Save"],
       "showsEndpoint": "/api/video/libraries/folders"
     },
@@ -4076,7 +4202,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/5",
-            "body": "{\"name\":\"Stand-Up-guard\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+            "body": "{\"name\":\"Stand-Up-guard\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
           }
         ]
       },
@@ -4096,7 +4222,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/5",
-            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[],\"path\":\"/media/standup-guard\",\"enabled\":true}"
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup-guard\",\"enabled\":true}"
           }
         ]
       },
@@ -4117,7 +4243,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/5",
-            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy-guard\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy-guard\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
           }
         ]
       },
@@ -4138,7 +4264,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/5",
-            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up-guard\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up-guard\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
           }
         ]
       },
@@ -4159,7 +4285,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/5",
-            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":0,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":0,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
           }
         ]
       },
@@ -4180,7 +4306,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/5",
-            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su-guard\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su-guard\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
           }
         ]
       },
@@ -4201,7 +4327,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/5",
-            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"guard-probe\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"guard-probe\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
           }
         ]
       },
@@ -4222,7 +4348,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/5",
-            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":false,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":false,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
           }
         ]
       },
@@ -4243,7 +4369,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/5",
-            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":false,\"chapter_thumbs\":true,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":false,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
           }
         ]
       },
@@ -4264,11 +4390,74 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/5",
-            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":false,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
           }
         ]
       },
       "asked": false,
+      "click": ["Save"],
+      "showsEndpoint": "/api/video/libraries/folders"
+    },
+    "[data-library-id=\"5\"][data-kind=\"movie\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find intros and credits\"]": {
+      "sel": "[data-library-id=\"5\"][data-kind=\"movie\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find intros and credits\"]",
+      "weak": "context",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/video/libraries/folders/5",
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":false,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+          }
+        ]
+      },
+      "asked": false,
+      "click": ["Save"],
+      "showsEndpoint": "/api/video/libraries/folders"
+    },
+    "[data-library-id=\"5\"][data-kind=\"movie\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find recaps too\"]": {
+      "sel": "[data-library-id=\"5\"][data-kind=\"movie\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Find recaps too\"]",
+      "weak": "context",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/video/libraries/folders/5",
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":true,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+          }
+        ]
+      },
+      "asked": true,
+      "click": ["Save"],
+      "showsEndpoint": "/api/video/libraries/folders"
+    },
+    "[data-library-id=\"5\"][data-kind=\"movie\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Save skip markers beside the videos\"]": {
+      "sel": "[data-library-id=\"5\"][data-kind=\"movie\"] input[type=\"checkbox\"][role=\"switch\"][aria-label=\"Save skip markers beside the videos\"]",
+      "weak": "context",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/video/libraries/folders/5",
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":true,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":true}"
+          }
+        ]
+      },
+      "asked": true,
       "click": ["Save"],
       "showsEndpoint": "/api/video/libraries/folders"
     },
@@ -4285,7 +4474,7 @@
           {
             "method": "PUT",
             "url": "/api/video/libraries/folders/5",
-            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":false}"
+            "body": "{\"name\":\"Stand-Up\",\"rules\":{\"genres\":[\"Comedy\"],\"keywords\":[\"stand-up\"]},\"quality_profile_id\":3,\"sources\":[\"usenet\"],\"torrent_category\":\"su\",\"usenet_category\":\"\",\"auto_search\":true,\"upgrades\":true,\"chapter_thumbs\":true,\"markers\":true,\"markers_recaps\":false,\"markers_write\":false,\"indexer_ids\":[],\"path\":\"/media/standup\",\"enabled\":false}"
           }
         ]
       },
