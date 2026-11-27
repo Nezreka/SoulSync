@@ -83,12 +83,34 @@ def test_the_filename_still_substitutes_disc():
                      disc_number=1, total_discs=1) == "03 - Apetitan"
 
 
-def test_quality_stays_filename_only():
-    """The one variable the settings page really does document as filename-only."""
-    assert _folder("$albumartist/$quality/$album/$track - $title") \
-        == "Sawano Hiroyuki/AoT OST"
+def test_quality_works_in_a_folder_too():
+    """hrk_hrk: $albumartist/$year. $album. $quality/$track. $title gave a
+    folder with no quality; it was stripped from folders as filename-only."""
+    assert _folder("$albumartist/$year. $album. $quality/$track. $title").replace("\\", "/") \
+        == "Sawano Hiroyuki/2017. AoT OST. FLAC"
+    assert _folder("$albumartist/${quality}/$album/$track - $title").replace("\\", "/") \
+        == "Sawano Hiroyuki/FLAC/AoT OST"
     assert _filename("$albumartist/$album/$track - $title [$quality]") \
         == "03 - Apetitan [FLAC]"
+
+
+def test_folder_quality_is_the_albums_and_the_file_keeps_its_own():
+    ctx = _ctx()
+    ctx["quality"] = "FLAC 24bit/96kHz"
+    ctx["album_quality"] = "FLAC 16bit/44.1kHz"
+    folder, filename = import_paths.get_file_path_from_template_raw(
+        "$albumartist/$album [$quality]/$track - $title [${quality}]", ctx)
+    assert folder.replace("\\", "/") == "Sawano Hiroyuki/AoT OST [FLAC 16bit_44.1kHz]"
+    assert filename == "03 - Apetitan [FLAC 24bit_96kHz]"
+
+
+def test_an_album_pins_its_first_quality(monkeypatch):
+    monkeypatch.setattr(import_paths, "_ALBUM_QUALITY_PINS", {})
+    key = ("sawano hiroyuki", "aot ost", "2017", "")
+    assert import_paths.pin_album_quality(key, "FLAC 16bit") == "FLAC 16bit"
+    assert import_paths.pin_album_quality(key, "MP3 320") == "FLAC 16bit"
+    assert import_paths.pin_album_quality(("x", "y", "", ""), "MP3 320") == "MP3 320"
+    assert import_paths.pin_album_quality(key, "") == ""
 
 
 # ── every spelling of a disc variable, not just the bare ones ────────────────

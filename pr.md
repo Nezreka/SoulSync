@@ -69,6 +69,9 @@ the browser extension (chrome and firefox) has a new release, 0.3.0: https://git
 - **my account in a member's words (#2303).** it says what you can do and what you can ask for.
 - **connected accounts stay yours (#2301).** a member who hasn't connected their own spotify, tidal, deezer, qobuz or youtube music no longer sees the server's playlists. there is a switch to share them.
 
+- **import plex users (#2319).** settings, people, import from plex lists everyone your plex server is shared with. each gets a profile linked to their plex account, so sign in with plex lands on it, even with plex sign-ups off.
+- **seerr both ways (#2324).** seerr's webhook sends requests to soulsync, each filed once under the right profile (matched by plex account), with its seasons and 4k. with your seerr url and key set, approve, decline and available go back to seerr. no radarr or sonarr needed.
+
 ## playlists
 
 - **sync several at once (#2309).** select playlists and choose sync (on your server with the songs you have, nothing downloaded) or sync & download. they run one after another with a status for each and stop after this one. each playlist's own window also has sync only.
@@ -92,6 +95,8 @@ the browser extension (chrome and firefox) has a new release, 0.3.0: https://git
 
 - **note sonar.** the search bar can listen to a song playing near you, or take a clip, and find it through shazam (thanks @Jygijiji, #2307). the clip goes to shazam, which the button says before it records.
 
+- **paste a youtube link (#2322).** a video or playlist link in search, files shows that exact video (or the playlist's videos, up to 200) with download buttons.
+
 ## library
 
 - **remove several artists at once (#2300)** from the library's selection bar.
@@ -111,6 +116,14 @@ the browser extension (chrome and firefox) has a new release, 0.3.0: https://git
 
 - a multi-artist album (one artist's release where every song credits guests) stays under its album artist instead of becoming one album per guest (#2300).
 - changing an album's quality profile keeps its details window open (#2316).
+- the same artist no longer shows up two or three times when sources spell the name with different characters (alt‐J, 98º and 98°), and existing twins merge on start (#2321).
+- a various artists compilation no longer splits into one album per track artist, split ones are put back together on start, and re-tag never offers a track artist over various artists.
+- a tv release for a different show ("the 100" for "100 days of deception") is refused: titles in other alphabets keep their letters when compared, and the importer checks the file's own name and tag.
+- a soulseek video download is measured by its real file, never a leftover partial in slskd's incomplete folder.
+- $quality works in folder names too, with one folder per album.
+- the soulseek tab of downloads lists only soulseek's transfers, and its clear completed clears only those.
+- the import plex users list scrolls (#2323).
+- docker compose publishes 8443 for the player app's remote streaming, and the remote access help covers the automatic router option.
 
 - discovery: the new-music pool and the made-for-you playlists follow what you play this month, not only your watchlist and lifetime plays.
 - a permission denied on tags says who soulsync runs as and what to set (#2295), a navidrome cover downloads (#2293), a re-tag finding that only writes ids can close (#2292), a service tile stays when its sheet closes (#2285), scrollbars match (#2250), and recommendations lead with what you play this month.

@@ -81,7 +81,7 @@ def import_reference(context):
     from contextlib import closing
     from core.downloads.origin import _parse_source_info
     from core.imports.context import get_import_track_info
-    from core.library2.retag import _track_rows, _db_data_for_row
+    from core.library2.retag import _track_rows, _db_data_for_row, keeps_various_artists
     track = get_import_track_info(context)
     native = context.get('lib2_entity') or track.get('lib2_entity') or {}
     track_id = native.get('track_id') or _parse_source_info(track.get('source_info')).get('lib2_track_id')
@@ -215,7 +215,7 @@ def quiet_differences(config):
 
 
 def validate_tags(conn, file_id, tags, config):
-    from core.library2.retag import _track_rows, _db_data_for_row
+    from core.library2.retag import _track_rows, _db_data_for_row, keeps_various_artists
     from core.tag_writer import build_tag_diff, total_is_settled
     from core.library2.status import EXPECTED_TAGS
 
@@ -234,6 +234,10 @@ def validate_tags(conn, file_id, tags, config):
         checks[key] = ('not_required' if not diff['file_value'] and not diff['db_value']
                        else 'missing' if not diff['file_value'] else 'unknown' if not diff['db_value'] or diff.get('protected')
                        else 'mismatch' if diff['changed'] else 'correct')
+        if (key == 'albumartist' and checks[key] == 'mismatch'
+                and keeps_various_artists(diff['file_value'], data)):
+            # a compilation filed under its performer: the file is right
+            checks[key] = 'differs'
     for key, number, expected in (('total_tracks', 'track_number', data.get('track_count')),
                                   ('total_discs', 'disc_number', data.get('total_discs'))):
         actual = tags.get(key)

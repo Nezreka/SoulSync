@@ -35,6 +35,7 @@ bp = Blueprint("seerr_compat", __name__, url_prefix="/seerr/api/v1")
 get_database = None
 config_manager = None
 _service = None
+_bridge = None
 _service_lock = threading.Lock()
 _jf_cache = {"at": 0.0, "users": []}
 _JF_TTL_S = 300
@@ -43,6 +44,11 @@ _JF_TTL_S = 300
 def configure(*, get_database, config_manager):
     globals()["get_database"] = get_database
     globals()["config_manager"] = config_manager
+    try:
+        from core.video.download_events import register_event_forwarder
+        register_event_forwarder(on_video_event)
+    except Exception:  # noqa: BLE001 - seerr just hears later
+        logger.exception("seerr compat: could not follow video events")
 
 
 def create_blueprint():
@@ -228,6 +234,88 @@ def service() -> SeerrCompat:
                 publish=_publish, show_wanted=_show_wanted, perms_for=_perms_for,
                 unknown_users=unknown_users, quality_profiles=_quality_profiles)
         return _service
+
+
+def seerr_remote():
+    """the seerr in front of soulsync (#2324), or None while it has no url
+    and key in settings."""
+    from core.seerr_compat.remote import SeerrRemote
+    try:
+        url = config_manager.get("seerr_compat.seerr_url", "") or ""
+        key = config_manager.get("seerr_compat.seerr_api_key", "") or ""
+    except Exception:  # noqa: BLE001 - unreadable is not set
+        return None
+    if not str(url).strip() or not str(key).strip() or key == getattr(config_manager, "REDACTED_SENTINEL", None):
+        return None
+    r = SeerrRemote(url, key)
+    return r if r.configured else None
+
+
+def _plex_account(plex_id):
+    return get_database().get_profile_by_plex_account(str(plex_id))
+
+
+def bridge():
+    global _bridge
+    svc = service()
+    with _service_lock:
+        if _bridge is None or _bridge.svc is not svc:
+            from core.seerr_compat.bridge import SeerrBridge, SeerrLinks
+            _bridge = SeerrBridge(service=svc, links=SeerrLinks(lambda: _video_db()._get_connection()),
+                                  remote=seerr_remote, list_profiles=_list_profiles,
+                                  plex_account=_plex_account)
+        return _bridge
+
+
+_sync_state = {"running": False, "again": False}
+_sync_guard = threading.Lock()
+
+
+def _sync_loop():
+    while True:
+        try:
+            bridge().sync()
+        except Exception:  # noqa: BLE001
+            logger.exception("seerr compat: status sync failed")
+        with _sync_guard:
+            if not _sync_state["again"]:
+                _sync_state["running"] = False
+                return
+            _sync_state["again"] = False
+
+
+def on_video_event(etype, _data=None):
+    """an approval, a decline or a finished download may be news for seerr:
+    one sync at a time in the background, another after it when more came."""
+    from core.seerr_compat.bridge import SYNC_EVENTS
+    if etype not in SYNC_EVENTS or not enabled() or seerr_remote() is None:
+        return
+    with _sync_guard:
+        if _sync_state["running"]:
+            _sync_state["again"] = True
+            return
+        _sync_state["running"] = True
+    threading.Thread(target=_sync_loop, name="seerr-status-sync", daemon=True).start()
+
+
+def test_seerr() -> tuple:
+    """(ok, message) for the settings Test button."""
+    from core.seerr_compat.remote import SeerrRemoteError
+    r = seerr_remote()
+    if r is None:
+        return False, "Add the Seerr URL and API key first."
+    try:
+        return True, r.test()
+    except SeerrRemoteError as e:
+        return False, str(e)
+
+
+_SEERR_KEYS = ("seerrRequestId", "requestId", "request_id", "notification_type", "notificationType")
+
+
+def _from_seerr(body) -> bool:
+    """a body seerr's webhook sent: its request id or its event name."""
+    return any(k in body for k in _SEERR_KEYS) or isinstance(body.get("request"), dict)
 
 
 def _message(status, message):
@@ -464,9 +552,27 @@ def request_create():
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         raise SeerrError(400, "A JSON body is required.")
+    if _from_seerr(body):
+        # seerr's webhook pointed here (#2324): its request id is kept so
+        # the same request is never filed twice, and seerr hears back
+        out, code = bridge().handle(body, _api_user())
+        return jsonify(out), code
     # is4k and profileId are read by the service: the acting profile's 4K
     # profile, or its allowed pick (resolve_request_quality)
     return jsonify(service().create_request(_api_user(), body)), 201
+
+
+@bp.route("/webhook", methods=["POST"])
+@seerr_route(acting=False)
+def seerr_webhook():
+    """seerr's webhook agent with its default payload (#2324). the requester
+    comes from seerr (with its url set) or the payload, then X-Api-User,
+    then the fallback profile."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        raise SeerrError(400, "A JSON body is required.")
+    out, code = bridge().handle(body, _api_user())
+    return jsonify(out), code
 
 
 @bp.route("/request/<int:request_id>", methods=["DELETE"])
