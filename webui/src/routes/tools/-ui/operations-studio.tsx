@@ -280,7 +280,7 @@ export const VIDEO_PILLARS: readonly StrategicPillar[] = [
     tagline: 'Summaries, genres, artwork and TMDB matches',
     description:
       'Finds movies missing a summary, genres, a poster or backdrop, or a TMDB match, and fills them in from the metadata sources.',
-    jobIds: ['metadata_gaps', 'media_info'],
+    jobIds: ['metadata_gaps', 'media_info', 'loudness'],
     findingTypes: ['metadata_gap'],
   },
 ] as const;

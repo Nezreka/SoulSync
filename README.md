@@ -241,6 +241,8 @@ Every page is there: **Home, Movies, TV, Music, YouTube, Audiobooks, Podcasts, H
 ## Music, audiobooks & podcasts
 
 - **A music hub** with artists, albums, playlists, your mixes and artist mixes, a full now-playing view with synced lyrics, a queue, and visuals that move to the song.
+- **Volume levelling** from the ReplayGain SoulSync already measures: Off, Track, Album or Smart (album levels while an album plays in order, song levels on shuffle and playlists), a target loudness, a pre-amp and clipping prevention from each song's peak. Songs without ReplayGain are measured in the background, the moment they're played first. Set per profile in Settings, You, Music; Subsonic apps get the same gains.
+- **Level video loudness**: very quiet films and very loud videos brought to one level, measured in the background (nothing is written into the files).
 - **Audiobooks and podcasts** with chapters, resume and progress kept across every screen.
 - **YouTube**: a video you downloaded plays in the player with resume and queue; one you haven't plays in YouTube's own embed.
 - **Plays count**: a song played in the player is a play in your stats, mixes and scrobbles.
@@ -432,7 +434,7 @@ Live batches with speed and ETA, "download this next", and a step-by-step detail
 - **Verification**: AcoustID fingerprinting (link your AcoustID account once in Settings: lookups need it from 1 January 2027), real-audio checks with ffmpeg (catches padded previews), silence, duration (with an adjustable tolerance) and integrity guards, and a **fake-lossless** detector.
 - **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention. The trash icon at the top of the Library opens it. Review stays quiet on its own: near-misses leave once a later candidate for the same track imports, automatic quality upgrades never send anything to Review (your current file stays), and old items can age out after N days (off by default). All of it lands in the recycle bin, restorable.
 - **Tagging**: Picard-style **MusicBrainz release preflight** pins one release per album so every track agrees. Tags are written with mutagen (ID3v2.4, FLAC, Vorbis, MP4), enriched in the order you choose. What the library learns later (a genre, a year, a track total) is filled into the tags a file left blank on its own, never over a tag the file has, and every fill can be undone from **Tools → Filled Tags** (**Fill empty tags automatically**: fill only, fill and update, or off).
-- **Extras**: preferred-source cover art with a minimum size, synced lyrics from LRClib, **ReplayGain 2.0** (track + album), optional lossy copies (MP3 / Opus / AAC), and **atomic album publishing** so half-downloaded albums never appear in your server.
+- **Extras**: preferred-source cover art with a minimum size, synced lyrics from LRClib, **ReplayGain 2.0** (track + album; Opus gets RFC 7845 R128 tags), optional lossy copies (MP3 / Opus / AAC), and **atomic album publishing** so half-downloaded albums never appear in your server.
 - **File organization**: templates for albums, singles, compilations, playlists, music videos, podcasts and audiobooks (`$albumartist/$album/$track - $title` and friends). Every template shows the path it makes right under it as you type.
 
 <details>

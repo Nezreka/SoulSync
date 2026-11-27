@@ -437,6 +437,25 @@ CREATE INDEX IF NOT EXISTS idx_media_files_size    ON media_files(size_bytes);
 -- scan rewrites media_files, so this is where a probe outlives it: the scan
 -- fills the languages in from here when the server didn't send them (plex
 -- sends no stream data in a library listing).
+-- how loud each video file's main audio track is (v79), measured with ffmpeg
+-- ebur128 in the background (the Loudness maintenance job), so the player can
+-- level a very quiet or very loud video. keyed like video_file_probes, by file
+-- name + size, so a server scan that rewrites media_files keeps it. nothing is
+-- ever written into the video file.
+CREATE TABLE IF NOT EXISTS video_file_loudness (
+    file_name        TEXT NOT NULL,
+    size_bytes       INTEGER NOT NULL,
+    audio_stream     INTEGER NOT NULL DEFAULT 0,   -- which audio track was measured (0 = the first)
+    integrated_lufs  REAL,
+    true_peak_db     REAL,
+    lra              REAL,                         -- loudness range, LU
+    measured_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    attempts         INTEGER NOT NULL DEFAULT 0,   -- failures so far (3 and it's left alone)
+    error            TEXT,
+    PRIMARY KEY (file_name, size_bytes)
+);
+CREATE INDEX IF NOT EXISTS idx_video_file_loudness_size ON video_file_loudness(size_bytes);
+
 CREATE TABLE IF NOT EXISTS video_file_probes (
     file_name          TEXT NOT NULL,
     size_bytes         INTEGER NOT NULL,

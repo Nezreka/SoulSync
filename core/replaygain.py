@@ -53,6 +53,45 @@ _TAG_ALBUM_PEAK = "REPLAYGAIN_ALBUM_PEAK"
 
 _AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
 
+# opus keeps its gain as R128_TRACK_GAIN / R128_ALBUM_GAIN (RFC 7845 5.2.1):
+# a signed Q7.8 integer (dB * 256) relative to -23 LUFS, on top of the
+# header's output gain. many opus players ignore REPLAYGAIN_* entirely.
+# peaks have no R128 tag, so the REPLAYGAIN_*_PEAK comments stay.
+_R128_TRACK = "R128_TRACK_GAIN"
+_R128_ALBUM = "R128_ALBUM_GAIN"
+R128_REFERENCE_LUFS = -23.0
+# a ReplayGain gain sits 5 dB above the same file's R128 gain (-18 vs -23)
+_R128_OFFSET_DB = RG_REFERENCE_LUFS - R128_REFERENCE_LUFS
+
+
+def rg_gain_to_r128(gain_db: float) -> int:
+    """a ReplayGain gain in dB as an R128 tag value (Q7.8, ref -23 LUFS).
+    a target other than -18 (#1060) rides along: the offset is kept."""
+    q = int(round((float(gain_db) - _R128_OFFSET_DB) * 256))
+    return max(-32768, min(32767, q))
+
+
+def r128_to_rg_gain(value) -> Optional[float]:
+    """an R128 tag value (Q7.8 text) as a ReplayGain gain in dB, or None"""
+    try:
+        q = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if not -32768 <= q <= 32767:
+        return None
+    return round(q / 256.0 + _R128_OFFSET_DB, 2)
+
+
+def _is_opus(audio, ext: str) -> bool:
+    """an opus stream, by extension or (an .ogg holding opus) by what mutagen opened"""
+    if ext == '.opus':
+        return True
+    try:
+        from mutagen.oggopus import OggOpus
+        return isinstance(audio, OggOpus)
+    except Exception:  # noqa: BLE001
+        return False
+
 
 # ---------------------------------------------------------------------------
 # FFmpeg availability
@@ -104,7 +143,17 @@ def analyze_track(file_path: str) -> Tuple[float, float]:
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError("ffmpeg timed out analyzing track") from exc
 
-    stderr = result.stderr
+    parsed = _parse_ebur128(result.stderr)
+    if parsed is None:
+        raise RuntimeError(
+            f"Could not parse ebur128 output for '{file_path}'. "
+            f"FFmpeg exit code: {result.returncode}"
+        )
+    return parsed['integrated_lufs'], parsed['true_peak_db']
+
+
+def _parse_ebur128(stderr: str) -> Optional[Dict[str, float]]:
+    """the Summary block's integrated loudness, true peak and loudness range"""
 
     # ebur128 emits two kinds of output:
     #   (a) Per-window progress lines like
@@ -142,10 +191,7 @@ def analyze_track(file_path: str) -> Tuple[float, float]:
         peak_matches = re.findall(r'Peak:\s+([-\d.]+)\s+dBFS', stderr)
 
     if not lufs_values:
-        raise RuntimeError(
-            f"Could not parse ebur128 output for '{file_path}'. "
-            f"FFmpeg exit code: {result.returncode}"
-        )
+        return None
 
     integrated_lufs = float(lufs_values[-1])
 
@@ -155,7 +201,58 @@ def analyze_track(file_path: str) -> Tuple[float, float]:
         # Fall back to 0 dBFS peak if not available
         true_peak_dbfs = 0.0
 
-    return integrated_lufs, true_peak_dbfs
+    lra = None
+    if summary_idx >= 0:
+        lra_values = re.findall(r'LRA:\s+([-\d.]+)\s+LU\b', stderr[summary_idx:])
+        if lra_values:
+            lra = float(lra_values[0])
+    return {'integrated_lufs': integrated_lufs, 'true_peak_db': true_peak_dbfs, 'lra': lra}
+
+
+def _low_priority_prefix() -> list:
+    """nice 19 and idle io where the box has them: a background measurement
+    never competes with playback, a scan or an import"""
+    import os
+    import shutil
+    if os.name != 'posix':
+        return []
+    prefix = []
+    if shutil.which('ionice'):
+        prefix += ['ionice', '-c3']
+    if shutil.which('nice'):
+        prefix += ['nice', '-n', '19']
+    return prefix
+
+
+def measure_loudness(file_path: str, *, audio_stream: Optional[int] = None,
+                     timeout: float = 120, low_priority: bool = True) -> Dict[str, Optional[float]]:
+    """ebur128 on one audio stream of a file, for the background measurers:
+    one thread, no video decoded, low priority. ``audio_stream`` picks the
+    nth audio stream (a video's main track is 0); None takes ffmpeg's pick.
+    returns {integrated_lufs, true_peak_db, lra}. raises like analyze_track."""
+    cmd = (_low_priority_prefix() if low_priority else []) + [
+        'ffmpeg', '-nostdin', '-hide_banner', '-v', 'info', '-threads', '1',
+        '-i', file_path, '-vn', '-sn', '-dn',
+    ]
+    if audio_stream is not None:
+        cmd += ['-map', f'0:a:{int(audio_stream)}']
+    cmd += ['-filter:a', 'ebur128=peak=true', '-f', 'null', '-']
+    try:
+        result = subprocess.run(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8', errors='replace', timeout=timeout,
+        )
+    except FileNotFoundError as exc:
+        raise FileNotFoundError("ffmpeg not found on PATH") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("ffmpeg timed out measuring loudness") from exc
+    parsed = _parse_ebur128(result.stderr)
+    if parsed is None:
+        raise RuntimeError(f"ffmpeg couldn't measure this file (exit {result.returncode})")
+    # silence reads -70 LUFS: no gain can level it, and +52 dB would be a disaster
+    if parsed['integrated_lufs'] <= -69.0:
+        raise RuntimeError("the audio is silent")
+    return parsed
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +312,13 @@ def read_replaygain_tags(file_path: str) -> Dict[str, Optional[str]]:
             result['track_peak'] = _vorbis_first(audio, _TAG_TRACK_PEAK.lower())
             result['album_gain'] = _vorbis_first(audio, _TAG_ALBUM_GAIN.lower())
             result['album_peak'] = _vorbis_first(audio, _TAG_ALBUM_PEAK.lower())
+            if _is_opus(audio, ext):
+                # R128 is opus's own gain: it wins over a REPLAYGAIN_* an
+                # older SoulSync (or another tool) left beside it
+                for key, tag in (('track_gain', _R128_TRACK), ('album_gain', _R128_ALBUM)):
+                    gain = r128_to_rg_gain(_vorbis_first(audio, tag.lower()))
+                    if gain is not None:
+                        result[key] = f"{gain:+.2f} dB"
         elif ext in ('.m4a', '.mp4'):
             result['track_gain'] = _mp4_rg(audio, _TAG_TRACK_GAIN)
             result['track_peak'] = _mp4_rg(audio, _TAG_TRACK_PEAK)
@@ -313,6 +417,8 @@ def write_replaygain_tags(
 
         if ext == '.mp3':
             _write_id3_rg(audio, track_gain_str, track_peak_str, album_gain_str, album_peak_str)
+        elif ext in ('.flac', '.ogg', '.oga', '.opus') and _is_opus(audio, ext):
+            _write_opus_rg(audio, track_gain_db, track_peak_str, album_gain_db, album_peak_str)
         elif ext in ('.flac', '.ogg', '.oga', '.opus'):
             _write_vorbis_rg(audio, track_gain_str, track_peak_str, album_gain_str, album_peak_str)
         elif ext in ('.m4a', '.mp4'):
@@ -358,6 +464,28 @@ def _write_vorbis_rg(audio, track_gain: str, track_peak: str,
     audio[_TAG_TRACK_PEAK.lower()] = [track_peak]
     if album_gain is not None:
         audio[_TAG_ALBUM_GAIN.lower()] = [album_gain]
+    if album_peak is not None:
+        audio[_TAG_ALBUM_PEAK.lower()] = [album_peak]
+
+
+def _write_opus_rg(audio, track_gain_db: float, track_peak: str,
+                   album_gain_db: Optional[float], album_peak: Optional[str]) -> None:
+    """opus gains as R128_* (RFC 7845), never REPLAYGAIN_*_GAIN: a player
+    reading both would apply the gain twice, and the RFC says not to write
+    them. an old REPLAYGAIN_*_GAIN SoulSync wrote before is taken off. the
+    peaks stay as REPLAYGAIN_*_PEAK (R128 has none; clipping prevention
+    needs them)."""
+    if audio.tags is None:
+        audio.add_tags()
+    audio[_R128_TRACK.lower()] = [str(rg_gain_to_r128(track_gain_db))]
+    audio[_TAG_TRACK_PEAK.lower()] = [track_peak]
+    for stale in (_TAG_TRACK_GAIN, _TAG_ALBUM_GAIN if album_gain_db is not None else None):
+        if stale:
+            for key in (stale.lower(), stale):
+                if key in audio:
+                    del audio[key]
+    if album_gain_db is not None:
+        audio[_R128_ALBUM.lower()] = [str(rg_gain_to_r128(album_gain_db))]
     if album_peak is not None:
         audio[_TAG_ALBUM_PEAK.lower()] = [album_peak]
 

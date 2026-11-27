@@ -278,6 +278,8 @@ Error codes: `10` a required parameter is missing, `40` wrong username or passwo
 
 Ids are typed: `ar-<id>` artist, `al-<id>` album, `tr-<id>` song (a bare number is a song), `pl-<id>` playlist, `mx-<n>` a Daily Mix. One music folder, id `1`.
 
+Songs carry OpenSubsonic `replayGain` (`trackGain`, `albumGain`, `trackPeak`, `albumPeak`, `baseGain`), from the file's ReplayGain or Opus R128 tags, or SoulSync's own measurement when the file has none.
+
 Methods: `ping`, `getLicense`, `getOpenSubsonicExtensions`, `tokenInfo`, `getUser` (its own profile only), `getScanStatus`, `getMusicFolders`, `getIndexes`, `getArtists`, `getArtist`, `getAlbum`, `getSong`, `getMusicDirectory`, `getGenres`, `getAlbumList` / `getAlbumList2` (`random`, `newest`, `highest`, `frequent`, `recent`, `alphabeticalByName`, `alphabeticalByArtist`, `starred`, `byYear`, `byGenre`; `size` up to 500), `getRandomSongs`, `getSongsByGenre`, `search2` / `search3` (an empty query pages through the whole library), `getStarred` / `getStarred2`, `star` / `unstar` (`id`, `albumId`, `artistId`, each repeatable), `setRating`, `scrobble` (`submission=true` records the play, `false` is now playing), `getNowPlaying` (this profile's), `getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`, `deletePlaylist`, `getCoverArt` (`size`), `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getSimilarSongs` / `getSimilarSongs2`, `getTopSongs`, `getArtistInfo` / `getArtistInfo2`, `getAlbumInfo` / `getAlbumInfo2`, `getPlayQueue`, `savePlayQueue`. `getBookmarks`, `getPodcasts`, `getNewestPodcasts`, `getInternetRadioStations` and `getShares` answer empty; `startScan` answers `50`.
 
 What a request sees is its profile's: its library (own-library rules), less explicit music when the profile hides it, its playlists, stars, ratings, play queue (one per app) and plays. A starred song is a Liked Song. Starring a song the profile has no file for adds it to the wishlist (may download) or makes a request (may only ask), else `50`. Mirrored playlists, Liked Songs and Daily Mixes are `readonly: true`.
@@ -497,6 +499,14 @@ How the player, and paired apps, play something. Both routes take the signed-in 
 
 - `GET /api/player/playable/<item_type>/<item_id>`: `{mode, url, mime, duration, parts, chapters, verdict}`, how to play it, never where the file is. `parts` and `chapters` are an audiobook's timeline, read from its files: each part's `start` and `duration` in seconds on the book's clock, and each chapter's `start` and `title`. `verdict` is a video file's direct-play verdict (`yes`, `maybe` or `no`, with `reasons`).
 - `GET /api/player/stream/<item_type>/<item_id>`: the bytes, with `Range` support (`206`), so a player can seek. A file SoulSync can't reach is relayed from your media server.
+
+#### Volume levelling
+
+- `playable` for a track adds `loudness: {track_gain, track_peak, album_gain, album_peak, reference_lufs, source}` for the file `stream` sends: gains in dB to reach `reference_lufs` (-18 unless the library's ReplayGain target was changed), peaks linear (1.0 is full scale), `source` `tags` (the file's ReplayGain or Opus R128 tags) or `measured` (SoulSync measured a file with none, and wrote nothing into it). `null` when nothing is known yet; that song's album is then measured next, in the background.
+- A track's `stream` fetched whole (no `Range`) carries the same numbers as `X-Loudness-Reference` and `X-ReplayGain-Track-Gain` / `-Track-Peak` / `-Album-Gain` / `-Album-Peak` headers, for a client that downloads songs ahead.
+- `GET /api/player/loudness?ids=1,2,3` (up to 500 library track ids): `{reference_lufs, tracks: {"<id>": {...} or null}}`, a queue's worth at once.
+- `playable` for a movie or episode adds `loudness: {integrated_lufs, true_peak_db, lra, audio_stream}` once the video Loudness maintenance job has measured its file (the first audio track), else `null`.
+- The profile's player settings hold `loudness_mode` (`off`, `track`, `album`, `smart`; smart is album gain while an album plays in order, track gain otherwise), `loudness_target` (LUFS, -24 to -10, default -18), `loudness_preamp` (dB, -12 to 12), `loudness_prevent_clipping` and `video_loudness`. The rule every player applies is in `core/loudness.level_db`.
 
 Refusals are `{error, message}`: `403 restricted` for something over the profile's limits, `404` for something not in the library or without a file. Podcast episodes don't come here: they stream from the feed's host through the podcast side's audio proxy.
 

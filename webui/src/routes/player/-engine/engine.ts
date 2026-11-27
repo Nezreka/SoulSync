@@ -16,6 +16,7 @@
  * engine is tested with fakes and nothing here knows about react.
  */
 
+import type { LevelPrefs, Loudness, VideoLoudness } from './loudness';
 import type { Queue } from './queue';
 import type { Tracks, TrackPrefs } from './tracks';
 import type { Chapter, ItemType, MediaKind, Part, PlayItem, RepeatMode } from './types';
@@ -27,6 +28,13 @@ import {
   shouldCrossfade,
   startEqualPowerCrossfade,
 } from './crossfade';
+import {
+  DEFAULT_LEVEL_PREFS,
+  dbToLinear,
+  inAlbumContext,
+  songLevelDb,
+  videoLevelDb,
+} from './loudness';
 import * as Q from './queue';
 import { bookTime, locate, nextChapterStart, previousChapterStart } from './timeline';
 import { pickAudio, pickSubtitle } from './tracks';
@@ -79,6 +87,8 @@ export interface Playable {
   parts?: Part[];
   chapters?: Chapter[];
   verdict?: Verdict | null;
+  /** how loud it is, for volume levelling: a song's gains, or a video's measurement */
+  loudness?: Loudness | VideoLoudness | null;
 }
 
 export interface SavedPosition {
@@ -114,6 +124,13 @@ export interface EngineDeps {
   now: () => number;
   /** amplify an element past full volume (a web audio gain); absent: no boost */
   boost?: (el: HTMLMediaElement, gain: number) => void;
+  /**
+   * volume levelling through web audio (linear gain; ``instant`` at a song's
+   * start, a glide otherwise). false: it can't be, the element's volume levels
+   */
+  level?: (el: HTMLMediaElement, linear: number, instant: boolean) => boolean;
+  /** level a crossfade's outgoing copy (a boost); returns its release, or null */
+  levelDetached?: (el: HTMLMediaElement, linear: number) => (() => void) | null;
   /** what's playing as sound, for visuals that follow it; absent or null: none */
   analyser?: (el: HTMLMediaElement) => AnalyserNode | null;
   /** the lock screen / media keys (navigator.mediaSession), when there is one */
@@ -172,6 +189,14 @@ export interface PlayerState {
   stillWatching: boolean;
   /** a video plays on into the next (the profile's setting) */
   autoplayNext: boolean;
+  /** volume levelling on what's playing: dB, and what it's from (null: not levelled) */
+  level: LevelInfo | null;
+}
+
+/** what levelling did to the item playing (stats for nerds, the settings page) */
+export interface LevelInfo {
+  db: number;
+  basis: 'track' | 'album' | 'estimate' | 'video';
 }
 
 /** this many videos in a row with nobody touching anything, then ask before the next */
@@ -285,6 +310,7 @@ export class PlayerEngine {
       watchedKey: null,
       stillWatching: false,
       autoplayNext: true,
+      level: null,
     };
     this.bindMediaSession();
   }
@@ -441,7 +467,7 @@ export class PlayerEngine {
 
   setVolume(volume: number) {
     const v = clampVolume(volume);
-    for (const el of Object.values(this.media)) if (el) this.applyVolume(el, v);
+    for (const el of Object.values(this.media)) if (el) this.applyVolume(el, v, false);
     this.deps.store.set('volume', String(v));
     this.set({ volume: v });
     // turning it up is turning it on
@@ -454,16 +480,93 @@ export class PlayerEngine {
     return el && this.deps.analyser ? this.deps.analyser(el) : null;
   }
 
-  /** an element at ``v``: up to full on the element, past it through the boost */
-  private applyVolume(el: HTMLMediaElement, v: number) {
-    el.volume = Math.min(1, v);
+  /**
+   * an element at ``v``: up to full on the element, past it through the
+   * boost, and the item's levelling on its own gain (a glide unless
+   * ``instant``). without web audio, levelling turns the element down.
+   */
+  private applyVolume(el: HTMLMediaElement, v: number, instant = true) {
+    const lin = this.levelFor(el);
+    let viaGraph = false;
+    if (this.deps.level && (lin !== 1 || this.levelled.has(el))) {
+      viaGraph = this.deps.level(el, lin, instant);
+      if (viaGraph) this.levelled.add(el);
+    }
+    this.elementLevel.set(el, viaGraph ? 1 : Math.min(1, lin));
+    el.volume = this.elementVolume(el, v);
     if (v > 1 || this.boosted.has(el)) {
       this.deps.boost?.(el, Math.max(1, v));
       this.boosted.add(el);
     }
   }
 
+  /** the element's own volume for ``v``: levelling's share rides on it without web audio */
+  private elementVolume(el: HTMLMediaElement, v = this.state.volume) {
+    return Math.min(1, v) * (this.elementLevel.get(el) ?? 1);
+  }
+
+  private levelFor(el: HTMLMediaElement) {
+    return this.state.kind && this.media[this.state.kind] === el ? this.levelLinear : 1;
+  }
+
   private readonly boosted = new Set<HTMLMediaElement>();
+  private readonly levelled = new Set<HTMLMediaElement>();
+  private readonly elementLevel = new Map<HTMLMediaElement, number>();
+
+  // ── volume levelling ─────────────────────────────────────────────────
+
+  private levelPrefs: LevelPrefs = DEFAULT_LEVEL_PREFS;
+  private levelLinear = 1;
+  /** whether the item playing is part of its album, decided once when it loads */
+  private albumContext = false;
+
+  /** the profile's levelling settings; what's playing glides to its new level */
+  configureLevelling(next: Partial<LevelPrefs>) {
+    const prefs = { ...this.levelPrefs, ...next };
+    if (JSON.stringify(prefs) === JSON.stringify(this.levelPrefs)) return;
+    this.levelPrefs = prefs;
+    this.updateLevel(false);
+  }
+
+  getLevelPrefs(): LevelPrefs {
+    return this.levelPrefs;
+  }
+
+  /** work out the playing item's level and put it on its element */
+  private updateLevel(instant: boolean) {
+    const info = this.computeLevel();
+    this.levelLinear = info ? dbToLinear(info.db) : 1;
+    if (JSON.stringify(info) !== JSON.stringify(this.state.level)) this.set({ level: info });
+    const el = this.state.kind ? this.media[this.state.kind] : undefined;
+    if (el) this.applyVolume(el, this.state.volume, instant);
+  }
+
+  private computeLevel(): LevelInfo | null {
+    const item = this.state.item;
+    const loud = this.playable?.loudness ?? null;
+    if (!item) return null;
+    const prefs = this.levelPrefs;
+    if (item.type === 'track') {
+      if (prefs.mode === 'off') return null;
+      const song = loud as Loudness | null;
+      const db = songLevelDb(song, prefs, this.albumContext);
+      const albumWanted = prefs.mode === 'album' || (prefs.mode === 'smart' && this.albumContext);
+      const hasAlbum = typeof song?.album_gain === 'number';
+      const hasTrack = typeof song?.track_gain === 'number';
+      const basis: LevelInfo['basis'] =
+        !hasAlbum && !hasTrack
+          ? 'estimate'
+          : (albumWanted && hasAlbum) || (!hasTrack && hasAlbum)
+            ? 'album'
+            : 'track';
+      return { db, basis };
+    }
+    if (MEDIA_KIND[item.type] === 'video' && item.type !== 'commercial') {
+      const db = videoLevelDb(loud as VideoLoudness | null, prefs, this.state.audioTrack);
+      return db === 0 ? null : { db, basis: 'video' };
+    }
+    return null;
+  }
 
   /** audio sync for this video: kept for it, applied at the same spot (through the converter) */
   setAudioDelay(ms: number) {
@@ -748,6 +851,14 @@ export class PlayerEngine {
       return;
     }
     this.playable = playable;
+    // levelling: album or track decided now, for the whole song (a queue
+    // edit mid-song never makes it jump); put on before a sound plays
+    this.albumContext = item.type === 'track' && inAlbumContext(this.state.queue);
+    {
+      const info = this.computeLevel();
+      this.levelLinear = info ? dbToLinear(info.db) : 1;
+      this.set({ level: info });
+    }
     const parts = playable.parts?.length
       ? playable.parts
       : [{ index: 0, start: 0, duration: playable.duration ?? 0 }];
@@ -1077,7 +1188,12 @@ export class PlayerEngine {
     this.crossfadeInFlightKey = fadeKey;
     this.cancelCrossfade?.();
     const vol = this.state.muted ? 0 : Math.min(1, this.state.volume);
-    this.cancelCrossfade = startEqualPowerCrossfade(el, Math.min(cfSec, remaining), vol);
+    this.cancelCrossfade = startEqualPowerCrossfade(el, Math.min(cfSec, remaining), vol, {
+      // the tail keeps the level its song played at; the next song comes in at its own
+      outLevel: this.levelLinear,
+      levelOut: this.deps.levelDetached,
+      inVolume: () => (this.state.muted ? 0 : this.elementVolume(el)),
+    });
     this.save(true);
     this.stopSaving();
     this.set({ queue: Q.goTo(this.state.queue, to) });

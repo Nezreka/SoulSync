@@ -110,6 +110,8 @@ export function albumItems(album: LibAlbumDetail): PlayItem[] {
       duration: t.duration ? t.duration / 1000 : null,
       parentId: String(album.id),
       parentTitle: album.title,
+      trackNumber: t.track_number ?? null,
+      discNumber: t.disc_number ?? null,
     }));
 }
 

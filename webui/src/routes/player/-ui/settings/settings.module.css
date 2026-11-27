@@ -1044,3 +1044,24 @@
 .state[data-on='true'] {
   color: var(--accent-light);
 }
+
+/* the pre-amp: a slider and its value */
+.preamp {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  width: 100%;
+}
+
+.preampRange {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.preampValue {
+  min-width: 5.5em;
+  color: var(--pl-text-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}

@@ -1,12 +1,12 @@
 /**
- * the "you" sections. playback and look & feel save with the profile (every
- * screen); picture, subtitles and music stay in this browser.
+ * the "you" sections. playback, look & feel and volume levelling save with
+ * the profile (every screen); picture, subtitles and the rest of music stay
+ * in this browser.
  */
-
-import type { CSSProperties } from 'react';
 
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
 import { THEMES } from '@/lib/visualizer';
 
@@ -21,6 +21,7 @@ import {
   useSmartGapless,
 } from '../../-engine/crossfade';
 import { QUALITIES, type Quality } from '../../-engine/engine';
+import { levelPrefsFrom, type LevelMode } from '../../-engine/loudness';
 import { playerSettingsQuery, type PlayerAccentColor } from '../../-player.api';
 import { ChevronIcon, HomeIcon } from '../icons';
 import { styles as k } from '../kit';
@@ -242,6 +243,153 @@ export function SubtitlesSection() {
   );
 }
 
+const LEVEL_MODES: { value: LevelMode; label: string }[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'track', label: 'Track' },
+  { value: 'album', label: 'Album' },
+  { value: 'smart', label: 'Smart' },
+];
+const LEVEL_MODE_HELP: Record<LevelMode, string> = {
+  off: 'Songs play as loud as they were mastered.',
+  track: 'Every song plays at the same loudness.',
+  album:
+    'Each album plays at the same loudness, and its quiet and loud songs stay as the artist made them.',
+  smart:
+    "Album levelling while an album plays in order, song levelling on shuffle, playlists and mixes. Best of both: you never touch the volume, and albums aren't flattened.",
+};
+const TARGETS = [
+  { value: -14, label: 'Loud' },
+  { value: -16, label: 'Louder' },
+  { value: -18, label: 'Standard' },
+  { value: -20, label: 'Softer' },
+  { value: -23, label: 'Quiet' },
+];
+const PREAMP_MIN = -12;
+const PREAMP_MAX = 12;
+
+function signedDb(db: number) {
+  return `${db > 0 ? '+' : db < 0 ? '−' : ''}${Math.abs(db).toFixed(1)} dB`;
+}
+
+/**
+ * the pre-amp: heard as it's dragged (the engine glides to it), saved once
+ * the hand stops
+ */
+function PreampSlider({
+  value,
+  disabled,
+  onSave,
+}: {
+  value: number;
+  disabled?: boolean;
+  onSave: (db: number) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const timer = useRef<number | null>(null);
+  useEffect(() => setDraft(value), [value]);
+  useEffect(
+    () => () => {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+    },
+    [],
+  );
+  const change = (db: number) => {
+    setDraft(db);
+    getEngine().configureLevelling({ preamp: db });
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => onSave(db), 450);
+  };
+  return (
+    <div className={p.preamp}>
+      <input
+        className={p.preampRange}
+        type="range"
+        min={PREAMP_MIN}
+        max={PREAMP_MAX}
+        step={0.5}
+        value={draft}
+        disabled={disabled}
+        aria-label="Pre-amp"
+        aria-valuetext={signedDb(draft)}
+        onChange={(e) => change(Number(e.target.value))}
+        onDoubleClick={() => change(0)}
+        data-nav
+      />
+      <output className={p.preampValue} aria-hidden="true">
+        {signedDb(draft)}
+      </output>
+    </div>
+  );
+}
+
+export function LevellingSection() {
+  const mine = useQuery(playerSettingsQuery()).data?.settings;
+  const save = useSavePlayerSettings();
+  const busy = !mine || save.isPending;
+  const prefs = levelPrefsFrom(mine);
+  const off = prefs.mode === 'off';
+  return (
+    <Card label="Volume levelling">
+      <Row stacked label="Volume levelling" help={LEVEL_MODE_HELP[prefs.mode]}>
+        <Choices
+          label="Volume levelling"
+          options={LEVEL_MODES}
+          value={prefs.mode}
+          disabled={busy}
+          onPick={(v) => save.mutate({ loudness_mode: v })}
+        />
+      </Row>
+      <Row
+        stacked
+        label="Target loudness"
+        help={`Levelled songs play at ${prefs.target} LUFS. Standard (-18) is the ReplayGain reference and leaves room for loud moments; Loud matches streaming apps.`}
+      >
+        <Choices
+          label="Target loudness"
+          options={TARGETS}
+          value={prefs.target}
+          disabled={busy || off}
+          onPick={(v) => save.mutate({ loudness_target: v })}
+        />
+      </Row>
+      <Row
+        stacked
+        label="Pre-amp"
+        help="A little more or less on top of levelling. Double-click to reset."
+      >
+        <PreampSlider
+          value={prefs.preamp}
+          disabled={busy || (off && !prefs.video)}
+          onSave={(db) => save.mutate({ loudness_preamp: db })}
+        />
+      </Row>
+      <Row
+        label="Prevent clipping"
+        help="Never turns a song up past the point its loudest moment would distort."
+      >
+        <Switch
+          label="Prevent clipping"
+          on={prefs.preventClipping}
+          busy={busy}
+          onChange={(v) => save.mutate({ loudness_prevent_clipping: v })}
+        />
+      </Row>
+      <Row
+        label="Level video loudness"
+        help="Brings very quiet films and very loud videos to the same level, so the remote stays put. Measured in the background; a video not measured yet plays as it is."
+      >
+        <Switch
+          label="Level video loudness"
+          on={prefs.video}
+          busy={busy}
+          onChange={(v) => save.mutate({ video_loudness: v })}
+        />
+      </Row>
+      <SaveError show={save.isError} />
+    </Card>
+  );
+}
+
 export function MusicSection() {
   const visual = useVisual();
   const crossfadeSec = useCrossfadeSeconds();
@@ -249,69 +397,73 @@ export function MusicSection() {
   const prefetchCount = usePrefetchCount();
   const local = useLocal();
   return (
-    <Card>
-      <Row
-        stacked
-        label="Crossfade"
-        help="An equal-power blend between songs on playlists, shuffles and Artist Mixes."
-      >
-        <Choices
+    <>
+      <LevellingSection />
+      <h3 className={p.subhead}>Playback</h3>
+      <Card>
+        <Row
+          stacked
           label="Crossfade"
-          options={CROSSFADE_OPTIONS.map((sec) => ({
-            value: sec,
-            label: sec === 0 ? 'Off' : `${sec}s`,
-          }))}
-          value={crossfadeSec}
-          onPick={(v) => local(() => setCrossfadeSeconds(v))}
-        />
-      </Row>
-      <Row
-        label="Smart album gapless"
-        help="No crossfade when the next song comes from the same album."
-      >
-        <Switch
+          help="An equal-power blend between songs on playlists, shuffles and Artist Mixes."
+        >
+          <Choices
+            label="Crossfade"
+            options={CROSSFADE_OPTIONS.map((sec) => ({
+              value: sec,
+              label: sec === 0 ? 'Off' : `${sec}s`,
+            }))}
+            value={crossfadeSec}
+            onPick={(v) => local(() => setCrossfadeSeconds(v))}
+          />
+        </Row>
+        <Row
           label="Smart album gapless"
-          on={smartGapless}
-          onChange={(v) => local(() => setSmartGapless(v))}
-        />
-      </Row>
-      <Row
-        stacked
-        label="Pre-cache upcoming songs"
-        help="Loads the next songs in the queue ahead, so crossfades and skips start at once."
-      >
-        <Choices
+          help="No crossfade when the next song comes from the same album."
+        >
+          <Switch
+            label="Smart album gapless"
+            on={smartGapless}
+            onChange={(v) => local(() => setSmartGapless(v))}
+          />
+        </Row>
+        <Row
+          stacked
           label="Pre-cache upcoming songs"
-          options={PREFETCH_OPTIONS.map((cnt) => ({
-            value: cnt,
-            label: cnt === 0 ? 'Off' : `Next ${cnt}`,
-          }))}
-          value={prefetchCount}
-          onPick={(v) => local(() => setPrefetchCount(v))}
-        />
-      </Row>
-      <Row stacked label="Music visuals" help="The moving backdrop in full-screen Now Playing.">
-        <div className={p.chipWrap} role="radiogroup" aria-label="Music visuals">
-          {THEMES.map((t) => {
-            const on = visual === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                className={p.themeChip}
-                data-on={on ? 'true' : undefined}
-                onClick={() => local(() => setVisual(t.id as typeof visual))}
-                data-nav
-              >
-                {t.name}
-              </button>
-            );
-          })}
-        </div>
-      </Row>
-    </Card>
+          help="Loads the next songs in the queue ahead, so crossfades and skips start at once."
+        >
+          <Choices
+            label="Pre-cache upcoming songs"
+            options={PREFETCH_OPTIONS.map((cnt) => ({
+              value: cnt,
+              label: cnt === 0 ? 'Off' : `Next ${cnt}`,
+            }))}
+            value={prefetchCount}
+            onPick={(v) => local(() => setPrefetchCount(v))}
+          />
+        </Row>
+        <Row stacked label="Music visuals" help="The moving backdrop in full-screen Now Playing.">
+          <div className={p.chipWrap} role="radiogroup" aria-label="Music visuals">
+            {THEMES.map((t) => {
+              const on = visual === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  className={p.themeChip}
+                  data-on={on ? 'true' : undefined}
+                  onClick={() => local(() => setVisual(t.id as typeof visual))}
+                  data-nav
+                >
+                  {t.name}
+                </button>
+              );
+            })}
+          </div>
+        </Row>
+      </Card>
+    </>
   );
 }
 

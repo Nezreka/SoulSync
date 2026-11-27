@@ -141,6 +141,7 @@ VIDEO_JOB_CATEGORIES = {
     "wishlist_audit": "Collection gaps",
     "metadata_gaps": "Metadata",
     "media_info": "Metadata",
+    "loudness": "Metadata",
 }
 
 # Jobs whose fixes move, rename or delete real files. The settings drawer
