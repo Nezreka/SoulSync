@@ -71,7 +71,11 @@ export interface Part {
 
 export interface Chapter {
   start: number;
+  /** where it ends (the next one's start); none for a book's or the last */
+  end?: number | null;
   title: string;
+  /** its picture (a video's, made in the background), once there is one */
+  thumb?: string | null;
 }
 
 export type RepeatMode = 'off' | 'all' | 'one';

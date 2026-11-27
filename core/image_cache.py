@@ -1133,21 +1133,28 @@ _image_cache: Optional[ImageCache] = None
 _image_cache_lock = threading.Lock()
 
 
+def cache_root() -> Path:
+    """the image cache's folder. other derived pictures (chapter thumbnails,
+    core/player/chapter_thumbs.py) keep a folder of their own inside it.
+
+    the env override is the test suite's seam: without it a test that
+    reaches any image endpoint writes into the developer's LIVE cache from a
+    second process. from wsl that means a linux sqlite scribbling on a wal
+    the windows server has open, which is how boulder's index got corrupted
+    on sept 15 2026."""
+    cache_dir = (os.environ.get("SOULSYNC_IMAGE_CACHE_DIR")
+                 or config_manager.get("image_cache.path", "storage/image_cache"))
+    if not os.path.isabs(cache_dir):
+        cache_dir = str(config_manager.base_dir / cache_dir)
+    return Path(cache_dir)
+
+
 def get_image_cache() -> ImageCache:
     global _image_cache
     with _image_cache_lock:
         if _image_cache is None:
-            # the env override is the test suite's seam: without it a test
-            # that reaches any image endpoint writes into the developer's
-            # LIVE cache from a second process. from wsl that means a linux
-            # sqlite scribbling on a wal the windows server has open, which
-            # is how boulder's index got corrupted on sept 15 2026.
-            cache_dir = (os.environ.get("SOULSYNC_IMAGE_CACHE_DIR")
-                         or config_manager.get("image_cache.path", "storage/image_cache"))
-            if not os.path.isabs(cache_dir):
-                cache_dir = str(config_manager.base_dir / cache_dir)
             _image_cache = ImageCache(
-                cache_dir,
+                str(cache_root()),
                 ttl_seconds=int(config_manager.get("image_cache.ttl_seconds", DEFAULT_TTL_SECONDS)),
                 failed_ttl_seconds=int(config_manager.get("image_cache.failed_ttl_seconds", DEFAULT_FAILED_TTL_SECONDS)),
                 pending_ttl_seconds=int(config_manager.get(

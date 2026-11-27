@@ -105,7 +105,9 @@ def normalize_options(raw: Any) -> Dict[str, Any]:
       default; off = only a search you start, Radarr's monitored-but-no-
       automatic-search)
     - upgrades: its titles you already have keep being upgraded toward
-      their profile's cutoff (on by default)"""
+      their profile's cutoff (on by default)
+    - chapter_thumbs: its files with chapters get a picture per chapter
+      (core/player/chapter_thumbs.py; on by default)"""
     raw = raw if isinstance(raw, dict) else {}
     rules = raw.get("rules") if isinstance(raw.get("rules"), dict) else {}
     sources = []
@@ -121,7 +123,8 @@ def normalize_options(raw: Any) -> Dict[str, Any]:
             "usenet_category": _category(raw.get("usenet_category")),
             "indexer_ids": _indexer_ids(raw.get("indexer_ids")),
             "auto_search": _flag(raw.get("auto_search")),
-            "upgrades": _flag(raw.get("upgrades"))}
+            "upgrades": _flag(raw.get("upgrades")),
+            "chapter_thumbs": _flag(raw.get("chapter_thumbs"))}
 
 
 def _flag(value: Any) -> bool:
@@ -246,7 +249,7 @@ def _check_path(db, path: Any, *, skip_id: Optional[int] = None) -> str:
 
 # a library's options, settable at the top of a create / update body too
 _OPTION_KEYS = ("rules", "quality_profile_id", "sources", "torrent_category", "usenet_category",
-                "indexer_ids", "auto_search", "upgrades")
+                "indexer_ids", "auto_search", "upgrades", "chapter_thumbs")
 
 
 def _check_profile(db, profile_id: int) -> None:

@@ -1,10 +1,10 @@
 /**
  * the seek bar, for the transport bar and the video player alike: what's
- * played and buffered, chapter marks, the time (and chapter) under the
- * pointer, drag to scrub (the position only moves when you let go), and
- * the arrow keys as a slider (5 seconds, page up/down a minute). marks
- * (moments someone noted) sit on it as pins: near one, the hint reads its
- * note; let go on one and it lands right on it.
+ * played and buffered, chapter marks, the time (and chapter, with its
+ * picture) under the pointer, drag to scrub (the position only moves when
+ * you let go), and the arrow keys as a slider (5 seconds, page up/down a
+ * minute). marks (moments someone noted) sit on it as pins: near one, the
+ * hint reads its note; let go on one and it lands right on it.
  */
 
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
@@ -155,7 +155,14 @@ export function SeekBar({
                 {hintPin.label ? <span>{hintPin.label}</span> : null}
               </span>
             ) : hintChapter?.title ? (
-              <span className={s.seekHintChapter}>{hintChapter.title}</span>
+              <>
+                {hintChapter.thumb ? (
+                  <span className={s.seekHintArt}>
+                    <img src={hintChapter.thumb} alt="" decoding="async" />
+                  </span>
+                ) : null}
+                <span className={s.seekHintChapter}>{hintChapter.title}</span>
+              </>
             ) : null}
             {clock(hintPin?.at ?? hint)}
           </span>

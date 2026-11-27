@@ -3,16 +3,26 @@
     GET /api/player/tracks/<item_type>/<item_id>?part=     {audio, subtitles}
     GET /api/player/subtitle/<item_type>/<item_id>?part=&sub=s0|x0
                                                            WebVTT
+    GET /api/player/chapters/<item_type>/<item_id>?part=   {chapters}
+    GET /api/player/chapter-thumb/<item_type>/<item_id>/<n>?part=&v=
+                                                           a chapter's picture
 
 the same play check as the bytes (core/player/playable.resolve). audio
 tracks are numbered among the file's audio, subtitles ``s<n>`` (in the
 file, among its subtitles) or ``x<n>`` (a file beside it). an image
 subtitle can't be WebVTT: the player burns it in through the converter.
+
+a chapter carries ``thumb``, its picture's url, once the background worker
+has made it (core/player/chapter_thumbs.py), else null. the chapters route
+is for a detail page: it never reads the file, only what the worker and the
+player already know, so a page of cards costs nothing.
 """
 
 from __future__ import annotations
 
-from flask import Blueprint, Response, jsonify, request
+import os
+
+from flask import Blueprint, Response, jsonify, request, send_file
 
 from core.connect.device_access import device_playback
 from core.permissions import requires_any
@@ -67,7 +77,84 @@ def tracks(item_type, item_id):
     found = source_tracks(source)
     if found is None:
         return jsonify({"success": True, "audio": [], "subtitles": [], "unavailable": "no ffmpeg"})
-    return jsonify({"success": True, **K.public(found[0])})
+    out = K.public(found[0])
+    if out.get("chapters"):
+        out["chapters"] = _with_thumbs(item_type, item_id, source, out["chapters"])
+    return jsonify({"success": True, **out})
+
+
+def _thumb_key(item_type, source):
+    """the chapter pictures' key for a resolved movie or episode, or None"""
+    from core.player import chapter_thumbs as C
+    file_id = source.extra.get("file_id")
+    if item_type not in ("movie", "episode") or not file_id:
+        return None
+    from api.video import get_video_db
+    return C.key_for_media_file(get_video_db(), file_id)
+
+
+def _with_thumbs(item_type, item_id, source, chapters):
+    from core.player import chapter_thumbs as C
+    try:
+        manifest = C.read_manifest(_thumb_key(item_type, source))
+    except Exception:  # noqa: BLE001 - chapters without pictures still work
+        logger.debug("chapter pictures for %s %s", item_type, item_id, exc_info=True)
+        manifest = None
+    return C.attach(chapters, manifest, item_type=item_type, item_id=item_id,
+                    file_id=source.extra.get("file_id"))
+
+
+@bp.route("/api/player/chapters/<item_type>/<path:item_id>", methods=["GET"])
+@requires_any(*SECTIONS)
+@device_playback
+def chapters(item_type, item_id):
+    """a movie's or an episode's chapters with their pictures, for its
+    detail page. from the pictures' manifest, else from a probe the player
+    already made; never reads the file"""
+    from core.player import chapter_thumbs as C
+    from core.player import tracks as K
+    from core.player.playable import Refused
+    try:
+        source = _resolve(item_type, item_id)
+    except Refused as e:
+        return _refused(e)
+    file_id = source.extra.get("file_id")
+    key = _thumb_key(item_type, source)
+    manifest = C.read_manifest(key)
+    found = C.from_manifest(manifest, item_type=item_type, item_id=item_id, file_id=file_id)
+    if not found and source.mode == "file" and source.path:
+        size = (source.extra.get("file") or {}).get("size_bytes")
+        probed = K.cached(K.file_key(source.path, None)) or K.cached_like(
+            os.path.basename(source.path), size)
+        if probed and probed.get("chapters"):
+            found = C.attach(probed["chapters"], manifest, item_type=item_type, item_id=item_id,
+                             file_id=file_id)
+    return jsonify({"success": True, "chapters": found, "file_id": file_id})
+
+
+@bp.route("/api/player/chapter-thumb/<item_type>/<path:item_id>/<int:index>", methods=["GET"])
+@requires_any(*SECTIONS)
+@device_playback
+def chapter_thumb(item_type, item_id, index):
+    """one chapter's picture. the same play check as the video itself, so a
+    profile never sees a frame of something it can't watch. 404 until the
+    worker has made it"""
+    from core.player import chapter_thumbs as C
+    from core.player.playable import Refused
+    try:
+        source = _resolve(item_type, item_id)
+    except Refused as e:
+        return _refused(e)
+    path = C.thumb_path(_thumb_key(item_type, source), index)
+    if path is None:
+        return jsonify({"success": False, "error": "not_found",
+                        "message": "That chapter has no picture yet."}), 404
+    res = send_file(str(path), mimetype="image/webp" if path.suffix == ".webp" else "image/jpeg",
+                    conditional=True, max_age=0)
+    # a picture is made once; a remade one has a new ?v=, so it never goes stale
+    res.headers["Cache-Control"] = ("private, max-age=31536000, immutable" if request.args.get("v")
+                                    else "private, max-age=3600")
+    return res
 
 
 @bp.route("/api/player/subtitle/<item_type>/<path:item_id>", methods=["GET"])

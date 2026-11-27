@@ -592,6 +592,13 @@ What's new for this profile (new episodes of shows it watches, well-rated films,
 - `GET /api/player/subtitle/<item_type>/<item_id>?sub=s0`: a text subtitle as WebVTT. Made once and cached: an embedded one means reading the whole file the first time.
 - To play another audio track, ask `playable` (or `transcode`) with `&audio=<index>`; to draw an image subtitle into the picture, `&burn=<n>` (its number among the file's subtitles). Both go through the converter: a browser only plays a file's first audio track.
 
+#### Chapters and chapter pictures
+
+- `tracks` also returns `chapters: [{start, end, title, thumb}]` (seconds; a file with fewer than two chapters has none). `thumb` is the chapter's picture url, or null until it's made.
+- `GET /api/player/chapters/<item_type>/<item_id>?part=`: `{chapters, file_id}`, for a detail page. Read from what's already known (the pictures' manifest, or the player's earlier probe), never from the file, so it's instant; `[]` when nothing is known yet.
+- `GET /api/player/chapter-thumb/<item_type>/<item_id>/<n>?part=&v=`: chapter `n`'s picture, 320 px wide WebP (JPEG where WebP can't be written). The same play check as the video (profile, section, rating cap). 404 until it's made. With `v` (the urls above carry it) it may be cached forever: a remade picture gets a new `v`.
+- The pictures are made by a background worker, never while you wait: one per chapter, a frame a couple of seconds in that isn't black, a fade or a blur (several moments are tried and scored). Newest and most watched titles first. It waits while a scan or sync runs and while anyone is watching, and runs ffmpeg at the lowest priority. They live in the image cache's `chapters/` folder, never beside your files. A library's `chapter_thumbs` option (Settings > Folders > Video, on by default) turns it off for that library.
+
 
 ### Watchlist
 

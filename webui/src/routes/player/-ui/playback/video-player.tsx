@@ -7,8 +7,8 @@
  * the engine owns the <video>; this only moves it between the two frames.
  *
  * keys while full screen: space or k play/pause, j/l or arrows 10 seconds,
- * up/down volume, f full screen, m mute, n next, e episodes, i stats,
- * c subtitles, escape closes what's open, then leaves.
+ * up/down volume, f full screen, m mute, n next, e episodes, h chapters,
+ * i stats, c subtitles, escape closes what's open, then leaves.
  */
 
 import { useQueryClient } from '@tanstack/react-query';
@@ -22,6 +22,7 @@ import { clock, skippableAt } from '../../-engine/timeline';
 import { NextIcon, PauseIcon, PlayIcon } from '../icons';
 import { ReportIssueButton } from '../report-issue';
 import { inPlayer } from '../trailer';
+import { ChaptersPanel } from './chapters-panel';
 import {
   AudioMenu,
   PictureMenu,
@@ -36,6 +37,7 @@ import { EpisodesPanel } from './episodes-panel';
 import { FindSubtitles } from './find-subtitles';
 import {
   BackSecondsIcon,
+  ChaptersIcon,
   EpisodesIcon,
   CloseIcon,
   ChevronDownBigIcon,
@@ -96,6 +98,13 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
   const [fullscreen, setFullscreen] = useState(false);
   const [stats, setStats] = useState(false);
   const [episodes, setEpisodes] = useState(false);
+  const [chaptersOpen, setChaptersOpen] = useState(false);
+  const chaptersButton = useRef<HTMLButtonElement>(null);
+  const hasChapters = state.chapters.length > 1;
+  const closeChapters = useCallback(() => {
+    setChaptersOpen(false);
+    chaptersButton.current?.focus({ preventScroll: true });
+  }, []);
   const marks = useMarks(item);
   const [finding, setFinding] = useState(false);
   const fit = useFit();
@@ -109,7 +118,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
   useMountVideo(frame, true);
 
   const episodesOpen = useRef(false);
-  episodesOpen.current = episodes || finding;
+  episodesOpen.current = episodes || finding || chaptersOpen;
   const wake = useCallback(() => {
     // someone's here: no "are you still watching?"
     getEngine().activity();
@@ -140,6 +149,8 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         'input, textarea, select, [role="menu"]',
       );
       if (typing) return;
+      // the chapter strip moves along with the arrows and closes on escape itself
+      if ((e.target as HTMLElement | null)?.closest?.('[data-own-keys]')) return;
       // a menu or a dialog is open over the player (report an issue, a sheet):
       // its own keys. escape closes it, and only it; space doesn't pause behind it
       if (document.querySelector('[role="menu"], [aria-modal="true"]')) return;
@@ -160,14 +171,20 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         m: () => engine.setMuted(!v.muted),
         n: () => engine.next(),
         i: () => setStats((v) => !v),
-        e: () => setEpisodes((v) => !v),
+        e: () => (setChaptersOpen(false), setEpisodes((v) => !v)),
+        h: () => {
+          if (v.chapters.length < 2) return;
+          setEpisodes(false);
+          setFinding(false);
+          setChaptersOpen((open) => !open);
+        },
         c: () => {
           const first = v.tracks?.subtitles.find((t) => t.kind !== 'unknown');
           engine.setSubtitle(v.subtitle ? null : (first?.id ?? null));
         },
         Escape: () =>
           episodesOpen.current
-            ? (setEpisodes(false), setFinding(false))
+            ? (setEpisodes(false), setFinding(false), setChaptersOpen(false))
             : document.fullscreenElement
               ? void document.exitFullscreen()
               : onLeave(),
@@ -285,6 +302,17 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         <FindSubtitles state={state} onClose={() => setFinding(false)} />
       ) : episodes && item.type === 'episode' ? (
         <EpisodesPanel state={state} onClose={() => setEpisodes(false)} />
+      ) : chaptersOpen && hasChapters ? (
+        <ChaptersPanel
+          chapters={state.chapters}
+          position={state.position}
+          duration={state.duration}
+          onPick={(start) => {
+            engine.seek(start);
+            closeChapters();
+          }}
+          onClose={closeChapters}
+        />
       ) : (
         <EndScreen state={state} />
       )}
@@ -358,11 +386,30 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
                 title="Episodes (e)"
                 onClick={() => {
                   setFinding(false);
+                  setChaptersOpen(false);
                   setEpisodes((v) => !v);
                 }}
                 data-nav
               >
                 <EpisodesIcon />
+              </button>
+            ) : null}
+            {hasChapters ? (
+              <button
+                ref={chaptersButton}
+                type="button"
+                className={s.ctl}
+                aria-label="Chapters"
+                aria-pressed={chaptersOpen}
+                title="Chapters (h)"
+                onClick={() => {
+                  setFinding(false);
+                  setEpisodes(false);
+                  setChaptersOpen((v) => !v);
+                }}
+                data-nav
+              >
+                <ChaptersIcon />
               </button>
             ) : null}
             <MarkButton item={item} />

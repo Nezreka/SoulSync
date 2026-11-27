@@ -33,7 +33,7 @@ export interface Tracks {
   audio: AudioTrack[];
   subtitles: SubtitleTrack[];
   /** the file's own chapter marks (a video with fewer than two has none) */
-  chapters?: { start: number; end?: number | null; title: string }[];
+  chapters?: { start: number; end?: number | null; title: string; thumb?: string | null }[];
 }
 
 /** 'off', or a language code ('en', 'eng'); null: never picked */

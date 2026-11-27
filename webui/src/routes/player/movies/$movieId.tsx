@@ -14,6 +14,7 @@ import {
   progressLookupQuery,
   videoCatalogQuery,
 } from '../-player.api';
+import { ChaptersRow } from '../-ui/chapters-row';
 import { Comments } from '../-ui/comments';
 import { MoreButton } from '../-ui/context-menu';
 import {
@@ -184,6 +185,15 @@ function MoviePage() {
                 {m.tagline ? <p className={s.tagline}>“{m.tagline}”</p> : null}
                 <Keywords words={extras.data?.keywords} />
               </Section>
+            ) : null}
+            {best ? (
+              <ChaptersRow
+                itemType="movie"
+                itemId={String(id)}
+                part={playFile}
+                duration={seconds}
+                onPlayAt={(t) => playItems([movieItem(m, playFile)], 0, { startAt: t })}
+              />
             ) : null}
             <ExtrasVideos videos={extras.data?.videos} />
             <CastRow cast={m.cast} />

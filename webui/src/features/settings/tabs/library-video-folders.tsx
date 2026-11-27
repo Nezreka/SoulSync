@@ -170,6 +170,7 @@ interface Library {
     usenet_category?: string;
     auto_search?: boolean;
     upgrades?: boolean;
+    chapter_thumbs?: boolean;
   };
 }
 interface Indexer {
@@ -300,8 +301,10 @@ function LibraryRow({
     };
     const auto = r.querySelector<HTMLInputElement>('.video-library-auto');
     const upg = r.querySelector<HTMLInputElement>('.video-library-upgrades');
+    const chap = r.querySelector<HTMLInputElement>('.video-library-chapters');
     if (auto) out.auto_search = auto.checked;
     if (upg) out.upgrades = upg.checked;
+    if (chap) out.chapter_thumbs = chap.checked;
     // the indexers: what's ticked once the list loaded, else what it had
     out.indexer_ids = r.querySelector('.video-library-idx')
       ? [...r.querySelectorAll<HTMLInputElement>('.video-library-idx:checked')].map((c) =>
@@ -582,6 +585,19 @@ function LibraryRow({
             <span>
               Upgrade what you have
               <small>Titles you have keep upgrading toward their profile&apos;s cutoff</small>
+            </span>
+          </label>
+          <label className={s.libCheck}>
+            <Switch
+              aria-label="Chapter pictures"
+              className="video-library-chapters"
+              defaultChecked={options.chapter_thumbs !== false}
+            />
+            <span>
+              Chapter pictures
+              <small>
+                A picture for every chapter, made in the background while nobody is watching
+              </small>
             </span>
           </label>
           {builtin ? null : (

@@ -106,7 +106,15 @@ async function tracks(item: PlayItem): Promise<Tracks> {
       timeout: 90_000,
     })
     .json<Partial<Tracks>>();
-  return { audio: body.audio ?? [], subtitles: body.subtitles ?? [] };
+  return {
+    audio: body.audio ?? [],
+    subtitles: body.subtitles ?? [],
+    // the file's own chapters, each with its picture once the server made it
+    chapters: (body.chapters ?? []).map((c) => ({
+      ...c,
+      thumb: c.thumb ? appURL(c.thumb) : null,
+    })),
+  };
 }
 
 async function subtitle(item: PlayItem, id: string): Promise<string> {
