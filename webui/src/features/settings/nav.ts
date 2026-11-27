@@ -60,6 +60,7 @@ export const TABS: TabDef[] = [
     views: [
       { key: 'services', label: 'Servers and services' },
       { key: 'metasync', label: 'MetaSync', side: 'music' },
+      { key: 'giveback', label: 'Give back', side: 'music' },
       { key: 'notifications', label: 'Notifications', side: 'video' },
     ],
   },

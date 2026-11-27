@@ -12018,6 +12018,12 @@
       "sides": ["music"],
       "scenario": "music"
     },
+    "#stg-pill-connections-giveback": {
+      "id": "stg-pill-connections-giveback",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
     "#stg-server-card \"Test server\"": {
       "label": "Test server",
       "anchor": "stg-server-card",

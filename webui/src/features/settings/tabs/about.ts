@@ -11,6 +11,7 @@
 export const ABOUT: Record<string, string> = {
   'connections/services': 'Pick the metadata source, and test each connection.',
   'connections/metasync': 'Connect to MetaSync and join a pool to share metadata.',
+  'connections/giveback': 'Send what SoulSync identified back to MusicBrainz and AcoustID.',
   'connections/notifications': 'Where SoulSync sends a message when something happens.',
 
   'downloads/sources': 'Connect each one, tune its settings, and test them all.',

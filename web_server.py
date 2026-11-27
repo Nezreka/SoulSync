@@ -24847,6 +24847,11 @@ from api.acoustid_routes import configure as _configure_acoustid_api, create_blu
 _configure_acoustid_api(config_manager_=config_manager)
 app.register_blueprint(_create_acoustid_blueprint())
 
+# Give back to MusicBrainz and AcoustID (#2335), opt-in
+from api.giveback_routes import configure as _configure_giveback_api, create_blueprint as _create_giveback_blueprint
+_configure_giveback_api(config_manager_=config_manager, get_database_=get_database)
+app.register_blueprint(_create_giveback_blueprint())
+
 # Media server descriptors for the UI (settings page, wizard, quick-switch).
 from api.media_servers import configure as _configure_media_servers_api, create_blueprint as _create_media_servers_blueprint
 _configure_media_servers_api(config_manager_=config_manager, engine_getter=lambda: media_server_engine)
@@ -26588,6 +26593,14 @@ def start_runtime_services():
         # to fire at module import, which started the 30s loop in every
         # importer — tests, workers, CLI tools.)
         start_batch_healing_timer()
+
+        # #2335: give back to acoustid and musicbrainz, slowly. the thread
+        # only sleeps until a Give back switch is on
+        try:
+            from core.giveback import worker as _giveback_worker
+            _giveback_worker.start(get_database, config_manager, version=SOULSYNC_VERSION)
+        except Exception as _gb_err:
+            logger.debug(f"could not start the give back worker: {_gb_err}")
 
         # #2205: fold the wal back in every few minutes, so a busy install
         # can't sit on a multi-GB wal file (SOULSYNC_DB_CHECKPOINT_MINUTES=0

@@ -140,6 +140,11 @@ class ConfigManager:
         'security.oidc_client_secret',
         # the seerr in front of soulsync (#2324)
         'seerr_compat.seerr_api_key',
+        # give back (#2335): the person's musicbrainz tokens, the pkce
+        # verifier of a link in progress, a self-registered app's secret
+        'giveback.musicbrainz_auth',
+        'giveback.musicbrainz_pending',
+        'giveback.musicbrainz_client_secret',
     })
 
     def _get_fernet(self) -> Fernet:
@@ -913,6 +918,18 @@ class ConfigManager:
                 "api_key": "",
                 "user_key": "",
                 "enabled": False  # Disabled by default - requires API key and fpcalc
+            },
+            # #2335: give back to acoustid and musicbrainz. every part is off
+            # until the person turns it on (Settings, Connections, Give back)
+            "giveback": {
+                "acoustid": False,
+                "isrc": False,
+                "releases": False,
+                "musicbrainz_client_id": "",
+                "musicbrainz_client_secret": "",
+                "musicbrainz_auth": {},
+                "musicbrainz_pending": {},
+                "musicbrainz_user": "",
             },
             "lastfm": {
                 "api_key": "",

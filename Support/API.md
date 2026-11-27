@@ -247,6 +247,23 @@ From 1 January 2027 an AcoustID lookup needs the person's own AcoustID key with 
 
 Settings: `acoustid.user_key` (a secret, redacted like the others), `acoustid.api_key` (an application key the install registered itself; SoulSync's own is used when it has one, or the `ACOUSTID_APP_KEY` env var). Every lookup sends the user key in the `Acoustid-User-Key` header.
 
+### Give back to MusicBrainz and AcoustID (web UI routes, admins only)
+
+Settings, Connections, Give back (#2335). Three switches, all off by default: `giveback.acoustid`, `giveback.isrc`, `giveback.releases`. No answer ever carries a token.
+
+- `GET /api/giveback`: `{switches: {acoustid, isrc, releases}, acoustid: {ready, message}, musicbrainz: {available, connected, username, message}, counts: {acoustid: {submitted, present, skipped, rejected}, isrc: {...}}, running, last, last_at}`.
+- `PUT /api/giveback/settings` `{acoustid?: bool, isrc?: bool, releases?: bool}`: saves the switches; answers as above. Anything but a bool is `400`.
+- `POST /api/giveback/run`: runs a round now in the background (`409` while both sending switches are off).
+- `POST /api/giveback/musicbrainz/connect`: `{url}` to open. OAuth2 with PKCE (S256), installed-application redirect `urn:ietf:wg:oauth:2.0:oob`, scopes `submit_isrc profile`. `409` while SoulSync has no registered MusicBrainz application.
+- `POST /api/giveback/musicbrainz/code` `{code}`: trades the code MusicBrainz showed for tokens (kept in the encrypted `giveback.musicbrainz_auth`); a link older than an hour must be started again.
+- `POST /api/giveback/musicbrainz/disconnect`: revokes the refresh token at MusicBrainz and forgets it.
+- `GET /api/giveback/releases`: `{releases: [{id, title, artist, year, source, source_url}]}`, albums the MusicBrainz worker didn't find that have a Spotify, Deezer, Apple Music, Tidal, Qobuz or Bandcamp id. Empty while `giveback.releases` is off.
+- `GET /api/giveback/releases/<album_id>/seed`: `{action: "https://musicbrainz.org/release/add", fields: [[name, value], ...], source}`, the release editor seeding fields (`name`, `artist_credit.names.0.*`, `type`, `status`, `events.0.date.*`, `labels.0.name`, `barcode`, `mediums.N.format`, `mediums.N.track.M.{name,number,length,artist_credit.names.0.name}`, `urls.0.{url,link_type}`, `edit_note`). The page POSTs them as a form; the person submits the edit. `404` without a source.
+
+What is sent: AcoustID `POST /v2/submit` (gzipped; `client`, `clientversion`, `duration.N`, `fingerprint.N`, `mbid.N`, `fileformat.N`; the user key in the `Acoustid-User-Key` header), at most 20 per request. MusicBrainz `GET /ws/2/recording/<mbid>?inc=isrcs` then `POST /ws/2/recording/?client=soulsync-<version>` with the `mmd-2.0` `<recording-list>` / `<isrc-list>` XML and a Bearer token, one request a second, User-Agent `SoulSync/<version> ( https://github.com/Nezreka/SoulSync )`. Every outcome is kept in `giveback_submissions` (unique on kind, subject, recording), so nothing is sent twice.
+
+A MusicBrainz application can be supplied with the `MUSICBRAINZ_OAUTH_CLIENT_ID` / `MUSICBRAINZ_OAUTH_CLIENT_SECRET` env vars or the `giveback.musicbrainz_client_id` / `giveback.musicbrainz_client_secret` settings until SoulSync ships its own.
+
 ### Paired devices: listen anywhere (web UI and app routes)
 
 Settings > Devices pairs music apps with this server. A device gets its own token, never an API key. The admin routes are `@admin_only`; the device's own routes take the token in `X-Device-Token: sdt_...` (or `Authorization: Bearer sdt_...`) and no cookie. A request may carry a device token or an API key, not both (`400 device_one_credential`).
