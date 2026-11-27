@@ -634,6 +634,7 @@ Point at **Up to date** to see when each was last asked. **Refresh** asks all th
 | **Move to another episode…** | For a file filed under the wrong episode. Pick the right one; where SoulSync can reach the file it is renamed for the new episode so your media server agrees. |
 | **Rename to template** | Renames the file to what your template says, where it sits. Subtitles and sidecars move with it, nothing is overwritten, and the stored path follows. |
 | **Search subtitles** | The manual subtitle search, for that file. |
+| **Make subtitles with AI…** | Your server listens to the file's audio and writes subtitles in the language you pick (see [AI subtitles](#vlib-ai-subtitles)). Shows its place in line, progress and about how long. |
 | **Copy path** | The path as your media server reports it. |
 | **Delete to recycle bin** | Shows the file and what is left, then moves it to the recycle bin. If it was the last copy the title shows as missing. For an episode, **Stop hunting this episode** in the same window keeps a monitored season from fetching it again. A file outside your library folders is refused rather than deleted for good. |
 
@@ -665,6 +666,24 @@ Tick episodes (the box under an episode's number, shown when you point at a row)
 **Match** shows the TMDB, IMDb and TVDB ids the title is matched to. **Fix match** searches TMDB (a title, a title and year, or a pasted TMDB id) and re-points the title. The ids are locked, so a library scan can't switch them back, and if your server named the title differently, SoulSync takes TMDB's name and year. **Use the server's match again** undoes it.
 
 Subtitle language overrides and the acquisition history for the title are further down the same page.
+
+`
+        },
+        {
+            id: 'vlib-ai-subtitles',
+            title: 'AI Subtitles',
+            lede: 'Subtitles your server makes from the audio when no provider has them, replaced by a real one as soon as one turns up.',
+            body: `
+When no provider has subtitles in a language, SoulSync can make them from the audio with Whisper, on your server: nothing is sent anywhere. Install a model in **Settings → Library → Subtitles** (tiny 78 MB up to large-v3-turbo 1.6 GB; the page says what this server is, suggests a model, and **Quick test** measures how fast it runs here). Then:
+
+- **By hand**: **Generate subtitles** in the player's subtitle menu (or the bottom of **Find subtitles**), or **Make subtitles with AI…** in a file's **⋯** menu. Someone waiting in the player goes first in line.
+- **On their own**: switch on **Make subtitles with AI when none can be found**. A wanted language no provider filled within the wait (a day by default) gets AI subtitles. Never for a forced track: a transcript is every line.
+
+What it does better: it picks the audio track in your language (never a commentary), knows the language from the track's tag or by listening across the whole film instead of the opening music, skips silence and music, throws out the lines Whisper is known to make up ("thanks for watching", the same line forty times), and shapes the words into real subtitles: two lines of about 42 characters, timed to the words, slow enough to read. If the result looks made up it is thrown away rather than written. English can be made from any language.
+
+The file is named **Movie.ai.en.srt**: Plex and Emby read the language from the last part of the name, Jellyfin and Kodi show "ai" as the track's name, and the player marks it **(AI)**. It's a stand-in: the first real subtitle that clears your minimum score replaces it, and the AI file goes to the recycle bin. Background AI work waits while someone is watching (subtitles someone asked for keep going), and a server restart picks a job up where it was. With an NVIDIA card, run the \`:cuda\` image (\`docker build --build-arg WHISPER_CUDA=1\`) with \`--gpus all\`.
+
+**Subtitle timing.** In the player's subtitle menu, **Show earlier** and **Show later** move the lines by a tenth of a second (or a second). It's saved for that subtitle file and your profile on the server, so the app and every browser use it; a new subtitle file starts back in sync.
 `
         },
         {
@@ -1687,7 +1706,7 @@ Turn on **Download subtitles** (Settings → Library → Subtitles) and every im
 
 ![Library, Subtitles on the video side: the languages, the hearing-impaired preference, forced tracks and what counts as already having one](vset-subtitles.jpg)
 
-**Providers.** OpenSubtitles, SubDL and SubSource (free API keys, each with a **Test** button), **Embedded** (extracts a text track already inside the file) and optional **Whisper** local transcription as the last resort. Drag the **provider chain** to set the order. Candidates are scored hash-first: a subtitle timed for your exact file beats one that only shares the release name, and anything under the minimum score is never downloaded.
+**Providers.** OpenSubtitles, SubDL and SubSource (free API keys, each with a **Test** button), **Embedded** (extracts a text track already inside the file) and optional **Whisper**: [AI subtitles](#vlib-ai-subtitles) made on your server when none of them has a language. Drag the **provider chain** to set the order. Candidates are scored hash-first: a subtitle timed for your exact file beats one that only shares the release name, and anything under the minimum score is never downloaded.
 
 **Already have it.** Before fetching, SoulSync checks what the video already has, the same way Bazarr does:
 

@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { apiClient, refusalText } from '@/app/api-client';
+import { jobWords, useAiSubtitles } from '@/features/video-library/ai-subtitles';
 
 import type { PlayerState } from '../../-engine/engine';
 
@@ -52,7 +53,7 @@ const LANGS = [
   'tr',
 ];
 
-function startLang(): string {
+export function startLang(): string {
   try {
     const v = localStorage.getItem('ss-player:subLang');
     if (v && v !== 'off') return v.slice(0, 2);
@@ -74,6 +75,10 @@ export function FindSubtitles({ state, onClose }: { state: PlayerState; onClose:
   const [lang, setLang] = useState(startLang);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const ai = useAiSubtitles(kind, kind ? item?.id : null, lang, 'player', (l) => {
+    void getEngine().refreshTracks(l);
+  });
+  const aiWords = ai.job ? jobWords(ai.job, ai.watching) : null;
   const search = useQuery({
     queryKey: ['player', 'subtitle-search', kind, item?.id, lang],
     enabled: !!kind,
@@ -172,6 +177,44 @@ export function FindSubtitles({ state, onClose }: { state: PlayerState; onClose:
           </li>
         ))}
       </ol>
+      {kind ? (
+        <div className={s.finderAi}>
+          <span className={s.episodeText}>
+            <span className={s.episodeName}>
+              {ai.active && aiWords
+                ? aiWords.label
+                : `Make ${languageName(lang)} subtitles with AI`}
+            </span>
+            <span className={s.episodeMeta}>
+              {ai.error ||
+                (ai.active && aiWords ? aiWords.detail : null) ||
+                (!ai.available && ai.why) ||
+                (aiWords && ai.job?.state !== 'done' ? aiWords.detail : null) ||
+                'Your server listens to the audio and writes them. Real subtitles replace them later.'}
+            </span>
+          </span>
+          {ai.active ? (
+            <button
+              type="button"
+              className={s.finderAiBtn}
+              onClick={() => void ai.cancel()}
+              data-nav
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={s.finderAiBtn}
+              disabled={ai.asking || !ai.available}
+              onClick={() => void ai.generate()}
+              data-nav
+            >
+              {ai.asking ? 'Asking…' : 'Generate'}
+            </button>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }

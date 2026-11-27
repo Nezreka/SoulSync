@@ -508,6 +508,26 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 - `GET /api/player/transcode/<item_type>/<item_id>?q=&part=&t=`: the converted stream, fragmented MP4, from `t` seconds. It can't seek by `Range`: to seek, start a new one at the new `t`. A few run at once; past that it answers `503 busy`.
 - `GET /api/player/transcode/<item_type>/<item_id>/start?t=`: where a stream asked to start at `t` really starts, `{start, seek}`. Copied video can only start at a keyframe, so request `t=seek` and count the stream's time from `start`.
 
+#### Subtitles in the player
+
+- `GET /api/player/tracks/<item_type>/<item_id>?part=`: `{audio, subtitles, chapters}`. Each subtitle is `s<n>` (inside the file) or `x<n>` (a file beside it) with `language`, `kind` (`text`, `image`), `forced`, `sdh`, `external`, `ai` (made by Whisper on this server: `Movie.ai.en.srt`), `low_confidence` (an AI one Whisper wasn't sure of) and `delay_ms`, this profile's saved delay for that subtitle file.
+- `GET /api/player/subtitle/<item_type>/<item_id>?sub=x0`: a text subtitle as WebVTT. Kept by the file's path, size and modified time, so a replaced or re-timed subtitle shows at once; served with an `ETag` and `Cache-Control: no-cache`.
+- `PUT /api/player/subtitle-delay/<item_type>/<item_id>?sub=x0` with `{delay_ms}`: save this profile's delay for that subtitle (positive shows it later, ±30000 at most, `0` clears it). A different file at the same name starts back at 0.
+
+#### AI subtitles
+
+Whisper runs on the server, on its own queue (one job at a time, never inside the subtitle worker's cycle). A job is a movie or episode and a language. Jobs someone asked for in the player come first, then the title page, the library manager, and last the automatic ones for gaps no provider filled after `ai_subs_wait_hours`. Background jobs on the CPU wait while someone is watching; a job someone asked for, or one on an NVIDIA card, doesn't. A restart resumes a job from its last 5 minute chunk.
+
+- `POST /api/video/subtitles/ai/jobs` with `{kind: movie|episode, item_id, lang, origin: player|detail|library}`: `202 {job}`. The same title and language again returns the same job (moved up when the new ask is more urgent). `503 {error: "unavailable", message}` says in plain words why it can't run (no model installed, no engine, no ffmpeg). Needs the profile's get permission for movies or TV.
+- `GET /api/video/subtitles/ai/jobs?kind=&item_id=&active=1`: `{jobs, available, why, watching}`. A job has `state` (`queued`, `running`, `paused`, `done`, `failed`, `cancelled`, `no_match` when the audio is another language and English isn't wanted, `discarded` when Whisper's output looked made up), `progress` (0 to 1), `eta_seconds`, `position` (1 is next), `spoken_language`, `task` (`transcribe`, or `translate` into English), `confidence` and `verdict` (`ok`, `low`).
+- `POST /api/video/subtitles/ai/jobs/<id>/cancel`: stops it (the profile that asked, or an admin).
+- `GET /api/video/subtitles/ai/hardware?refresh=1`: cores, memory, the NVIDIA card when CTranslate2 can use it (and why not when it can't), and the suggested model.
+- `POST /api/video/subtitles/ai/bench` with `{model}` (admin): a 30 second quick test; its speed (times real time) shows in `whisper/status`.
+- `GET /api/video/subtitles/whisper/status`: the models (`tiny`, `base`, `small`, `medium`, `large-v3-turbo`, `distil-large-v3`) with size, `installed`, disk use and quick test, the hardware line, the suggested model and the download's progress.
+- `POST /api/video/subtitles/whisper/download` with `{model}`, `POST /api/video/subtitles/whisper/download/cancel` and `DELETE /api/video/subtitles/whisper/models/<name>` (admin): install, stop installing, remove. Several models can be installed; the one in the settings is used.
+
+An AI subtitle counts as score 0 in the upgrade pass, so the first real subtitle that clears the minimum score replaces it (the AI file goes to the recycle bin). A real subtitle written any other way (an import, a manual pick) retires it too.
+
 #### Downloads
 
 Phones, tablets and the web player keep downloads; the TV app sends things to another of the profile's devices. Every route is under `/api/player/offline/`, takes the session or a paired device's token, and only ever sees the caller's own devices. A profile the admin switched downloads off for gets `403 downloads_disabled` for anything new (admins always may). The routes:

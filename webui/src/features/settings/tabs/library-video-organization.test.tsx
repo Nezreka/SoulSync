@@ -53,12 +53,22 @@ beforeEach(() => {
       downloaded: true,
       engine: true,
       model: 'base',
+      installed: ['base'],
+      recommended: 'small',
       size_bytes: 145_000_000,
       downloaded_at: '2026-11-01T10:00:00',
+      hardware: { summary: 'CPU, 8 cores, 16 GB', cuda: false },
       models: {
-        tiny: { label: 'tiny', blurb: 'fastest' },
-        base: { label: 'base', blurb: 'balanced' },
-        small: { label: 'small', blurb: 'best' },
+        tiny: { label: 'tiny', blurb: 'fastest', size_bytes: 78_000_000 },
+        base: {
+          label: 'base',
+          blurb: 'balanced',
+          size_bytes: 145_000_000,
+          installed: true,
+          disk_bytes: 145_000_000,
+          bench: { speed: 10.5, device: 'cpu' },
+        },
+        small: { label: 'small', blurb: 'best', size_bytes: 486_000_000 },
       },
     },
   };
@@ -134,6 +144,7 @@ describe('the load', () => {
     expect([...new Set(calls.map((c) => c.url))].sort()).toEqual([
       '/api/video/organization',
       '/api/video/repair/jobs',
+      '/api/video/subtitles/ai/jobs?active=1',
       '/api/video/subtitles/whisper/status',
     ]);
     fireEvent.input(el('vo-movie-template'), { target: { value: '/unsaved' } });
@@ -353,7 +364,7 @@ describe('the subtitle chain', () => {
       'Tried first',
     );
     const whisper = document.querySelector('#subchain-widget [data-pinned="whisper"]')!;
-    expect(whisper.textContent).toContain('Last resort, always tried last');
+    expect(whisper.textContent).toContain('Last resort, after the wait, on its own queue');
     expect(
       [...document.querySelectorAll<HTMLElement>('#subchain-widget [data-pool] > li[data-id]')].map(
         (t) => t.dataset.id,
@@ -390,30 +401,42 @@ describe('the subtitle chain', () => {
   });
 });
 
-describe('Whisper', () => {
-  it('a downloaded model: its line, the button done, the switch on', async () => {
+describe('AI subtitles', () => {
+  it('an installed model: the hardware, its line, the button done, the switch on', async () => {
     panel();
     await shown();
-    expect(el('vo-whisper-status').textContent).toBe('Downloaded: base (145 MB) on 2026-11-01.');
-    expect(el('vo-whisper-dl').textContent).toBe('base downloaded');
+    expect(el('vo-ai-hardware').textContent).toBe(
+      'This server: CPU, 8 cores, 16 GB. Suggested model: small.',
+    );
+    expect(el('vo-whisper-status').textContent).toBe(
+      'Installed: base (145 MB). Quick test: 10.5x real time on the CPU, about 3 min for a 45 minute episode.',
+    );
+    expect(el('vo-whisper-dl').textContent).toBe('base installed');
     expect(el('vo-whisper-dl').disabled).toBe(true);
     expect(el('vo-whisper-enabled').disabled).toBe(false);
     expect(document.querySelector('#vo-whisper-model option[value="base"]')!.textContent).toBe(
-      'base: balanced',
+      'base: balanced (installed)',
     );
-    // another model picked: it has to be downloaded first, and the switch waits
+    expect(document.querySelector('#vo-whisper-model option[value="small"]')!.textContent).toBe(
+      'small: best (suggested here)',
+    );
+    // another model picked: it has to be installed first; the installed one
+    // keeps the switch usable and nothing is saved yet
     fireEvent.change(el('vo-whisper-model'), { target: { value: 'small' } });
-    expect(el('vo-whisper-dl').textContent).toBe('Download small model');
+    expect(el('vo-whisper-dl').textContent).toBe('Install small (486 MB)');
     expect(el('vo-whisper-dl').disabled).toBe(false);
-    expect(el('vo-whisper-enabled').disabled).toBe(true);
+    expect(el('vo-whisper-enabled').disabled).toBe(false);
     expect(posts()).toHaveLength(0);
+    // back to an installed one: it is used from now on, so it saves
+    fireEvent.change(el('vo-whisper-model'), { target: { value: 'base' } });
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0].whisper_model).toBe('base');
   });
 
-  it('a download saves the pick first, then starts, and a failure says why', async () => {
+  it('an install saves the pick first, then starts, and a failure says why', async () => {
     panel();
     await shown();
     fireEvent.change(el('vo-whisper-model'), { target: { value: 'small' } });
-    answers['POST /api/video/subtitles/whisper/download'] = { error: 'busy' };
     const fetcher = fetch as unknown as ReturnType<typeof vi.fn>;
     fetcher.mockImplementationOnce((url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method || 'GET', body: JSON.parse(init?.body as string) });
@@ -434,28 +457,75 @@ describe('Whisper', () => {
       ['/api/video/organization', 'small'],
       ['/api/video/subtitles/whisper/download', 'small'],
     ]);
-    // the save before it was a quiet one
     expect(shell.showToast).not.toHaveBeenCalled();
   });
 
-  it('while a download runs: the progress, the button, and the line', async () => {
+  it('while an install runs: the progress, the button, cancel, and the line', async () => {
     answers['GET /api/video/subtitles/whisper/status'] = {
       downloaded: false,
+      installed: [],
       engine: false,
-      engine_hint: 'pip install faster-whisper',
+      engine_hint: 'the faster-whisper package is missing on the server',
       download: { state: 'downloading', model: 'base', total_bytes: 200, downloaded_bytes: 50 },
     };
     panel();
     await shown();
     expect(el('vo-whisper-progress').hidden).toBe(false);
     expect(el('vo-whisper-progress-bar').style.width).toBe('25%');
-    expect(el('vo-whisper-dl').textContent).toBe('Downloading base… 25%');
+    expect(el('vo-whisper-dl').textContent).toBe('Installing base… 25%');
     expect(el('vo-whisper-status').textContent).toBe(
-      'No model downloaded yet. Transcription engine missing on the server: pip install faster-whisper.',
+      'No model installed yet. The transcription engine is missing on the server: the faster-whisper package is missing on the server.',
     );
     expect(el('vo-whisper-enabled').closest('[data-row]')!.textContent).toContain(
-      'Download a model first (and install faster-whisper on the server).',
+      'Install a model first (and the transcription engine on the server).',
     );
+    fireEvent.click(el('vo-whisper-cancel'));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === '/api/video/subtitles/whisper/download/cancel')).toBe(
+        true,
+      ),
+    );
+    videoOrganization.resetState();
+  });
+
+  it('quick test and remove, the queue line, and the new settings saved', async () => {
+    answers['GET /api/video/subtitles/ai/jobs?active=1'] = {
+      jobs: [
+        { id: 4, language: 'en', state: 'running', progress: 0.42, eta_seconds: 360 },
+        { id: 5, language: 'es', state: 'queued', progress: 0 },
+      ],
+    };
+    panel();
+    await shown();
+    await waitFor(() => expect(el('vo-ai-queue').hidden).toBe(false));
+    expect(el('vo-ai-queue').textContent).toContain(
+      'Making en subtitles now: 42%, about 6 min left. 1 waiting.',
+    );
+    fireEvent.click(el('vo-ai-cancel'));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === '/api/video/subtitles/ai/jobs/4/cancel')).toBe(true),
+    );
+    fireEvent.click(el('vo-ai-bench'));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === '/api/video/subtitles/ai/bench')?.body).toEqual({
+        model: 'base',
+      }),
+    );
+    fireEvent.click(el('vo-ai-remove'));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) => c.url === '/api/video/subtitles/whisper/models/base' && c.method === 'DELETE',
+        ),
+      ).toBe(true),
+    );
+    fireEvent.click(el('vo-ai-pause'));
+    await waitFor(() => expect(posts().length).toBeGreaterThan(0));
+    expect(posts().at(-1)).toMatchObject({
+      ai_subs_pause_while_watching: false,
+      ai_subs_wait_hours: 24,
+      whisper_device: 'auto',
+    });
     videoOrganization.resetState();
   });
 });

@@ -1,9 +1,12 @@
-"""Whisper local transcription ("Replace Bazarr" Phase 4).
+"""Whisper models: the lineup, downloads, and the settings status.
 
-The LAST provider in the chain: when every network provider misses (or none is
-configured), the video's own audio is transcribed on this server as a final
-fallback. Fully optional — nothing here runs unless the user enables it AND
-downloads a model via the settings UI.
+Ai subtitles: when every network provider has missed for long enough (or
+someone asks for them in the player or on a title's page), the video's own
+audio is transcribed on this server. The run itself lives in
+``core.video.subtitles.ai`` (its own queue, off the wanted worker's cycle);
+this module owns the models. Several can be installed at once (tiny for
+quick jobs, turbo for the best), each on the data volume. Fully optional:
+nothing runs unless the user turns it on AND installs a model.
 
 Engine choice: faster-whisper (CTranslate2), NOT openai-whisper. Justification:
   - faster-whisper runs quantized int8 on CPU (~4x faster than openai-whisper
@@ -72,20 +75,45 @@ WHISPER_MODELS: dict[str, dict[str, Any]] = {
     "tiny": {
         "repo": "Systran/faster-whisper-tiny",
         "size_bytes": 78207087,
+        "ram_bytes": 300_000_000,
         "label": "tiny",
-        "blurb": "~78 MB · fastest, roughest transcription",
+        "blurb": "~78 MB · fastest, roughest. good for a raspberry pi",
     },
     "base": {
         "repo": "Systran/faster-whisper-base",
         "size_bytes": 147886409,
+        "ram_bytes": 400_000_000,
         "label": "base",
-        "blurb": "~148 MB · balanced speed/quality",
+        "blurb": "~148 MB · quick, fine for clear english",
     },
     "small": {
         "repo": "Systran/faster-whisper-small",
         "size_bytes": 486215847,
+        "ram_bytes": 1_000_000_000,
         "label": "small",
-        "blurb": "~486 MB · slowest, best transcription",
+        "blurb": "~486 MB · the usual pick for a server without a graphics card",
+    },
+    "medium": {
+        "repo": "Systran/faster-whisper-medium",
+        "size_bytes": 1530575217,
+        "ram_bytes": 2_500_000_000,
+        "label": "medium",
+        "blurb": "~1.5 GB · better on accents and other languages, needs a strong CPU",
+    },
+    "large-v3-turbo": {
+        "repo": "dropbox-dash/faster-whisper-large-v3-turbo",
+        "size_bytes": 1621668947,
+        "ram_bytes": 2_500_000_000,
+        "label": "large-v3-turbo",
+        "blurb": "~1.6 GB · the best, and fast on an NVIDIA graphics card",
+    },
+    "distil-large-v3": {
+        "repo": "Systran/faster-distil-whisper-large-v3",
+        "size_bytes": 1516482645,
+        "ram_bytes": 2_500_000_000,
+        "label": "distil-large-v3",
+        "blurb": "~1.5 GB · english only, quick on a graphics card",
+        "english_only": True,
     },
 }
 
@@ -190,6 +218,13 @@ def _safe_target(root: Path, member: str) -> Path:
     return target
 
 
+class DownloadCancelled(RuntimeError):
+    """the settings page's cancel button."""
+
+
+_cancel_download = threading.Event()
+
+
 def _download_one(url: str, tmp_path: Path, expected_size: int,
                   on_chunk: Callable[[int], None] | None = None) -> None:
     """Stream ``url`` to ``tmp_path``; raise unless the byte count matches.
@@ -197,6 +232,8 @@ def _download_one(url: str, tmp_path: Path, expected_size: int,
     req = urllib.request.Request(url, headers={"User-Agent": _UA})
     with urllib.request.urlopen(req, timeout=60) as r, open(tmp_path, "wb") as f:
         while True:
+            if _cancel_download.is_set():
+                raise DownloadCancelled("download cancelled")
             chunk = r.read(1024 * 256)
             if not chunk:
                 break
@@ -258,6 +295,8 @@ def download_model(name: Any,
                 pass
 
     for member, size in members:
+        if _cancel_download.is_set():
+            raise DownloadCancelled("download cancelled")
         target = _safe_target(dest, member)
         if target.is_file():
             try:
@@ -331,21 +370,52 @@ def _set_download_state(**kw) -> None:
         _download_state.update(kw)
 
 
-def _remove_other_model_dirs(keep: str) -> None:
-    """Delete fully-downloaded OTHER allowlisted model dirs after a successful
-    switch — "downloading replaces", per the UX. Only allowlisted names are
-    ever removed; anything else under the root is left alone."""
-    root = models_dir()
-    for name in WHISPER_MODELS:
-        if name == keep:
+def installed_models() -> list[str]:
+    """every allowlisted model fully on disk, in lineup order."""
+    return [n for n in WHISPER_MODELS if model_file_exists(n)]
+
+
+def model_disk_bytes(name: str) -> int:
+    """bytes the model's folder takes. 0 when it isn't there."""
+    try:
+        d = model_dir(name)
+    except ValueError:
+        return 0
+    total = 0
+    for p in d.rglob("*") if d.is_dir() else []:
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except OSError:
             continue
-        d = root / name
-        if d.is_dir():
-            try:
-                shutil.rmtree(d)
-                logger.info("whisper: removed replaced model dir %s", d)
-            except OSError:
-                logger.exception("whisper: could not remove old model dir %s", d)
+    return total
+
+
+def delete_model(name: Any) -> bool:
+    """remove one installed model. only allowlisted names; refuses while that
+    model is downloading. True when something was removed."""
+    valid = valid_model_name(name)
+    if valid is None:
+        raise ValueError("unknown whisper model: %r" % (name,))
+    st = get_download_status()
+    if st.get("state") == "downloading" and st.get("model") == valid:
+        raise RuntimeError("that model is downloading; cancel it first")
+    d = model_dir(valid)
+    if not d.is_dir():
+        return False
+    shutil.rmtree(d)
+    logger.info("whisper: removed model %s", valid)
+    return True
+
+
+def cancel_download() -> bool:
+    """stop the running download after its current block. True when one was
+    running."""
+    with _download_lock:
+        running = _download_state["state"] == "downloading"
+    if running:
+        _cancel_download.set()
+    return running
 
 
 def start_download(name: Any,
@@ -367,7 +437,9 @@ def start_download(name: Any,
         if _download_state["state"] == "downloading":
             return False, "a model download is already in progress"
         _download_state.update(state="downloading", model=valid,
-                               downloaded_bytes=0, total_bytes=0, error=None)
+                               downloaded_bytes=0, total_bytes=WHISPER_MODELS[valid]["size_bytes"],
+                               error=None)
+        _cancel_download.clear()
 
     def _progress(done_bytes: int, total_bytes: int) -> None:
         _set_download_state(downloaded_bytes=done_bytes, total_bytes=total_bytes)
@@ -375,6 +447,15 @@ def start_download(name: Any,
     def _run() -> None:
         try:
             info = download_model(valid, on_progress=_progress)
+        except DownloadCancelled as exc:
+            logger.info("whisper: download of %s cancelled", valid)
+            if callable(on_complete):
+                try:
+                    on_complete(None, exc)
+                except Exception:  # noqa: BLE001
+                    logger.exception("whisper on_complete raised (cancel path)")
+            _set_download_state(state="cancelled", error=None)
+            return
         except Exception as exc:  # noqa: BLE001 - download is best-effort
             logger.exception("whisper model download failed for %s", valid)
             if callable(on_complete):
@@ -387,7 +468,6 @@ def start_download(name: Any,
             # poller seeing "done" can read a stale blob.
             _set_download_state(state="error", error=str(exc))
             return
-        _remove_other_model_dirs(valid)
         if callable(on_complete):
             try:
                 on_complete(info, None)
@@ -446,102 +526,98 @@ def segments_to_srt(segments: Any) -> str:
 
 
 def transcribe_to_srt(name: Any, file_path: str, language: str | None = None) -> str | None:
-    """Transcribe ``file_path``'s audio to SRT with model ``name``.
+    """Transcribe ``file_path`` to SRT with model ``name``, in one go.
 
-    faster-whisper decodes the audio stream itself (no ffmpeg subprocess).
-    Raises on a bad model name or missing model.bin; returns None when the
-    engine isn't installed. Importing faster_whisper here (not at module top
-    level) keeps it an optional dependency — this is the ONLY place it's
-    imported.
+    The ai queue (``core.video.subtitles.ai.queue``) is how SoulSync makes
+    subtitles: it is resumable, can be paused and cancelled, and shows
+    progress. This is the same run with nobody watching it, kept for
+    scripts. Returns None when the engine isn't installed or the audio can't
+    make subtitles in ``language``.
     """
     valid = valid_model_name(name)
     if valid is None:
         raise ValueError("unknown whisper model: %r" % (name,))
     if transcription_engine() is None:
-        logger.warning("whisper: faster-whisper is not installed; "
-                       "transcription unavailable (pip install faster-whisper)")
+        logger.warning("whisper: faster-whisper is not installed; transcription unavailable")
         return None
     model_path = model_file_path(valid)
     if not model_path.is_file():
         raise RuntimeError("whisper model %s is not downloaded" % valid)
-    t0 = time.monotonic()
-    from faster_whisper import WhisperModel  # noqa: PLC0415 - optional dep, lazy
-    # A local dir (never a bare name — that would auto-download from HF).
-    model = WhisperModel(str(model_path.parent), device="cpu",
-                         compute_type="int8")
-    # whisper writes what it hears. forcing language="es" on english audio
-    # doesn't translate, it spends minutes producing junk labeled .es.srt.
-    # so detect first (info is ready before the lazy segments run): transcribe
-    # when the audio is the wanted language, translate when english is wanted
-    # (whisper only translates into english), otherwise it's a miss.
-    want = (str(language or "").strip().lower() or "en").split("-")[0]
-    segments, info = model.transcribe(str(file_path), beam_size=5)
-    heard = str(getattr(info, "language", "") or "").lower()
-    if heard != want:
-        if want != "en":
-            logger.info("whisper: %s audio is %r, can't make %r subtitles",
-                        file_path, heard, want)
-            del model
-            return None
-        segments, _info = model.transcribe(str(file_path), task="translate",
-                                           language=heard or None, beam_size=5)
-    text = segments_to_srt(segments)
-    # faster-whisper frees GPU/CPU buffers with the model; drop our ref too.
-    del model
-    logger.info("whisper: transcribed %s in %.1fs", file_path,
-                time.monotonic() - t0)
-    return text
+    from core.player import transcode as T
+    from core.video.subtitles.ai import engine
+    ffmpeg = T.ffmpeg_path()
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg is missing")
+    job = {"id": "adhoc-%d" % int(time.time() * 1000)}
+    try:
+        res = engine.run(job, video=str(file_path), model_dir=str(model_path.parent), ffmpeg=ffmpeg,
+                         ffprobe=T.ffprobe_for(ffmpeg),
+                         want=(str(language or "").strip().lower() or "en"))
+    finally:
+        engine.cleanup(job["id"])
+    return res.get("srt") if res.get("status") == "done" else None
 
 
 # ── status payload for the settings UI ─────────────────────────────────────────
 
 def status_payload(get_setting: Callable[[str, Any], Any]) -> dict:
     """Everything the settings UI needs. Never raises."""
-    try:
-        name = valid_model_name(get_setting("whisper_model",
-                                            DEFAULT_WHISPER_MODEL))
-    except Exception:  # noqa: BLE001
-        name = None
-    name = name or DEFAULT_WHISPER_MODEL
-    try:
-        enabled = bool(get_setting("whisper_enabled", False))
-    except Exception:  # noqa: BLE001
-        enabled = False
-    try:
-        flag = bool(get_setting("whisper_model_downloaded", False))
-    except Exception:  # noqa: BLE001
-        flag = False
-    on_disk = model_file_exists(name)
-    # Which model (if any) is actually on disk — the picker may point at a
-    # different one, in which case the UI offers "Download <picked> model"
-    # with a "replaces <disk_model>" note.
-    disk_model = next((n for n in WHISPER_MODELS if model_file_exists(n)), None)
-
-    def _s(key: str, default: str = "") -> str:
+    def _g(key: str, default: Any) -> Any:
         try:
-            return str(get_setting(key, default) or "")
+            return get_setting(key, default)
         except Exception:  # noqa: BLE001
             return default
 
-    try:
-        size_bytes = int(get_setting("whisper_model_size_bytes", 0) or 0)
-    except (TypeError, ValueError):
-        size_bytes = 0
+    name = valid_model_name(_g("whisper_model", DEFAULT_WHISPER_MODEL)) or DEFAULT_WHISPER_MODEL
+    enabled = bool(_g("whisper_enabled", False))
+    installed = installed_models()
     engine = transcription_engine()
+    bench = _g("whisper_bench", {}) or {}
+    if isinstance(bench, str):
+        try:
+            bench = json.loads(bench)
+        except ValueError:
+            bench = {}
+    if not isinstance(bench, dict):
+        bench = {}
+    try:
+        from core.video.subtitles.ai import hardware
+        hw = hardware.detect()
+        hw_line = hardware.summary(hw)
+        recommended = hardware.recommend(hw, bench)
+    except Exception:  # noqa: BLE001
+        hw, hw_line, recommended = {}, "", DEFAULT_WHISPER_MODEL
+    try:
+        from core.video.subtitles import autosync
+        sync_ok = autosync.ffsubsync_available()
+    except Exception:  # noqa: BLE001
+        sync_ok = False
+    models = {}
+    for n, m in WHISPER_MODELS.items():
+        on = n in installed
+        b = bench.get(n) if isinstance(bench.get(n), dict) else None
+        models[n] = {"repo": m["repo"], "size_bytes": m["size_bytes"], "ram_bytes": m.get("ram_bytes"),
+                     "label": m["label"], "blurb": m["blurb"],
+                     "english_only": bool(m.get("english_only")),
+                     "installed": on, "disk_bytes": model_disk_bytes(n) if on else 0,
+                     "bench": b}
     return {
         "enabled": enabled,
         "model": name,
-        "models": {
-            n: {"repo": m["repo"], "size_bytes": m["size_bytes"],
-                "label": m["label"], "blurb": m["blurb"]}
-            for n, m in WHISPER_MODELS.items()
-        },
-        "downloaded": bool(flag and on_disk),
-        "disk_model": disk_model,
-        "size_bytes": size_bytes,
-        "downloaded_at": _s("whisper_model_downloaded_at"),
+        "models": models,
+        "installed": installed,
+        "downloaded": name in installed,
+        "disk_model": installed[0] if installed else None,
+        "size_bytes": WHISPER_MODELS[name]["size_bytes"],
+        "downloaded_at": str(_g("whisper_model_downloaded_at", "") or ""),
         "engine": engine,
-        "engine_hint": None if engine else "pip install faster-whisper",
+        "engine_hint": None if engine else "the faster-whisper package is missing on the server",
+        "sync_engine": "ffsubsync" if sync_ok else None,
+        "hardware": {"summary": hw_line, "cuda": bool(hw.get("cuda")), "gpu": hw.get("gpu"),
+                     "cores": hw.get("cores"), "memory_bytes": hw.get("memory_bytes"),
+                     "arch": hw.get("arch"), "cuda_problem": hw.get("cuda_problem")},
+        "recommended": recommended,
+        "device": str(_g("whisper_device", "auto") or "auto"),
         "download": _public_download_status(),
     }
 
@@ -599,60 +675,14 @@ class WhisperProvider(SubtitleProvider):
             return False
 
     def search(self, query: SubtitleQuery) -> list[SubtitleCandidate]:
-        if not self._model:
-            return []
-        if getattr(query, "forced", False):
-            # a transcript is every spoken line. it can never be a forced
-            # (foreign-parts-only) track.
-            return []
-        file_path = getattr(query, "file_path", None)
-        if not file_path or not os.path.isfile(str(file_path)):
-            # No media, no transcription. (The chain always passes file_path
-            # in production; manual/blind queries simply get no candidate.)
-            return []
-        lang = str(getattr(query, "language", None) or "en")
-        return [SubtitleCandidate(
-            provider_id=self.id,
-            language=lang,
-            hi=False,  # no sound cues in a transcript
-            forced=False,
-            title="Local transcription (whisper %s)" % self._model,
-            download_ref={"file_path": str(file_path),
-                          "language": lang,
-                          "model": self._model},
-            # Honest, not a hack: the transcript is GENERATED from this exact
-            # file, so its timing is perfect by construction — the same
-            # guarantee a hash match gives. It clears the min-score gate so
-            # the last-resort chain can use it.
-            hash_match=True,
-            download_count=0,
-        )]
+        """nothing: ai subtitles don't run in the provider chain any more.
+        the wanted worker queues an ai job (``core.video.subtitles.ai.queue``)
+        once the network providers have missed for long enough, so a minutes
+        long transcription never holds up every other language's retry."""
+        return []
 
     def download(self, candidate: SubtitleCandidate) -> str | None:
-        # Re-verify both gates on EVERY call — never assume the model is still
-        # there because search() saw it (the user could delete it mid-cycle).
-        try:
-            if not self.is_configured(self._get_setting):
-                return None
-        except Exception:  # noqa: BLE001
-            return None
-        ref = getattr(candidate, "download_ref", None)
-        if not isinstance(ref, dict):
-            return None
-        file_path = ref.get("file_path")
-        if not file_path or not os.path.isfile(str(file_path)):
-            return None
-        if str(ref.get("model") or "") != (self._model or ""):
-            # The candidate was built for a different model than the one now
-            # selected — don't transcribe with a stale ref.
-            return None
-        lang = str(ref.get("language") or "en")
-        try:
-            text = transcribe_to_srt(self._model, str(file_path), lang)
-        except Exception:  # noqa: BLE001 - a failed transcription is a miss
-            logger.exception("whisper transcription failed for %s", file_path)
-            return None
-        return text if text and text.strip() else None
+        return None
 
 
 __all__ = [
@@ -660,6 +690,7 @@ __all__ = [
     "valid_model_name", "default_models_dir", "set_models_dir_override",
     "models_dir", "model_dir", "model_file_path", "model_file_exists",
     "download_model", "start_download", "get_download_status",
+    "installed_models", "model_disk_bytes", "delete_model", "cancel_download", "DownloadCancelled",
     "transcription_engine", "segments_to_srt", "transcribe_to_srt",
     "status_payload", "WhisperProvider",
 ]

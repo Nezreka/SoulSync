@@ -717,6 +717,9 @@ _set_bulk_emit(socketio.emit)
 from core.video.repair.worker import get_video_repair_worker as _get_video_repair
 _get_video_repair().set_emitter(socketio.emit)
 _get_video_repair().start()
+# ai subtitles: live 'video:subtitles:ai' job progress (player, title page, settings)
+from core.video.subtitles.ai.queue import set_emitter as _set_ai_subs_emit
+_set_ai_subs_emit(socketio.emit)
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}

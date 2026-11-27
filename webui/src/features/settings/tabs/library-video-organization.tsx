@@ -44,6 +44,9 @@ import {
   MOVIE_EG,
   SUBCHAIN_NETWORK_IDS,
   YOUTUBE_EG,
+  WHISPER_ORDER,
+  episodeMinutes,
+  etaWords,
   jobLine,
   renderTemplate,
   subchainMeta,
@@ -67,6 +70,7 @@ const SAVED_WHEN_LEFT: Record<string, true> = {
   'vo-sub-upgrade-delta': true,
   'vo-sub-worker-interval': true,
   'vo-sub-worker-batch': true,
+  'vo-ai-wait': true,
 };
 
 const save = (key: string, value: string | boolean) =>
@@ -564,7 +568,12 @@ export function YoutubeFollowCount() {
  *  pinned last while it is on, downloaded and has its engine */
 function SubtitleChain() {
   const { order, whisper, loads } = useVideoOrganization();
-  const whisperOn = !!(whisper && whisper.enabled && whisper.downloaded && whisper.engine);
+  const whisperOn = !!(
+    whisper &&
+    whisper.enabled &&
+    (whisper.installed?.length || whisper.downloaded) &&
+    whisper.engine
+  );
   const name = (id: string) => subchainMeta(id).name;
   const mark = (id: string) => (
     <Mark icon={id === 'embedded' ? 'box' : id === 'whisper' ? 'wave' : 'news'} size="sm" />
@@ -597,7 +606,9 @@ function SubtitleChain() {
                   {mark('whisper')}
                   <span>
                     <b>{name('whisper')}</b>
-                    <StatusWords tone="ok">Last resort, always tried last</StatusWords>
+                    <StatusWords tone="ok">
+                      Last resort, after the wait, on its own queue
+                    </StatusWords>
                   </span>
                 </div>
               ) : null}
@@ -614,70 +625,99 @@ function SubtitleChain() {
   );
 }
 
-/** Whisper: the model, its download, and the switch that needs both */
+/** AI subtitles: this server's hardware, the models (several can be
+ *  installed), the quick test, the switch, and the queue */
 function Whisper() {
-  const { whisper: st, form, whisperError, status } = useVideoOrganization();
+  const { whisper: st, form, whisperError, status, ai } = useVideoOrganization();
   const busy = status === 'loading' || status === 'failed';
   const picked = String(form.whisper_model || '');
   const dl = st?.download || {};
   const downloading = dl.state === 'downloading';
-  // "ready": downloaded, for the model the settings name now
-  const pickedReady = !!st?.downloaded && picked === st?.model;
-  const usable = pickedReady && !!st?.engine;
+  const installed = st?.installed ?? (st?.downloaded && st?.model ? [st.model] : []);
+  const pickedReady = installed.includes(picked);
+  const usable = installed.length > 0 && !!st?.engine;
+  const meta = st?.models?.[picked];
   const pct =
     downloading && (dl.total_bytes || 0) > 0
       ? Math.round(((dl.downloaded_bytes || 0) / (dl.total_bytes || 1)) * 100)
       : 0;
+  const testing = ai?.bench?.running || null;
 
-  let button = 'Download model';
+  let button = 'Install model';
   let buttonOff = false;
   if (st) {
     if (downloading) {
-      button = `Downloading ${dl.model || picked}… ${pct}%`;
+      button = `Installing ${dl.model || picked}… ${pct}%`;
       buttonOff = true;
     } else if (pickedReady) {
-      button = `${picked} downloaded`;
+      button = `${picked} installed`;
       buttonOff = true;
-    } else button = `Download ${picked} model`;
+    } else
+      button = `Install ${picked}${meta?.size_bytes ? ` (${whisperBytes(meta.size_bytes)})` : ''}`;
   }
 
   let statusText = '';
   if (st) {
     const bits: string[] = [];
-    if (st.downloaded)
+    if (installed.length)
       bits.push(
-        `Downloaded: ${st.model} (${whisperBytes(st.size_bytes)})${st.downloaded_at ? ` on ${String(st.downloaded_at).slice(0, 10)}` : ''}.`,
+        `Installed: ${installed
+          .map((n) => {
+            const m = st.models?.[n];
+            return `${n} (${whisperBytes(m?.disk_bytes || m?.size_bytes)})`;
+          })
+          .join(', ')}.`,
       );
-    else bits.push('No model downloaded yet.');
-    if (st.disk_model && st.disk_model !== picked)
-      bits.push(`Note: ${st.disk_model} is on disk; downloading ${picked} replaces it.`);
+    else bits.push('No model installed yet.');
+    const speed = meta?.bench?.speed;
+    if (pickedReady && speed)
+      bits.push(
+        `Quick test: ${speed}x real time on the ${meta?.bench?.device === 'cuda' ? 'graphics card' : 'CPU'}, ${episodeMinutes(speed)}.`,
+      );
     if (!st.engine)
       bits.push(
-        `Transcription engine missing on the server: ${st.engine_hint || 'install faster-whisper'}.`,
+        `The transcription engine is missing on the server: ${st.engine_hint || 'install faster-whisper'}.`,
       );
     statusText = bits.join(' ');
   }
+  const order = WHISPER_ORDER.filter((n) => !st?.models || st.models[n]);
   const option = (value: string) => {
-    const meta = st?.models?.[value];
-    return { value, label: meta ? `${meta.label}: ${meta.blurb}` : value };
+    const m = st?.models?.[value];
+    const tags = [
+      installed.includes(value) ? 'installed' : '',
+      st?.recommended === value ? 'suggested here' : '',
+    ].filter(Boolean);
+    return {
+      value,
+      label: m ? `${m.label}: ${m.blurb}${tags.length ? ` (${tags.join(', ')})` : ''}` : value,
+    };
   };
+  const hw = st?.hardware;
+  const jobs = ai?.jobs ?? [];
+  const running = jobs.find((j) => j.state === 'running');
+  const waiting = jobs.filter((j) => j.state !== 'running').length;
 
   return (
     <>
       <Row
         wide
-        label="Local transcription (Whisper)"
+        label="AI subtitles"
         htmlFor="vo-whisper-model"
-        help="The last resort when no provider has subtitles: this server transcribes the video's own audio. No key, no quota, offline after the one-time model download."
-        more="It runs in the background subtitle worker (a 45-minute episode takes roughly 10 to 20 minutes on a typical CPU). It needs the faster-whisper Python package on the server. The model you pick is saved when it is downloaded."
+        help="When no provider has subtitles, this server listens to the video's own audio and writes them. No key, no quota, nothing leaves the server."
+        more="The files are named Movie.ai.en.srt so Plex, Jellyfin, Emby and Kodi still read them as English, and SoulSync replaces them with the first real subtitle that turns up. Bigger models are slower and better. Several can be installed; the one picked here is used."
       >
+        <div className={s.fieldNote} id="vo-ai-hardware">
+          {hw?.summary
+            ? `This server: ${hw.summary}.${st?.recommended ? ` Suggested model: ${st.recommended}.` : ''}${hw.cuda_problem && hw.gpu ? ` The graphics card can't be used: ${hw.cuda_problem}.` : ''}`
+            : ''}
+        </div>
         <div className={s.whisperLine}>
           <Select
             id="vo-whisper-model"
-            aria-label="Whisper model"
+            aria-label="AI subtitle model"
             value={picked}
-            onChange={(event) => videoOrganization.edit({ whisper_model: event.target.value })}
-            options={[option('tiny'), option('base'), option('small')]}
+            onChange={(event) => videoOrganization.pickModel(event.target.value)}
+            options={order.map(option)}
           />
           <Btn
             small
@@ -688,6 +728,42 @@ function Whisper() {
           >
             {button}
           </Btn>
+          {downloading ? (
+            <Btn
+              small
+              kind="ghost"
+              icon="x"
+              id="vo-whisper-cancel"
+              onClick={() => void videoOrganization.cancelDownload()}
+            >
+              Cancel
+            </Btn>
+          ) : null}
+          {pickedReady && !downloading ? (
+            <>
+              <Btn
+                small
+                kind="ghost"
+                icon="refresh"
+                id="vo-ai-bench"
+                busy={testing === picked}
+                disabled={busy || !!testing || !st?.engine}
+                onClick={() => void videoOrganization.bench(picked)}
+              >
+                {testing === picked ? 'Testing…' : 'Quick test'}
+              </Btn>
+              <Btn
+                small
+                kind="ghost"
+                icon="x"
+                id="vo-ai-remove"
+                disabled={busy}
+                onClick={() => void videoOrganization.removeModel(picked)}
+              >
+                Remove
+              </Btn>
+            </>
+          ) : null}
         </div>
         <div className={s.progress} id="vo-whisper-progress" hidden={!downloading}>
           <div
@@ -705,24 +781,81 @@ function Whisper() {
       </Row>
       <Row
         sub
-        label="Enable local transcription"
+        label="Make subtitles with AI when none can be found"
         htmlFor="vo-whisper-enabled"
         off={!!st && !usable}
         help={
           st && !usable
-            ? 'Download a model first (and install faster-whisper on the server).'
-            : 'Whisper is pinned last in the chain while this is on.'
+            ? 'Install a model first (and the transcription engine on the server).'
+            : 'For a wanted language that no provider has, after the wait below. You can always make them by hand in the player or on a title.'
         }
       >
         <Switch
           id="vo-whisper-enabled"
           checked={!!form.whisper_enabled}
-          // off until the picked model is downloaded and the engine is there;
-          // never switched off here, so a later save keeps what was asked for
+          // off until a model is installed and the engine is there; never
+          // switched off here, so a later save keeps what was asked for
           disabled={busy || (!!st && !usable)}
           onChange={(event) => void videoOrganization.toggleWhisper(event.target.checked)}
         />
       </Row>
+      <Row
+        sub
+        field
+        label="Wait for real subtitles first"
+        htmlFor="vo-ai-wait"
+        help="Hours a new title waits for a real subtitle before AI makes one."
+      >
+        <Num id="vo-ai-wait" field="ai_subs_wait_hours" min="0" max="720" unit="hours" />
+      </Row>
+      <Check
+        sub
+        id="vo-ai-pause"
+        field="ai_subs_pause_while_watching"
+        label="Wait while someone is watching"
+        help="Background AI work pauses so playback keeps the CPU. Subtitles someone asked for keep going, and a graphics card never waits."
+      />
+      <Row
+        sub
+        label="Run it on"
+        htmlFor="vo-ai-device"
+        help={
+          hw?.cuda
+            ? `${hw.gpu || 'An NVIDIA card'} found.`
+            : 'No usable NVIDIA card found. The :cuda image adds the GPU libraries.'
+        }
+      >
+        <Select
+          id="vo-ai-device"
+          aria-label="Where AI subtitles run"
+          value={String(form.whisper_device || 'auto')}
+          onChange={(event) => save('whisper_device', event.target.value)}
+          options={[
+            { value: 'auto', label: 'The graphics card when there is one' },
+            { value: 'cpu', label: 'The CPU only' },
+            { value: 'cuda', label: 'The NVIDIA graphics card' },
+          ]}
+        />
+      </Row>
+      <div className={s.fieldNote} id="vo-ai-queue" hidden={!jobs.length}>
+        {running
+          ? `Making ${running.language} subtitles now: ${Math.round((running.progress || 0) * 100)}%${running.eta_seconds ? `, ${etaWords(running.eta_seconds)}` : ''}.`
+          : ai?.watching
+            ? 'Waiting while someone watches.'
+            : ''}
+        {waiting ? ` ${waiting} waiting.` : ''}{' '}
+        {running ? (
+          <Btn
+            small
+            kind="ghost"
+            icon="x"
+            id="vo-ai-cancel"
+            onClick={() => void videoOrganization.cancelAiJob(running.id)}
+          >
+            Stop
+          </Btn>
+        ) : null}
+      </div>
     </>
   );
 }

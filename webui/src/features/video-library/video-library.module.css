@@ -1696,3 +1696,37 @@
     width: 100%;
   }
 }
+
+/* make subtitles with ai: the job's state, and its progress */
+.aiStatus {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--vlt-line);
+  border-radius: var(--radius-lg);
+  background: var(--white-a04);
+  font-size: 13px;
+}
+
+.aiStatus[data-state='failed'],
+.aiStatus[data-state='discarded'],
+.aiStatus[data-state='no_match'] {
+  border-color: var(--warning);
+}
+
+.aiBar {
+  height: 4px;
+  margin-top: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+  overflow: hidden;
+}
+
+.aiBar > div {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--vlt-accent);
+  transition: width 0.4s ease;
+}

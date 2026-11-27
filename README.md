@@ -231,6 +231,8 @@ Every page is there: **Home, Movies, TV, Music, YouTube, Audiobooks, Podcasts, H
 - **Plays anything**: files a browser can't play are converted on the fly by the server (on the GPU when it works), with seeking.
 - **Chapters and skip intro**: a file's own chapter marks show in the chapter menu, and a chapter named intro, recap or credits gets a skip button. Nothing is guessed.
 - **Find subtitles while you watch** from SoulSync's own subtitle providers, best match first. The one you pick is saved beside the video and switched on at once.
+- **AI subtitles, made on your server**: when no provider has a language, SoulSync listens to the audio itself (Whisper, from tiny to large-v3-turbo, on the CPU or an NVIDIA card) and writes proper subtitles: two lines at most, timed to the words, with made-up lines ("thanks for watching", repeats, music) thrown out. Ask for them in the player or on a title, or let it fill gaps on its own after a day of waiting. They're named `Movie.ai.en.srt` so Plex, Jellyfin, Emby and Kodi still read the language, and the first real subtitle that turns up replaces them. Nothing leaves your server.
+- **Subtitle timing you set once**: nudge a subtitle earlier or later and it's saved for that subtitle file and your profile, in the browser and the app.
 - **The end of a video**: the next episode counts down, what you were in the middle of sits beside it, and a long unattended run asks "are you still watching?".
 - **Casting**: Chromecast plays anything, with files the TV can't decode converted on the way.
 - **Info and stats**: an info sheet on every item says what it is and what file it is. **Stats for nerds** shows the stream live: the file, direct play or converted (and why), the tracks in use, dropped frames and buffer.

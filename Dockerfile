@@ -29,6 +29,16 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# AI subtitles on an NVIDIA GPU (the :cuda tag): the cuBLAS and cuDNN 9 libraries
+# for CUDA 12 that CTranslate2 needs, as pip wheels (~2 GB, so never in the
+# default image). SoulSync loads them itself; no LD_LIBRARY_PATH needed.
+#   docker build --build-arg WHISPER_CUDA=1 -t soulsync:cuda .
+# then run with --gpus all (the NVIDIA container toolkit on the host).
+ARG WHISPER_CUDA=0
+RUN if [ "$WHISPER_CUDA" = "1" ]; then \
+        pip install --no-cache-dir nvidia-cublas-cu12 "nvidia-cudnn-cu12==9.*"; \
+    fi
+
 # yt-dlp must track YouTube faster than its stable channel ships — stable can
 # lag months behind a breaking YouTube change while extraction is broken
 # ("Requested format is not available"). Build images with the NIGHTLY channel.

@@ -91,7 +91,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 78   # v78: seerr_request_links (seerr in front, soulsync behind it in place of radarr and sonarr, #2324); v77: home_videos (a player library of clips from a camera or phone, never looked up); v76: video_requests.acquisition + video_wishlist.awaiting_selection (an approved request held for a release pick, #2199); v75: video_request_log.kind (music, movies and TV each have their own request limit); v74: quality_profiles.media_type (movie | tv | NULL = both, #2168); v73: video_request_log (the request limit counts asks, not surviving rows) + video_downloads/video_download_history.profile_id (who started a grab); v72: idx_episodes_summary (the library manager sums a show up from the index alone); v71: video_title_freshness (when each source was last asked about a title, for the detail page refresh); v70: video_file_changes (file history and undo) + movies/shows.hands_off (the padlock: automation leaves the title and its files alone); v69: episode_scene_numbers (a lumped anime season the server numbers TMDB's way is searched by its split numbers) + re-sync those shows; v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 81   # v81: subtitle_ai_jobs (the ai subtitle queue) + subtitle_delays (a profile's delay per subtitle file); v79 and v80 are taken by other branches; v78: seerr_request_links (seerr in front, soulsync behind it in place of radarr and sonarr, #2324); v77: home_videos (a player library of clips from a camera or phone, never looked up); v76: video_requests.acquisition + video_wishlist.awaiting_selection (an approved request held for a release pick, #2199); v75: video_request_log.kind (music, movies and TV each have their own request limit); v74: quality_profiles.media_type (movie | tv | NULL = both, #2168); v73: video_request_log (the request limit counts asks, not surviving rows) + video_downloads/video_download_history.profile_id (who started a grab); v72: idx_episodes_summary (the library manager sums a show up from the index alone); v71: video_title_freshness (when each source was last asked about a title, for the detail page refresh); v70: video_file_changes (file history and undo) + movies/shows.hands_off (the padlock: automation leaves the title and its files alone); v69: episode_scene_numbers (a lumped anime season the server numbers TMDB's way is searched by its split numbers) + re-sync those shows; v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 
@@ -4619,6 +4619,225 @@ class VideoDatabase:
             conn.commit()
         finally:
             conn.close()
+
+    # ── ai subtitle jobs (v81) ────────────────────────────────────────────────
+    AI_JOB_ACTIVE = ("queued", "running", "paused")
+
+    def ai_job_enqueue(self, video_kind, video_id, language, *, source="auto",
+                       priority=20, created_by=None) -> dict:
+        """a job for this video x language, or the one already waiting (its
+        priority raised when this ask is more urgent). returns the row."""
+        kind, vid, lang = str(video_kind), int(video_id), str(language or "en").lower()
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM subtitle_ai_jobs WHERE video_kind=? AND video_id=? AND language=? "
+                "AND state IN ('queued','running','paused') ORDER BY id DESC LIMIT 1",
+                (kind, vid, lang)).fetchone()
+            if row:
+                if int(priority) > int(row["priority"]):
+                    conn.execute("UPDATE subtitle_ai_jobs SET priority=?, source=?, "
+                                 "created_by=COALESCE(?, created_by), updated_at=datetime('now') WHERE id=?",
+                                 (int(priority), str(source), created_by, row["id"]))
+                    conn.commit()
+                jid = row["id"]
+            else:
+                cur = conn.execute(
+                    "INSERT INTO subtitle_ai_jobs(video_kind, video_id, language, source, priority, created_by) "
+                    "VALUES (?, ?, ?, ?, ?, ?)", (kind, vid, lang, str(source), int(priority), created_by))
+                conn.commit()
+                jid = cur.lastrowid
+            return dict(conn.execute("SELECT * FROM subtitle_ai_jobs WHERE id=?", (jid,)).fetchone())
+        finally:
+            conn.close()
+
+    def ai_job_get(self, job_id) -> dict | None:
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT * FROM subtitle_ai_jobs WHERE id=?", (int(job_id),)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def ai_job_next(self, *, background_ok=True) -> dict | None:
+        """the next job to run: highest priority, oldest first. with
+        ``background_ok`` False only on-demand jobs (someone is watching)."""
+        sql = ("SELECT * FROM subtitle_ai_jobs WHERE state IN ('queued','paused') %s "
+               "ORDER BY priority DESC, id ASC LIMIT 1"
+               % ("" if background_ok else "AND source='on_demand'"))
+        conn = self._get_connection()
+        try:
+            row = conn.execute(sql).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    _AI_JOB_FIELDS = ("state", "progress", "stage", "eta_seconds", "error", "model", "device",
+                      "spoken_language", "task", "confidence", "verdict", "output_path",
+                      "duration_seconds", "started_at", "finished_at", "priority")
+
+    def ai_job_update(self, job_id, **fields) -> None:
+        cols = [k for k in fields if k in self._AI_JOB_FIELDS]
+        if not cols:
+            return
+        sets = ", ".join("%s=?" % c for c in cols)
+        vals = [fields[c] for c in cols]
+        conn = self._get_connection()
+        try:
+            conn.execute("UPDATE subtitle_ai_jobs SET %s, updated_at=datetime('now') WHERE id=?" % sets,
+                         (*vals, int(job_id)))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def ai_job_cancel(self, job_id) -> bool:
+        """a waiting job is cancelled here; a running one is flagged and the
+        worker stops it between segments. True when it was active."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE subtitle_ai_jobs SET state='cancelled', finished_at=datetime('now'), "
+                "updated_at=datetime('now') WHERE id=? AND state IN ('queued','paused','running')",
+                (int(job_id),))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def ai_job_requeue_running(self) -> int:
+        """startup: a job a restart cut off goes back to the queue (it resumes
+        from its checkpoint)."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE subtitle_ai_jobs SET state='queued', stage='resuming', "
+                               "updated_at=datetime('now') WHERE state='running'")
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def ai_job_list(self, *, active_only=False, limit=100, video_kind=None, video_id=None) -> list:
+        where, args = [], []
+        if active_only:
+            where.append("state IN ('queued','running','paused')")
+        if video_kind is not None:
+            where.append("video_kind=?")
+            args.append(str(video_kind))
+        if video_id is not None:
+            where.append("video_id=?")
+            args.append(int(video_id))
+        sql = "SELECT * FROM subtitle_ai_jobs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += (" ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'paused' THEN 1 WHEN 'queued' THEN 2 ELSE 3 END,"
+                " CASE WHEN state IN ('queued','paused','running') THEN -priority ELSE 0 END, "
+                " CASE WHEN state IN ('queued','paused','running') THEN id ELSE -id END LIMIT ?")
+        args.append(max(1, int(limit)))
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(sql, args).fetchall()]
+        finally:
+            conn.close()
+
+    def ai_job_position(self, job_id) -> int | None:
+        """1 = next to run (or running). None when it isn't waiting."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT state, priority, id FROM subtitle_ai_jobs WHERE id=?",
+                               (int(job_id),)).fetchone()
+            if not row or row["state"] not in ("queued", "running", "paused"):
+                return None
+            if row["state"] == "running":
+                return 1
+            ahead = conn.execute(
+                "SELECT COUNT(*) FROM subtitle_ai_jobs WHERE state IN ('queued','running','paused') AND "
+                "(state='running' OR priority > ? OR (priority = ? AND id < ?))",
+                (row["priority"], row["priority"], row["id"])).fetchone()[0]
+            return int(ahead) + 1
+        finally:
+            conn.close()
+
+    def ai_job_for_output(self, path) -> dict | None:
+        """the newest finished job that wrote this sidecar (its confidence)."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT * FROM subtitle_ai_jobs WHERE output_path=? AND state='done' "
+                               "ORDER BY id DESC LIMIT 1", (str(path),)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def ai_job_prune(self, keep_days=30) -> int:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM subtitle_ai_jobs WHERE state NOT IN ('queued','running','paused') "
+                               "AND updated_at < datetime('now', ?)", ("-%d days" % int(keep_days),))
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def subtitle_latest_download(self, video_kind, video_id, language,
+                                 hi=False, forced=False) -> dict | None:
+        """{score, provider} of the newest 'downloaded' history row, or None."""
+        key = self._subtitle_wanted_key(video_kind, video_id, language, hi, forced)
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT score, provider FROM subtitle_fetch_history "
+                "WHERE video_kind=? AND video_id=? AND language=? AND hi=? AND forced=? "
+                "AND outcome='downloaded' ORDER BY id DESC LIMIT 1", key).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        return {"score": None if row["score"] is None else float(row["score"]),
+                "provider": str(row["provider"] or "")}
+
+    # ── subtitle delay per profile x subtitle file (v81) ──────────────────────
+    def subtitle_delay_get(self, profile_id, video_path, sub_key, sub_sig="") -> int:
+        """the saved delay in ms, 0 when none or the subtitle file changed."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT delay_ms, sub_sig FROM subtitle_delays WHERE profile_id=? "
+                               "AND video_path=? AND sub_key=?",
+                               (int(profile_id), str(video_path), str(sub_key))).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return 0
+        if sub_sig and row["sub_sig"] and row["sub_sig"] != sub_sig:
+            return 0
+        return int(row["delay_ms"] or 0)
+
+    def subtitle_delays_for(self, profile_id, video_path) -> dict:
+        """{sub_key: (delay_ms, sub_sig)} for one file."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute("SELECT sub_key, delay_ms, sub_sig FROM subtitle_delays WHERE profile_id=? "
+                                "AND video_path=?", (int(profile_id), str(video_path))).fetchall()
+        finally:
+            conn.close()
+        return {r["sub_key"]: (int(r["delay_ms"] or 0), str(r["sub_sig"] or "")) for r in rows}
+
+    def subtitle_delay_set(self, profile_id, video_path, sub_key, delay_ms, sub_sig="") -> int:
+        """save (0 clears). returns what was stored."""
+        d = max(-30000, min(30000, int(delay_ms)))
+        conn = self._get_connection()
+        try:
+            if d == 0:
+                conn.execute("DELETE FROM subtitle_delays WHERE profile_id=? AND video_path=? AND sub_key=?",
+                             (int(profile_id), str(video_path), str(sub_key)))
+            else:
+                conn.execute(
+                    "INSERT INTO subtitle_delays(profile_id, video_path, sub_key, sub_sig, delay_ms) "
+                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT(profile_id, video_path, sub_key) DO UPDATE SET "
+                    "delay_ms=excluded.delay_ms, sub_sig=excluded.sub_sig, updated_at=datetime('now')",
+                    (int(profile_id), str(video_path), str(sub_key), str(sub_sig or ""), d))
+            conn.commit()
+        finally:
+            conn.close()
+        return d
 
     def get_import_failed_video_downloads(self) -> list:
         """Downloads that finished but couldn't be auto-placed (sample / wrong episode /

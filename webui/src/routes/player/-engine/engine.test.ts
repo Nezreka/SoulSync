@@ -632,6 +632,39 @@ describe('subtitle sync and new subtitles', () => {
     expect(t.engine.getState().subtitleDelay).toBe(400);
   });
 
+  it('uses the delay saved on the server for that subtitle file, and saves nudges once', async () => {
+    const saved: Array<[string, number]> = [];
+    const t = setup({
+      tracks: {
+        audio: [],
+        subtitles: [
+          { ...tracks.subtitles[0], id: 's0', delay_ms: -1500 },
+          { ...tracks.subtitles[0], id: 'x0', external: true, ai: true, delay_ms: 0 },
+        ],
+      },
+    });
+    const deps = (t.engine as unknown as { deps: EngineDeps }).deps;
+    deps.saveSubtitleDelay = async (_item, id, ms) => {
+      saved.push([id, ms]);
+    };
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    t.engine.setSubtitle('s0');
+    expect(t.engine.getState().subtitleDelay).toBe(-1500);
+    t.engine.setSubtitle('x0');
+    expect(t.engine.getState().subtitleDelay).toBe(0);
+    t.engine.setSubtitleDelay(100);
+    t.engine.setSubtitleDelay(200);
+    t.engine.setSubtitleDelay(99_000);
+    expect(t.engine.getState().subtitleDelay).toBe(30_000);
+    await new Promise((r) => setTimeout(r, 700));
+    // a run of nudges is one save, clamped, for the subtitle on screen
+    expect(saved).toEqual([['x0', 30_000]]);
+    // back on the first one: its own saved delay, not the other file's
+    t.engine.setSubtitle('s0');
+    expect(t.engine.getState().subtitleDelay).toBe(-1500);
+  });
+
   it('switches to a subtitle file just downloaded beside the video', async () => {
     const t = setup({ tracks });
     t.engine.playItems([movie('1')]);

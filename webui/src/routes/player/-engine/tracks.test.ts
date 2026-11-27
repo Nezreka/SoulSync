@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { AudioTrack, SubtitleTrack } from './tracks';
 
-import { audioLabel, pickAudio, pickSubtitle, sameLanguage } from './tracks';
+import { audioLabel, pickAudio, pickSubtitle, sameLanguage, subtitleLabel } from './tracks';
 import { cuesAt, parseVtt } from './vtt';
 
 const a = (index: number, language: string, extra: Partial<AudioTrack> = {}): AudioTrack => ({
@@ -90,5 +90,27 @@ Second &amp; line
     expect(cuesAt(cues, 2).map((c) => c.text)).toEqual(['Hello there']);
     expect(cuesAt(cues, 3.6)).toEqual([]);
     expect(cuesAt(cues, 4.5)[0].start).toBe(4);
+  });
+});
+
+describe('ai subtitles', () => {
+  it('a real subtitle wins over one ai made in the same language', () => {
+    const subs = [
+      sub('x0', 'en', { external: true, ai: true }),
+      sub('x1', 'en', { external: true }),
+    ];
+    expect(pickSubtitle(subs, { audio: null, subtitle: 'en' }, 'en')).toBe('x1');
+    expect(pickSubtitle([subs[0]], { audio: null, subtitle: 'en' }, 'en')).toBe('x0');
+  });
+
+  it('says it was made by ai, and when it was unsure', () => {
+    const ai = subtitleLabel(sub('x0', 'en', { external: true, ai: true }));
+    expect(ai.label).toContain('(AI)');
+    expect(ai.detail).toBe('Made by AI');
+    const shaky = subtitleLabel(
+      sub('x0', 'en', { external: true, ai: true, low_confidence: true }),
+    );
+    expect(shaky.detail).toBe('Made by AI, low confidence');
+    expect(subtitleLabel(sub('x1', 'en', { external: true })).detail).toBe('File');
   });
 });

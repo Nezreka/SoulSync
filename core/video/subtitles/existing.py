@@ -35,6 +35,7 @@ class Track(NamedTuple):
     forced: bool
     source: str  # "external" | "embedded"
     codec: str = ""  # an embedded track's ffprobe codec (subrip, hdmv_pgs_subtitle ...)
+    ai: bool = False  # made by whisper on this server (``<stem>.ai.<lang>.srt``)
 
 
 #: subtitle sidecar extensions bazarr indexes (.txt left out: too many
@@ -49,7 +50,9 @@ VIDEO_EXTENSIONS = (".mkv", ".mp4", ".m4v", ".avi", ".mov", ".wmv", ".ts",
 _HI_TOKENS = {"sdh", "cc", "hearing", "hearingimpaired", "hearing-impaired", "hoh"}
 _FORCED_TOKENS = {"forced", "foreign", "foreignpartsonly"}
 _NOISE_TOKENS = {"default", "full", "sub", "subs", "subtitle", "subtitles",
-                 "ext", "external", "track", "normal", "dialog", "dialogue"}
+                 "ext", "external", "track", "normal", "dialog", "dialogue",
+                 # the ai marker (``<stem>.ai.en.srt``) is never a language
+                 "ai"}
 
 #: ffprobe codec names behind bazarr's ignore switches.
 _PGS_CODECS = {"hdmv_pgs_subtitle", "pgssub"}
@@ -154,7 +157,9 @@ def external_tracks(video_path: str, names: list[str] | None = None,
             if _stem_owner(nl, stems_list) != own_stem:
                 continue
             middle = root[len(own_stem):].lstrip(".")
-            lang, hi, forced = parse_sidecar_tokens(middle.split(".") if middle else [])
+            tokens = middle.split(".") if middle else []
+            lang, hi, forced = parse_sidecar_tokens(tokens)
+            ai = any(t.strip().lower() == "ai" for t in tokens)
             if ext in _TEXT_EXTENSIONS and (lang is None or not hi):
                 text = None
                 try:
@@ -168,7 +173,7 @@ def external_tracks(video_path: str, names: list[str] | None = None,
                         hi = True
             if lang is None:
                 continue  # unknown language can't satisfy anything
-            out.append(Track(lang, hi, forced, "external"))
+            out.append(Track(lang, hi, forced, "external", "", ai))
         return out
     except Exception:  # noqa: BLE001 - never breaks a fetch decision
         return []

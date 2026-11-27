@@ -1524,6 +1524,39 @@ a.nowTitle:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* make them with ai: under the provider results */
+.finderAi {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  margin-top: calc(var(--u) * 0.6);
+  padding: calc(var(--u) * 0.6);
+  border-top: 1px solid var(--white-a08);
+}
+
+.finderAiBtn {
+  flex: none;
+  margin-left: auto;
+  padding: calc(var(--u) * 0.35) calc(var(--u) * 0.9);
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-md);
+  background: var(--white-a08);
+  color: var(--pl-text);
+  font: inherit;
+  font-size: calc(var(--u) * 0.85);
+  cursor: pointer;
+}
+
+.finderAiBtn:hover:not(:disabled),
+.finderAiBtn:focus-visible {
+  border-color: var(--pl-text-3);
+}
+
+.finderAiBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* a song's heart and add-to-playlist, beside its name */
 .songActions {
   display: flex;
