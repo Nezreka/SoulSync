@@ -591,8 +591,9 @@ A paired device is given every address this server answers on, home ones first:
 
 ## Ways in from outside
 
-SoulSync doesn't open anything on your router by itself. Pick one:
+Nothing is opened on your router unless you ask. Pick one:
 
+- **Automatic remote access (UPnP / NAT-PMP)**: off by default. Switch it on in Settings > Devices and SoulSync asks your router to open its app port (8443, or 8444 and up when the router uses 8443 itself) and shows the address it got. Not every router allows it; when none answers it says so and you forward the port yourself. In Docker, publish that port (see docker-compose.yml).
 - **Forward a port** on your router to this server, and put https in front of it (a reverse proxy with a certificate).
 - **Cloudflare Tunnel**: runs next to SoulSync, gives it an https address, no ports opened. Use the tunnel's address as the remote address.
 - **Tailscale**: your phone and this server on one private network. Add the server's Tailscale name as an extra address. Every device that listens needs Tailscale too.

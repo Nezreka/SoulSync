@@ -178,3 +178,13 @@ describe('import plex users', () => {
     expect(await within(again).findByRole('alert')).toHaveTextContent('Plex is not connected');
   });
 });
+
+describe('a long plex user list (#2323)', () => {
+  it('scrolls inside the dialog', async () => {
+    const css = (await import('./people.module.css')).default as Record<string, string>;
+    expect(css.scrollRows).toBeTruthy();
+    const src = (await import('./plex-import.tsx?raw')).default as string;
+    expect(src).toContain('aria-label="Plex users"');
+    expect(src).toMatch(/css\.scrollRows\}`\} aria-label="Plex users"/);
+  });
+});
