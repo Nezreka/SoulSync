@@ -117,7 +117,7 @@ SoulSync is one server with a few faces. Everything below talks to your own serv
 
 | | |
 |---|---|
-| **Player** | Its own web player and Android / Android TV app: rows you arrange, libraries (4K, Kids, Anime, home videos), a live guide with channels, watch parties, Chromecast, chapters and skip intro, downloads for offline, notifications |
+| **Player** | Its own web player and Android / Android TV app: rows you arrange, libraries (4K, Kids, Anime, home videos), a live guide with channels, watch parties, Chromecast, chapters with pictures and skip intro, downloads for offline, notifications |
 | **Remote streaming** | Free. Pair with a one-time code, then direct, certificate-pinned HTTPS between the app and your server. No subscription and no media through any cloud |
 | **Download sources** | Soulseek (slskd), Tidal, Qobuz, Deezer, HiFi, YouTube, SoundCloud, Lidarr, Torrent and Usenet (via Prowlarr). One source or a drag-ordered hybrid chain. |
 | **Metadata** | Spotify (with or without an account), Apple Music / iTunes, Deezer, Discogs, MusicBrainz, plus 14 background enrichment workers |
@@ -230,6 +230,7 @@ Every page is there: **Home, Movies, TV, Music, YouTube, Audiobooks, Podcasts, H
 
 - **Plays anything**: files a browser can't play are converted on the fly by the server (on the GPU when it works), with seeking.
 - **Chapters and skip intro**: a file's own chapter marks show in the chapter menu, and a chapter named intro, recap or credits gets a skip button. Nothing is guessed.
+- **Chapter pictures**: every movie and episode with chapters gets a picture per chapter, made in the background while nobody's watching. Never a black frame or a fade: a few moments are tried and the sharpest well-lit one wins. They show in the player's chapter strip, over the seek bar as you scrub, and in a Chapters row on the detail page that plays from any chapter. Kept in the image cache, never beside your files; switch it off per library.
 - **Find subtitles while you watch** from SoulSync's own subtitle providers, best match first. The one you pick is saved beside the video and switched on at once.
 - **The end of a video**: the next episode counts down, what you were in the middle of sits beside it, and a long unattended run asks "are you still watching?".
 - **Casting**: Chromecast plays anything, with files the TV can't decode converted on the way.

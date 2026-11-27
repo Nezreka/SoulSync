@@ -25431,6 +25431,18 @@ try:
 except Exception:
     logger.warning("could not start the video folder watch", exc_info=True)
 
+# chapter pictures (core/player/chapter_thumbs.py): a picture per chapter for
+# movies and episodes whose files have chapters, made in the background at
+# the lowest priority. it waits while a scan runs or anyone is watching.
+# never under pytest: a test importing the app must not run ffmpeg over a library
+if 'pytest' not in _sys.modules and os.environ.get('SOULSYNC_NO_LIBRARY_BACKGROUND', '0') != '1':
+    try:
+        from core.player.chapter_thumbs import ensure_started as _ensure_chapter_thumbs
+        from api.video import get_video_db as _get_video_db_for_chapters
+        _ensure_chapter_thumbs(_get_video_db_for_chapters)
+    except Exception:
+        logger.warning("could not start the chapter thumbnail worker", exc_info=True)
+
 # Library Manager v2 — the UI-facing API mounted on /api/library/v2/*.
 # NOT opt-in: the cutover happened, lib2_* is the maintained catalogue, and
 # zero runtime SQL touches the legacy tables (enforced by

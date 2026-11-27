@@ -153,6 +153,7 @@ describe('settings: more libraries', () => {
       indexer_ids: [],
       auto_search: true,
       upgrades: true,
+      chapter_thumbs: true,
     });
   });
 
@@ -181,6 +182,7 @@ describe('settings: more libraries', () => {
       indexer_ids: [],
       auto_search: true,
       upgrades: true,
+      chapter_thumbs: true,
     });
   });
 
@@ -422,5 +424,17 @@ describe('settings: automatic search and upgrades per library (#2029 step 5)', (
     const body = JSON.parse(put![1]!.body as string);
     expect(body.auto_search).toBe(false);
     expect(body.upgrades).toBe(true);
+  });
+
+  it('turns chapter pictures off for one library', async () => {
+    const { doc, fetcher } = setup();
+    await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
+    const row = doc.querySelectorAll('.video-library-row')[2] as HTMLElement;
+    const chapters = row.querySelector('.video-library-chapters') as HTMLInputElement;
+    expect(chapters.checked).toBe(true);
+    chapters.checked = false;
+    click(row.querySelector('[data-library-action="save"]'));
+    const put = calls(fetcher).find((c) => c[1]?.method === 'PUT');
+    expect(JSON.parse(put![1]!.body as string).chapter_thumbs).toBe(false);
   });
 });

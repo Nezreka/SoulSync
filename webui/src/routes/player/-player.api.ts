@@ -1,7 +1,9 @@
 import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson, refusalText } from '@/app/api-client';
+import { appURL } from '@/platform/url-base';
 
+import type { Chapter } from './-engine/types';
 import type { HomeLayout, LayoutCatalog } from './-lib/home-layout';
 import type { ServerPremiere } from './-lib/premieres';
 import type { ServerResume } from './-lib/rails';
@@ -1710,6 +1712,26 @@ export const playableQuery = (itemType: string, itemId: string) =>
       await apiClient
         .get(`player/playable/${itemType}/${encodeURIComponent(itemId)}`)
         .json<{ duration?: number; chapters?: { start: number; title: string }[] }>(),
+    staleTime: 10 * MINUTE,
+    retry: false,
+  });
+
+/**
+ * a movie's or an episode's chapters with their pictures, for its detail
+ * page. the server answers from what it already knows (never reads the file),
+ * so it's instant; none until the file's been played or its pictures made.
+ */
+export const chaptersQuery = (itemType: string, itemId: string, part?: number | string | null) =>
+  queryOptions({
+    queryKey: ['player', 'chapters', itemType, itemId, part ?? null],
+    queryFn: async () => {
+      const body = await apiClient
+        .get(`player/chapters/${itemType}/${encodeURIComponent(itemId)}`, {
+          searchParams: part ? { part: String(part) } : {},
+        })
+        .json<{ chapters?: Chapter[] }>();
+      return (body.chapters ?? []).map((c) => ({ ...c, thumb: c.thumb ? appURL(c.thumb) : null }));
+    },
     staleTime: 10 * MINUTE,
     retry: false,
   });
