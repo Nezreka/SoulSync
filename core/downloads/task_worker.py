@@ -107,6 +107,68 @@ def _youtube_ytsearch_fallback(deps, query, track, tracks_result, profile_id=Non
     return deps.get_valid_candidates(extra, track, query, profile_id) or None
 
 
+def _hybrid_source_order(orch) -> list:
+    """the hybrid source order, most wanted first."""
+    order = list(getattr(orch, 'hybrid_order', None) or [])
+    if not order:
+        primary = getattr(orch, 'hybrid_primary', 'soulseek')
+        secondary = getattr(orch, 'hybrid_secondary', '')
+        order = [primary, secondary] if secondary and secondary != primary else [primary]
+    return order
+
+
+def _source_key(orch, name) -> str:
+    """one spelling per source, so 'deezer_dl' and 'deezer' count as one."""
+    try:
+        norm = getattr(orch, '_normalize_source_name', None)
+        canon = norm(name) if callable(norm) else None
+    except Exception:
+        canon = None
+    return str(canon or name or '').lower()
+
+
+def _primary_only_exclusions(orch, exclude):
+    """(primary, exclude) for one query in hybrid priority mode (#2330).
+
+    search_with_fallback runs the whole chain per query, so when soulseek
+    found nothing for query 1, youtube got query 1 and its download started
+    before soulseek ever saw queries 2..n. the query loop searches only the
+    first usable source now. the hybrid fallback after the loop gives every
+    later source all the queries. primary is None when nothing could be
+    picked, and the exclusions come back unchanged (the old chain search)."""
+    exclude = list(exclude or [])
+    try:
+        blocked = {str(s).lower() for s in exclude if s}
+        order = _hybrid_source_order(orch)
+        primary = None
+        for name in order:
+            if not name or str(name).lower() in blocked:
+                continue
+            client = orch.client(name)
+            if not client:
+                continue
+            if hasattr(client, 'is_configured') and not client.is_configured():
+                continue
+            primary = name
+            break
+        if primary is None:
+            return None, exclude
+        primary_key = _source_key(orch, primary)
+        rest = [n for n in order
+                if n and str(n).lower() not in blocked
+                and _source_key(orch, n) != primary_key]
+        chain = getattr(orch, '_resolve_source_chain', None)
+        if callable(chain):
+            for n in chain() or []:
+                if (n and n not in rest and str(n).lower() not in blocked
+                        and _source_key(orch, n) != primary_key):
+                    rest.append(n)
+        return primary, exclude + rest
+    except Exception as exc:
+        logger.debug("[Modal Worker] primary-only hybrid pick failed: %s", exc)
+        return None, exclude
+
+
 async def _search_fallback_source(client, query, track_hint, profile_id):
     """Direct hybrid retries carry the same identity/profile as the main search."""
     from core.downloads.track_hint import track_hint_context
@@ -919,6 +981,14 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                 set(_t.get('searched_queries') or ()) if cached_first else set()
             )
         _exclude_for_hybrid_album = None
+        # hybrid priority mode: each query goes to the first source only, and
+        # the hybrid fallback below runs every query on the next sources
+        # (#2330). records which queries each source has had.
+        _primary_only = (
+            not _pooled_search
+            and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid'
+        )
+        _ran_on = {}
         for query_index, query in enumerate(search_queries):
             # Cancellation check before each query
             with tasks_lock:
@@ -986,6 +1056,10 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                     return
                 if _login == 'skip' and 'soulseek' not in _exclude_sources:
                     _exclude_sources.append('soulseek')
+                _query_primary = None
+                if _primary_only:
+                    _query_primary, _exclude_sources = _primary_only_exclusions(
+                        deps.download_orchestrator, _exclude_sources)
                 # Live search ticker (#1156): slskd's poller fires this on every
                 # response tick — the hook existed through the whole plugin chain
                 # but the download path never passed one.
@@ -1030,6 +1104,10 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                 tracks_result, _albums_result = deps.run_async(
                     deps.download_orchestrator.search(query, **_search_kwargs)
                 )
+                if _query_primary:
+                    _ran_on.setdefault(
+                        _source_key(deps.download_orchestrator, _query_primary),
+                        set()).add(query)
                 # files inside soulseek folder groups are candidates too (#2228)
                 tracks_result = track_candidates(tracks_result, _albums_result)
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
@@ -1154,11 +1232,7 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
         if not _pooled_search and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
             try:
                 orch = deps.download_orchestrator
-                hybrid_order = getattr(orch, 'hybrid_order', None) or []
-                if not hybrid_order:
-                    primary = getattr(orch, 'hybrid_primary', 'soulseek')
-                    secondary = getattr(orch, 'hybrid_secondary', '')
-                    hybrid_order = [primary, secondary] if secondary and secondary != primary else [primary]
+                hybrid_order = _hybrid_source_order(orch)
 
                 # Resolve via the orchestrator's generic accessor — the
                 # legacy per-source attrs were dropped in the registry
@@ -1186,9 +1260,12 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                     if hasattr(fb_client, 'is_configured') and not fb_client.is_configured():
                         continue
 
-                    # Release sources must see the whole bounded track-query
-                    # ladder; their album hint is cached once for this task.
-                    fb_queries = search_queries if fallback_source in ('torrent', 'usenet') else search_queries[:2]
+                    # every source gets every query (#2330): the query loop
+                    # only searched the first source, so this is where the
+                    # next ones see queries 2..n. a query this source already
+                    # had in the loop (it was first then) is not run again.
+                    _had = _ran_on.get(_source_key(orch, fallback_source), set())
+                    fb_queries = [q for q in search_queries if q not in _had]
                     for fb_query in fb_queries:
                         try:
                             logger.warning(f"[Hybrid Fallback] Trying {fallback_source}: '{fb_query}'")
@@ -1205,6 +1282,8 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                                 if task_id not in download_tasks or download_tasks[task_id]['status'] == 'cancelled':
                                     return
                             if not fb_results:
+                                search_diagnostics.append(
+                                    f'{fallback_source} "{fb_query}": no results found')
                                 continue
                             fb_candidates = _judge(deps, fb_results, track, fb_query, _profile_id, decision_pool)
                             if not fb_candidates:
@@ -1212,6 +1291,15 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                                     deps, fb_query, track, fb_results, _profile_id)
                                 if extra:
                                     fb_candidates = extra
+                            if not fb_candidates:
+                                # these used to reach the review modal through
+                                # the per-query chain, keep them there
+                                search_diagnostics.append(
+                                    f'{fallback_source} "{fb_query}": {len(fb_results)} results '
+                                    f'but none passed quality/artist filters')
+                                from core.downloads.validation import filter_soundcloud_previews
+                                all_raw_results.extend(
+                                    filter_soundcloud_previews(fb_results[:20], track))
                             if fb_candidates:
                                 logger.warning(f"[Hybrid Fallback] {fallback_source} found {len(fb_candidates)} valid candidates!")
                                 with tasks_lock:
