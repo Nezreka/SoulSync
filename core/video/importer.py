@@ -245,6 +245,33 @@ def _reject(reason: str, bad_release: bool = False) -> dict:
     return {"action": "reject", "reason": reason, "manual": True, "bad_release": bad_release}
 
 
+def _names_other_title(dl: dict, name: str, probe: dict | None, want_titles: Any) -> str | None:
+    """the title a download names when it is not the one wanted, or None.
+
+    the search gate checks the release name, but a grab can get past it (a
+    hand pick, an alias that once folded wrong) and then The.100.S01E01 was
+    filed as 100 Days of Deception. so the import checks again: the release
+    name, the file's own name and the title tag inside the file. a file name
+    or tag only counts when it carries SxxExx or a year beside the title, so
+    'ep01.mkv' or a tag of 'Pilot' never refuse a good file."""
+    titles = want_titles
+    if not titles:
+        titles = _search_ctx(dl).get("titles")
+    if not titles:
+        return None
+    from core.video.release_parse import extract_title, title_region_year, titles_match
+    year = _ctx(dl).get("year")
+    names = [dl.get("release_title")]
+    for extra in (name, (probe or {}).get("container_title")):
+        p = parse_release(extra) if extra else {}
+        if p.get("season") is not None or title_region_year(extra):
+            names.append(extra)
+    for n in names:
+        if n and not titles_match(n, titles, year):
+            return extract_title(n) or str(n)
+    return None
+
+
 def _existing_match(scope: str, dest_dir: str, ctx: dict, list_dir: Callable) -> str | None:
     """The basename of a file ALREADY in the destination folder that represents this
     same item (any video for a movie; a matching SxxExx for an episode), or None.
@@ -307,7 +334,8 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                 ids: dict | None = None, series_name: str | None = None,
                 locked: bool = False,
                 absolute_of: Callable[[Any, Any], Any] | None = None,
-                series_type: str | None = None) -> dict:
+                series_type: str | None = None,
+                want_titles: Any = None) -> dict:
     """Decide what to do with a finished download. Returns one of:
 
       {"action": "import",  "dest": {...}, "quality_label": str}
@@ -329,7 +357,9 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     episode)`` gives an episode's absolute number for $absolute (None when
     it isn't known); None = $absolute renders empty. ``series_type`` is the
     show's routing type: 'anime' names the episode by the anime episode
-    template when one is set.
+    template when one is set. ``want_titles`` are every name the title goes
+    by (its own, TMDB's aliases, yours); None = the search context's list.
+    a release or file that names a different show is refused.
 
     MANUAL placement: ``force=True`` with an ``override`` ({scope, title, year, season,
     episode, episode_title, target_dir, media_id}) trusts the user's chosen identity —
@@ -359,6 +389,11 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
             return _reject("Looks like a sample, not the feature", bad_release=True)
         if scope not in ("movie", "episode", "youtube"):
             return _reject("Season/complete packs need manual import")
+        if scope in ("movie", "episode"):
+            other = _names_other_title(dl, name, probe, want_titles)
+            if other:
+                return _reject("This is %s, not %s" % (other, ctx.get("title") or "this title"),
+                               bad_release=True)
         if scope == "episode":
             if ctx.get("season") is None or ctx.get("episode") is None:
                 return _reject("Missing season/episode info")
