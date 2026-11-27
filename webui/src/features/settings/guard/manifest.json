@@ -8327,6 +8327,40 @@
       "asked": "2",
       "shows": ["seerr_compat.profile_id"]
     },
+    "#seerr-compat-seerr-url": {
+      "sel": "#seerr-compat-seerr-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "seerr_compat": {
+            "seerr_url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["seerr_compat.seerr_url"]
+    },
+    "#seerr-compat-seerr-api-key": {
+      "sel": "#seerr-compat-seerr-api-key",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "seerr_compat": {
+            "seerr_api_key": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["seerr_compat.seerr_api_key"]
+    },
     "#imgcache-max-mb": {
       "sel": "#imgcache-max-mb",
       "kind": "number",
@@ -14126,7 +14160,7 @@
     "#stg-view-advanced-api \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "stg-view-advanced-api",
-      "count": 4,
+      "count": 5,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -14147,6 +14181,12 @@
     "#api-key-generated \"Copy\"": {
       "label": "Copy",
       "anchor": "api-key-generated",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#seerr-compat-test-btn": {
+      "id": "seerr-compat-test-btn",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -14504,6 +14544,12 @@
     "#ppl-screen-people \"Needs a look1\"": {
       "label": "Needs a look1",
       "anchor": "ppl-screen-people",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#ppl-plex-import": {
+      "id": "ppl-plex-import",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"

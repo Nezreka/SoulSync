@@ -123,9 +123,29 @@ _EXPLICIT_CREDIT_RE = re.compile(
 )
 
 
+# one character typed several ways. musicbrainz writes alt\u2010J with a real
+# hyphen and 98\u00b0 with a degree sign, a tag or a catalogue writes alt-J and
+# 98\u00ba (the ordinal sign), and each spelling became its own artist (#2321).
+# only marks that are the same mark go here: letters and other punctuation stay,
+# so two names that differ by a real character are still two names. the
+# dashes match core.text.normalize.fold_dashes (#1797): an em dash is a separator.
+NAME_FOLD_VERSION = 1
+_NAME_FOLD = {
+    **dict.fromkeys(map(ord, "\u00ba\u02da"), "\u00b0"),
+    **dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2212\ufe63\uff0d"), "-"),
+    **dict.fromkeys(map(ord, "\u2018\u2019\u201b\u02bc\u2032\uff07"), "'"),
+    **dict.fromkeys(map(ord, "\u201c\u201d\u201f\u2033\uff02"), '"'),
+}
+#: the characters the fold changes, for finding stored keys made before it
+NAME_FOLD_CHARS = "".join(chr(code) for code in _NAME_FOLD)
+
+
 def normalize_name(name: str) -> str:
-    """Casefold + collapse whitespace for dedup keys. Not for display."""
-    return re.sub(r"\s+", " ", (name or "").strip()).casefold()
+    """Casefold + collapse whitespace for dedup keys. Not for display.
+
+    The same mark typed as another character (a unicode hyphen, the ordinal
+    sign for a degree sign, curly quotes) folds to one form first (#2321)."""
+    return re.sub(r"\s+", " ", (name or "").translate(_NAME_FOLD).strip()).casefold()
 
 
 def release_title_key(title: str) -> str:

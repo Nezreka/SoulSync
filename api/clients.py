@@ -58,6 +58,20 @@ def _trim_completed(rows, cap):
     return active + completed[:cap], len(completed)
 
 
+def _slskd_only(client):
+    """the soulseek plugin itself, never the whole orchestrator. the
+    orchestrator lists every source at once, so torrent and usenet grabs
+    showed in the soulseek tab under their internal ssc1- candidate names
+    (hrk_hrk), and clear completed there cleared every source. a raw
+    SoulseekClient getter (tests, older wiring) is used as is."""
+    if client is None or not hasattr(client, 'client'):
+        return client
+    try:
+        return client.client('soulseek')
+    except Exception:
+        return None
+
+
 def _slskd_uploader(client):
     """The object that can list slskd uploads. The orchestrator itself can't -
     its soulseek plugin (a SoulseekClient) can. A raw SoulseekClient getter
@@ -259,7 +273,7 @@ def create_blueprint() -> Blueprint:
         # escape as flask's html 500, which the ui can only show raw. every
         # failure from here leaves as json with a message.
         try:
-            client = _soulseek_client() if _soulseek_client else None
+            client = _slskd_only(_soulseek_client() if _soulseek_client else None)
             configured = False
             if client is not None:
                 try:
@@ -310,7 +324,7 @@ def create_blueprint() -> Blueprint:
     @admin_only
     @_json_guard
     def slskd_action():
-        client = _soulseek_client() if _soulseek_client else None
+        client = _slskd_only(_soulseek_client() if _soulseek_client else None)
         payload = request.get_json(silent=True) or {}
         item_id = str(payload.get('id') or '').strip()
         username = str(payload.get('username') or '').strip()
@@ -387,7 +401,7 @@ def create_blueprint() -> Blueprint:
     @admin_only
     @_json_guard
     def slskd_clear_completed():
-        client = _soulseek_client() if _soulseek_client else None
+        client = _slskd_only(_soulseek_client() if _soulseek_client else None)
         if not client:
             return jsonify({"success": False, "error": "slskd is not configured"}), 400
         ok = _run(client.clear_all_completed_downloads(), timeout=60)

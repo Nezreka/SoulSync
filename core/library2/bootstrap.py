@@ -837,7 +837,10 @@ def _fold_artist_twins_once(database: Any, conn: Any, *,
     state = get_state(database)
     if state.get("status") != "done":
         return {}
-    key = f"{state.get('finished_at') or ''}|artist-twins"
+    # "|2321": the name key now folds a unicode hyphen or ordinal sign and
+    # an alias-named row links to its artist, so a library merged before
+    # that runs it once more
+    key = f"{state.get('finished_at') or ''}|artist-twins|2321"
     conn.execute(f"CREATE TABLE IF NOT EXISTS {_SHARED_FILES_MARKER} "
                  "(import_finished_at TEXT PRIMARY KEY, "
                  "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
@@ -902,8 +905,10 @@ def _rehome_track_lead_releases_once(database: Any, conn: Any) -> Dict[str, int]
     from core.library2.schema import _done_once, _mark_done
     # v2 (#2239/#2240): runs again for a library v1 already passed, for a
     # release filed under its whole credit line ("A, B & C") and the kind
-    # a moved single's folder took. the repair only moves what still fits
-    name = "track_lead_releases_rehomed_v2"
+    # a moved single's folder took. the repair only moves what still fits.
+    # v3: wishlist adds before #2300 split compilations over their
+    # performers after v2 had run
+    name = "track_lead_releases_rehomed_v3"
     if _done_once(conn.cursor(), name):
         return {}
     from core.library2.release_artist_repair import rehome_track_lead_releases

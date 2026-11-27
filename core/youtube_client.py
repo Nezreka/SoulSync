@@ -1195,6 +1195,14 @@ class YouTubeClient(DownloadSourcePlugin):
             r'^(.+?)\s+by\s+(.+)$',     # Title by Artist (reversed)
         ]
 
+        # a full (not flat) extract of a music upload names the song and
+        # artist itself, which beats guessing from the title
+        meta_track = str(entry.get('track') or '').strip()
+        meta_artist = str(entry.get('artist') or entry.get('creator') or '').strip()
+        if meta_track and meta_artist:
+            artist, track_title = meta_artist, meta_track
+            patterns = []
+
         for pattern in patterns:
             match = re.match(pattern, title, re.IGNORECASE)
             if match:

@@ -1,5 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { HttpResponse, http } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { server } from '@/test/msw';
 
 import type { BasicResult, BasicTrack, DownloadTarget } from '../-basic.types';
 import type { BasicSearchController, BasicSearchState } from '../-basic.use-controller';
@@ -323,5 +326,47 @@ describe('indexer warnings (#1831)', () => {
     cleanup();
     renderPanel({ query: 'aphex', searching: true, warnings: [broken] });
     expect(screen.queryByText(/didn't answer/)).toBeNull();
+  });
+});
+
+describe('a pasted youtube link (#2322)', () => {
+  it('shows the video instead of searching', async () => {
+    let body: unknown;
+    server.use(
+      http.post('/api/search/youtube-link', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({
+          kind: 'video',
+          id: 'dQw4w9WgXcQ',
+          url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+          title: 'Artist - Rare Remix',
+          channel: 'Uploader',
+          thumbnail: null,
+          results: [
+            track({
+              username: 'youtube',
+              filename: 'dQw4w9WgXcQ||Artist - Rare Remix',
+              title: 'Rare Remix',
+            }),
+          ],
+          count: 1,
+          truncated: false,
+        });
+      }),
+    );
+    const { container, controller } = renderPanel();
+    fireEvent.change(input(container), { target: { value: 'https://youtu.be/dQw4w9WgXcQ' } });
+    fireEvent.submit(input(container).closest('form')!);
+    expect(controller.search).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText('Artist - Rare Remix')).toBeTruthy());
+    expect(body).toEqual({ url: 'https://youtu.be/dQw4w9WgXcQ' });
+    expect(screen.getByRole('button', { name: 'Download Rare Remix' })).toBeTruthy();
+  });
+
+  it('searches as usual for a link that is not youtube', () => {
+    const { container, controller } = renderPanel();
+    fireEvent.change(input(container), { target: { value: 'https://example.com/song' } });
+    fireEvent.submit(input(container).closest('form')!);
+    expect(controller.search).toHaveBeenCalledWith('https://example.com/song');
   });
 });

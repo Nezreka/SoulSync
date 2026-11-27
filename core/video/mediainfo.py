@@ -176,6 +176,11 @@ def parse_ffprobe(data: Any) -> dict:
         # the language tags Thibs asked for: audio, beside subs and resolution
         "audio_languages": stream_languages(streams, "audio"),
         "subtitle_languages": stream_languages(streams, "subtitle"),
+        # the title tag a release group leaves inside the file
+        # ('The.100.S01E01.1080p.BluRay.x265-RARBG'): the import checks it
+        # names the show it is being filed as
+        "container_title": str(((fmt.get("tags") or {}) if isinstance(fmt.get("tags"), dict)
+                                else {}).get("title") or "").strip() or None,
     }
 
 

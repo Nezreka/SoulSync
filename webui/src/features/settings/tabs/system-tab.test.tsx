@@ -142,6 +142,9 @@ describe('the page', () => {
         'lidarr-compat-profile',
         'seerr-compat-enabled',
         'seerr-compat-refuse-unknown',
+        'seerr-compat-seerr-url',
+        'seerr-compat-seerr-api-key',
+        'seerr-compat-test-btn',
       ],
       maintenance: [
         'db-size-display',
@@ -522,6 +525,55 @@ describe('API', () => {
     await waitFor(() => expect(input('seerr-compat-profile').value).toBe('1'));
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved()).toEqual({ seerr_compat: { refuse_unknown: false } });
+  });
+});
+
+describe('Seerr in front (#2324)', () => {
+  it('saves the Seerr URL and key, keeps a saved key masked, and tests the connection', async () => {
+    routes['POST /api/test-connection'] = () => ({
+      success: true,
+      message: 'Connected to Seerr v2.7.3',
+    });
+    act(() =>
+      store.hydrate({
+        seerr_compat: {
+          enabled: true,
+          refuse_unknown: true,
+          seerr_url: 'http://seerr:5055',
+          seerr_api_key: '__redacted_unchanged__',
+        },
+      }),
+    );
+    page('api');
+    expect(input('seerr-compat-seerr-url').value).toBe('http://seerr:5055');
+    expect(input('seerr-compat-seerr-api-key').value).toBe('__redacted_unchanged__');
+    expect(panel('api').textContent).toContain('Saved keys are never sent back');
+    fireEvent.change(input('seerr-compat-seerr-url'), { target: { value: 'http://seerr:5056' } });
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved()).toEqual({ seerr_compat: { seerr_url: 'http://seerr:5056' } });
+    fireEvent.click(input('seerr-compat-test-btn'));
+    await waitFor(() =>
+      expect(input('seerr-compat-test-status').textContent).toBe('Connected to Seerr v2.7.3'),
+    );
+    expect(calls.find((c) => c.url === '/api/test-connection')?.body).toEqual({
+      service: 'seerr_compat',
+    });
+  });
+
+  it('a failed test says why, and Test waits for a URL and key', async () => {
+    routes['POST /api/test-connection'] = () => ({
+      success: false,
+      error: 'seerr answered HTTP 403',
+    });
+    act(() => store.hydrate({ seerr_compat: { enabled: true, seerr_url: '', seerr_api_key: '' } }));
+    page('api');
+    expect((input('seerr-compat-test-btn') as unknown as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(input('seerr-compat-seerr-url'), { target: { value: 'http://seerr:5055' } });
+    fireEvent.change(input('seerr-compat-seerr-api-key'), { target: { value: 'abc' } });
+    fireEvent.click(input('seerr-compat-test-btn'));
+    await waitFor(() =>
+      expect(input('seerr-compat-test-status').textContent).toBe('seerr answered HTTP 403'),
+    );
   });
 });
 

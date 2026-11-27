@@ -456,6 +456,10 @@ def run_service_test(service, test_config):
                 return False, f"Lidarr returned HTTP {resp.status_code}"
             except Exception as e:
                 return False, f"Lidarr connection error: {str(e)}"
+        elif service == "seerr_compat":
+            # the seerr in front of soulsync (#2324)
+            from api.seerr_compat import test_seerr
+            return test_seerr()
         elif service == "itunes":
             # Public API — just confirm we can reach it with a cheap search
             try:
