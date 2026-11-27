@@ -234,6 +234,17 @@ const WRITES: Write[] = [
     answer: ({ get }) => ({ ...(get('/api/weather') as Dict), success: true }),
   },
   {
+    // Give back (#2335): the switches come back in the overview
+    on: /^PUT \/api\/giveback\/settings$/,
+    lay: ({ body, get, put }) => {
+      const answer = get('/api/giveback');
+      if (!plain(answer)) return;
+      const switches = { ...(plain(answer.switches) ? answer.switches : {}), ...body };
+      put('/api/giveback', { ...answer, switches });
+    },
+    answer: ({ get }) => get('/api/giveback') as Dict,
+  },
+  {
     // the addresses come back, a key only as "set"
     on: /^PUT \/api\/metasync\/settings$/,
     lay: ({ body, get, put }) => {

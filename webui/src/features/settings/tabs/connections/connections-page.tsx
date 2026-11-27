@@ -20,6 +20,7 @@ import { useNav } from '../../nav';
 import { Btn, SectionLabel, Sheet, SheetFootSay, StatusWords } from '../../ui';
 import s from '../../ui/settings.module.css';
 import { statusFrames } from '../connections';
+import { GiveBackSection } from '../connections-giveback';
 import { MetadataSourceGroup } from '../connections-metadata';
 import { MetaSyncSection } from '../connections-metasync';
 import {
@@ -206,6 +207,10 @@ export function ConnectionsPage(props: SettingsTabProps) {
 
       <ViewPanel tab={TAB} view="metasync" open={view === 'metasync'}>
         <MetaSyncSection opened={opened} />
+      </ViewPanel>
+
+      <ViewPanel tab={TAB} view="giveback" open={view === 'giveback'}>
+        <GiveBackSection opened={opened} active={view === 'giveback'} />
       </ViewPanel>
 
       <ViewPanel tab={TAB} view="notifications" open={view === 'notifications'}>

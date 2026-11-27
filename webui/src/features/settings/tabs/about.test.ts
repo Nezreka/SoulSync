@@ -81,7 +81,7 @@ describe('what each pill is for', () => {
       expect(words, `${key}: ${line}`).toBeGreaterThanOrEqual(6);
       expect(words, `${key}: ${line}`).toBeLessThanOrEqual(12);
       expect(line, key).toMatch(
-        /^[A-Z][^A-Z]*(?:(?:SoulSync|MetaSync|TV|NFO|M3U|YouTube|Import|Now)[^A-Z]*)*\.$/,
+        /^[A-Z][^A-Z]*(?:(?:SoulSync|MetaSync|MusicBrainz|AcoustID|TV|NFO|M3U|YouTube|Import|Now)[^A-Z]*)*\.$/,
       );
       expect(line, key).not.toContain('—');
     }

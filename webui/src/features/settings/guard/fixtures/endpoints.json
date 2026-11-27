@@ -326,6 +326,45 @@
       }
     ]
   },
+  "/api/giveback": {
+    "acoustid": {
+      "message": "",
+      "ready": false
+    },
+    "counts": {
+      "acoustid": {
+        "present": 0,
+        "rejected": 0,
+        "skipped": 0,
+        "submitted": 0
+      },
+      "isrc": {
+        "present": 0,
+        "rejected": 0,
+        "skipped": 0,
+        "submitted": 0
+      }
+    },
+    "last": {},
+    "last_at": null,
+    "musicbrainz": {
+      "available": true,
+      "connected": false,
+      "message": "",
+      "username": ""
+    },
+    "running": false,
+    "success": true,
+    "switches": {
+      "acoustid": false,
+      "isrc": false,
+      "releases": false
+    }
+  },
+  "/api/giveback/releases": {
+    "releases": [],
+    "success": true
+  },
   "/api/metasync": {
     "local_key_set": true,
     "node_fingerprint": "ab:cd",

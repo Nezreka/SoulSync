@@ -2362,6 +2362,14 @@ class MusicDatabase:
                 self._record_migration(cursor, 'acquisition_phase4_schema')
             except Exception as grabs_err:
                 logger.error(f"Acquisition schema init failed: {grabs_err}")
+            # #2335: what has been given back to acoustid and musicbrainz, so
+            # nothing is ever sent twice. additive, idempotent
+            try:
+                from core.giveback.store import ensure_schema as ensure_giveback_schema
+                ensure_giveback_schema(cursor)
+                self._record_migration(cursor, 'giveback_submissions')
+            except Exception as giveback_err:
+                logger.error(f"Give back schema init failed: {giveback_err}")
             # Hand-tagged files ("tag it yourself"): the remembered file is the
             # lock on this branch, lib2 rows carry no metadata_locked column.
             self._ensure_manual_metadata_schema(cursor)

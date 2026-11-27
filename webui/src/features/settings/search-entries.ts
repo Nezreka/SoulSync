@@ -447,6 +447,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     keywords: 'metasync node pool network',
   },
   {
+    label: 'Give back to MusicBrainz and AcoustID',
+    tab: 'connections',
+    anchor: { id: 'giveback-acoustid' },
+    file: 'connections-giveback.tsx',
+    hint: 'send fingerprints, ISRCs and missing albums',
+    keywords: 'give back contribute musicbrainz acoustid isrc fingerprint submit release add album',
+    side: 'music',
+  },
+  {
     label: 'TMDB',
     tab: 'connections',
     anchor: heading('TMDB'),

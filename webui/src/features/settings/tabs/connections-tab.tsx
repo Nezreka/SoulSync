@@ -8,6 +8,7 @@
 import type { SettingsTabProps } from '../host';
 
 import { MusicApiGroup } from './connections-extras';
+import { GiveBackSection } from './connections-giveback';
 import { MetadataSourceGroup } from './connections-metadata';
 import { MetaSyncSection } from './connections-metasync';
 import { ServerConnections } from './connections-servers';
@@ -30,5 +31,6 @@ export function ConnectionsTab(props: SettingsTabProps) {
   // Server Activity moved to System > Server Activity (settings-bic phase 3)
   if (part === 'servers') return <ServerConnections store={store} />;
   if (part === 'metasync') return <MetaSyncSection opened={opened} />;
+  if (part === 'giveback') return <GiveBackSection opened={opened} />;
   return null;
 }
