@@ -1379,9 +1379,11 @@ CREATE INDEX IF NOT EXISTS idx_home_videos_album ON home_videos(album_key, sort_
 CREATE INDEX IF NOT EXISTS idx_home_videos_work ON home_videos(work_state) WHERE work_state > 0;
 
 -- skip markers (v79): intro / credits / recap / preview / commercial spans of
--- a file. one row per (file, kind, source); the player shows the best source
--- per kind: user > sidecar (.edl) > detected > server (plex / jellyfin) >
--- chapter names (read live, never stored). core/video/markers/
+-- a file. one row per (file, kind, source), except commercials: a file has as
+-- many breaks as it has (an .edl from comskip or a dvr lists each), so those
+-- are many rows. core/video/markers/store.py keeps the one-per-source rule for
+-- the rest. the player shows the best source per kind: user > sidecar (.edl) >
+-- detected > server (plex / jellyfin) > chapter names (read live, never stored)
 CREATE TABLE IF NOT EXISTS video_segments (
     id             INTEGER PRIMARY KEY,
     media_file_id  INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
@@ -1392,8 +1394,7 @@ CREATE TABLE IF NOT EXISTS video_segments (
     confidence     REAL,                      -- 0..1, detected only
     extra          TEXT,                      -- json: post_credits [start, end], how it was found
     edited_by      INTEGER,                   -- the profile that set a user marker
-    created_at     TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (media_file_id, kind, source)
+    created_at     TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_video_segments_file ON video_segments(media_file_id);
 

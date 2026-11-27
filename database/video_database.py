@@ -1004,6 +1004,7 @@ class VideoDatabase:
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'video_segments'"
             ).fetchone() is not None
             conn.executescript(schema)
+            self._loosen_video_segments(conn)
             self._ensure_columns(conn)
             self._ensure_indexes(conn)
             self._seed_named_links_from_scalar(conn)
@@ -1199,6 +1200,24 @@ class VideoDatabase:
                     raise
                 logger.debug(
                     "video schema: %s.%s was added by another process mid-init", table, col)
+
+    @staticmethod
+    def _loosen_video_segments(conn) -> None:
+        """skip markers' v79 table first had one row per (file, kind, source),
+        so an .edl's second commercial break had nowhere to go. it never
+        shipped like that, but a dev box that ran the branch has it: copy the
+        rows into the table as schema.sql makes it now"""
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' "
+                           "AND name = 'video_segments'").fetchone()
+        if not row or "UNIQUE (media_file_id, kind, source)" not in (row[0] or ""):
+            return
+        cols = ("id, media_file_id, kind, start_s, end_s, source, confidence, extra, "
+                "edited_by, created_at")
+        conn.execute("ALTER TABLE video_segments RENAME TO video_segments_v79_old")
+        conn.execute("DROP INDEX IF EXISTS idx_video_segments_file")
+        conn.executescript(_SCHEMA_FILE.read_text(encoding="utf-8"))
+        conn.execute(f"INSERT INTO video_segments ({cols}) SELECT {cols} FROM video_segments_v79_old")
+        conn.execute("DROP TABLE video_segments_v79_old")
 
     @staticmethod
     def _run_data_migrations(conn, prev_version: int, *, had_markers: bool = True) -> None:

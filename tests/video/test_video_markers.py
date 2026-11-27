@@ -540,6 +540,64 @@ def test_player_markers_read_the_sidecar_and_queue_a_first_play(db, tmp_path):
     assert store.state(db, files[1])["priority"] == 10
 
 
+def test_every_commercial_break_in_an_edl_is_kept(db, tmp_path):
+    # a dvr recording comskip marked: an intro and four breaks, one a cut (0)
+    _sid, eps, files = _show(db, tmp_path)
+    ctx = service.file_ctx(db, files[1])
+    Path(edl.sidecar_path(ctx.local)).write_text(
+        "61.0 150.0 3\n700.0 820.0 3\n1100.0 1220.5 3\n1500.0 1600.0 0\n1900.0 1990.0 3\n")
+    got = service.player_markers(db, files[1], [], 2600, ctx.local)
+    assert [(m["kind"], m["start"]) for m in got] == [
+        ("intro", 61.0), ("commercial", 700.0), ("commercial", 1100.0),
+        ("commercial", 1500.0), ("commercial", 1900.0)]
+    stored = [m for m in store.segments(db, files[1]) if m["source"] == "sidecar"]
+    assert [m["kind"] for m in stored].count("commercial") == 4
+    # read again: nothing changed, nothing doubled
+    assert store.replace_source(db, files[1], "sidecar", [
+        {"kind": m["kind"], "start": m["start"], "end": m["end"]} for m in stored]) is False
+    # a second intro from the same source still can't sit beside the first
+    store.replace_source(db, files[1], "sidecar", [
+        {"kind": "intro", "start": 61.0, "end": 150.0}, {"kind": "intro", "start": 70.0, "end": 160.0}])
+    assert [m["start"] for m in store.segments(db, files[1]) if m["kind"] == "intro"] == [61.0]
+
+
+def test_a_hand_set_marker_replaces_the_last_one(db, tmp_path):
+    _sid, eps, files = _show(db, tmp_path)
+    store.set_user(db, files[0], "intro", 60.0, 150.0, 1)
+    store.set_user(db, files[0], "intro", 65.0, 155.0, 1)
+    users = [m for m in store.segments(db, files[0]) if m["source"] == "user"]
+    assert [(m["kind"], m["start"]) for m in users] == [("intro", 65.0)]
+
+
+def test_a_segments_table_from_before_takes_many_breaks(tmp_path):
+    # a dev box that ran the branch has the one-per-kind table: it's rebuilt, rows kept
+    import sqlite3
+    path = str(tmp_path / "video_library.db")
+    VideoDatabase(database_path=path)
+    conn = sqlite3.connect(path)
+    conn.execute("INSERT INTO movies (id, tmdb_id, title) VALUES (1, 11, 'Film')")
+    conn.execute("INSERT INTO media_files (id, movie_id, relative_path) VALUES (1, 1, 'Film.mkv')")
+    conn.execute("DROP TABLE video_segments")
+    conn.execute("""CREATE TABLE video_segments (
+        id INTEGER PRIMARY KEY, media_file_id INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL, start_s REAL NOT NULL, end_s REAL NOT NULL, source TEXT NOT NULL,
+        confidence REAL, extra TEXT, edited_by INTEGER,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (media_file_id, kind, source))""")
+    conn.execute("INSERT INTO video_segments (media_file_id, kind, start_s, end_s, source) "
+                 "VALUES (1, 'intro', 60, 150, 'sidecar')")
+    conn.commit()
+    conn.close()
+    from database import video_database as vdb
+    vdb._initialized_paths.discard(str(Path(path).resolve()))
+    d = VideoDatabase(database_path=path)
+    assert store.replace_source(d, 1, "sidecar", [
+        {"kind": "intro", "start": 60.0, "end": 150.0},
+        {"kind": "commercial", "start": 400.0, "end": 500.0},
+        {"kind": "commercial", "start": 900.0, "end": 1000.0}]) is True
+    assert [m["kind"] for m in store.segments(d, 1)] == ["intro", "commercial", "commercial"]
+
+
 # ── the job ──────────────────────────────────────────────────────────────
 
 def _job(db, **kw):

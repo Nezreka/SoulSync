@@ -45,21 +45,30 @@ def suppressed(db, file_id: int) -> List[str]:
             "SELECT kind FROM video_segment_suppressions WHERE media_file_id = ?", (int(file_id),))]
 
 
+# kinds a file can have many of from one source (every commercial break in an
+# .edl). the rest are one per kind and source, kept here, not by the table
+MANY_KINDS = frozenset({"commercial"})
+
+
 def replace_source(db, file_id: int, source: str, markers: Iterable[Dict[str, Any]]) -> bool:
     """the file's markers from one source are these now. True when that
     changed anything."""
     new = []
     seen = set()
     for m in markers:
-        if m["kind"] in seen:
-            continue        # one per kind and source (the table's key)
-        seen.add(m["kind"])
+        if m["kind"] in MANY_KINDS:
+            key = (m["kind"], round(float(m["start"]), 3), round(float(m["end"]), 3))
+        else:
+            key = m["kind"]
+        if key in seen:
+            continue        # one per kind and source, or the same break twice
+        seen.add(key)
         new.append((m["kind"], round(float(m["start"]), 3), round(float(m["end"]), 3),
                     m.get("confidence"), json.dumps(m.get("extra") or {}, sort_keys=True)))
     with connect(db) as conn:
         old = conn.execute(
             "SELECT kind, start_s, end_s, confidence, COALESCE(extra, '{}') FROM video_segments "
-            "WHERE media_file_id = ? AND source = ? ORDER BY kind", (int(file_id), source)).fetchall()
+            "WHERE media_file_id = ? AND source = ?", (int(file_id), source)).fetchall()
         if sorted(tuple(r) for r in old) == sorted(new):
             return False
         conn.execute("DELETE FROM video_segments WHERE media_file_id = ? AND source = ?",
@@ -73,12 +82,13 @@ def replace_source(db, file_id: int, source: str, markers: Iterable[Dict[str, An
 
 def set_user(db, file_id: int, kind: str, start: float, end: float, profile_id: Optional[int],
              extra: Optional[Dict[str, Any]] = None) -> None:
+    """the hand-set marker of this kind for the file (one; it replaces the last)"""
     with connect(db) as conn:
+        conn.execute("DELETE FROM video_segments WHERE media_file_id = ? AND kind = ? AND source = 'user'",
+                     (int(file_id), kind))
         conn.execute(
             "INSERT INTO video_segments (media_file_id, kind, start_s, end_s, source, edited_by, extra) "
-            "VALUES (?, ?, ?, ?, 'user', ?, ?) ON CONFLICT(media_file_id, kind, source) DO UPDATE SET "
-            "start_s = excluded.start_s, end_s = excluded.end_s, edited_by = excluded.edited_by, "
-            "extra = excluded.extra, created_at = CURRENT_TIMESTAMP",
+            "VALUES (?, ?, ?, ?, 'user', ?, ?)",
             (int(file_id), kind, round(float(start), 3), round(float(end), 3), profile_id,
              json.dumps(extra or {}, sort_keys=True)))
 
