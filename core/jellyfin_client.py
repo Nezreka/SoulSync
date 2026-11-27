@@ -1598,12 +1598,88 @@ class JellyfinClient(MediaServerBase):
                 ids.append(tid)
         return ids
 
-    def _replace_in_place(self, playlist_id, playlist_name: str, tracks) -> bool:
+    # what _replace_in_place says when it kept the old tracks on purpose.
+    # not False: False lets update_playlist delete the playlist and make it
+    # again, and that is how a playlist ended up empty (#2334)
+    KEPT = 'kept'
+    # why the last playlist write kept the playlist as it was, None when it didn't
+    last_playlist_write_refusal: Optional[str] = None
+
+    def _refuse_write(self, playlist_name: str, reason: str) -> None:
+        """a write that kept the playlist as it was. the reason is what the
+        sync shows instead of a bare "write failed" (#2334)"""
+        self.last_playlist_write_refusal = reason
+        logger.error(f"Jellyfin playlist '{playlist_name}' kept as it was: {reason}")
+
+    def _post_entries(self, items_url: str, ids, hdr) -> Optional[int]:
+        """add ids in batches of 100. None when all went in, else the http
+        status of the batch the server refused"""
+        import requests
+        for i in range(0, len(ids), 100):
+            r = requests.post(items_url, params={'Ids': ','.join(ids[i:i + 100]), 'UserId': self.user_id},
+                              headers=hdr, timeout=30)
+            if r.status_code not in (200, 204):
+                return r.status_code
+        return None
+
+    def _delete_entries(self, items_url: str, entry_ids, hdr) -> Optional[int]:
+        """remove entries in batches of 100. None when done, else the status"""
+        import requests
+        for i in range(0, len(entry_ids), 100):
+            r = requests.delete(items_url, params={'EntryIds': ','.join(entry_ids[i:i + 100])},
+                                headers=hdr, timeout=30)
+            if r.status_code not in (200, 204):
+                return r.status_code
+        return None
+
+    def _add_then_check(self, playlist_id, playlist_name: str, add_ids, before, desired):
+        """add first, then read the playlist back before anything comes out.
+
+        jellyfin answers 204 to an add of an id it doesn't know and drops it
+        without a word (#2235). clearing first and adding after emptied a
+        playlist whenever soulsync's ids for its tracks had gone stale (the
+        server rescanned or moved them): every add was dropped, nothing was
+        left (#2334). so: add, read back, and when most of the wanted tracks
+        didn't land on a playlist that holds tracks, take the adds back out
+        and keep it as it was.
+
+        returns (ok, after) where after is the entries read back, None when
+        the playlist couldn't be read (then the caller carries on as before)."""
+        hdr = {'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()}
+        items_url = f"{self.base_url}/Playlists/{playlist_id}/Items"
+        before_eids = {eid for _tid, eid in before if eid}
+        refused = self._post_entries(items_url, list(add_ids), hdr) if add_ids else None
+        after = self._playlist_entries(playlist_id)
+        added = [eid for _tid, eid in (after or []) if eid and eid not in before_eids]
+        if refused is not None:
+            if added:
+                self._delete_entries(items_url, added, hdr)
+            self._refuse_write(playlist_name, f"jellyfin refused adding tracks (HTTP {refused})")
+            return False, after
+        if after is None:
+            return True, None
+        on_server = {tid for tid, _eid in after}
+        wanted = list(dict.fromkeys(desired))
+        missing = [tid for tid in wanted if tid not in on_server]
+        if before and wanted and len(missing) * 2 > len(wanted):
+            if added:
+                self._delete_entries(items_url, added, hdr)
+            self._refuse_write(
+                playlist_name,
+                f"jellyfin doesn't know {len(missing)} of the {len(wanted)} tracks under the ids "
+                f"soulsync has for them, so it would have dropped most of the playlist. its "
+                f"{len(before)} tracks were kept. run a library scan on jellyfin and then a "
+                f"database update in soulsync, then sync again")
+            return False, after
+        return True, after
+
+    def _replace_in_place(self, playlist_id, playlist_name: str, tracks):
         """make an existing playlist hold exactly these tracks, in this order,
         without deleting it. the playlist keeps its id, so the mirror that
         syncs to it keeps finding it, and its cover and description stay
-        (#2098). False = nothing usable happened, the caller recreates it."""
-        import requests
+        (#2098). True when done, KEPT when the old tracks were kept on
+        purpose (#2334), False = nothing usable happened, the caller
+        recreates it."""
         desired = self._valid_track_ids(tracks)
         if not desired:
             return False
@@ -1613,23 +1689,18 @@ class JellyfinClient(MediaServerBase):
         if [tid for tid, _eid in entries] == desired:
             logger.info(f"Jellyfin playlist '{playlist_name}' already holds these {len(desired)} tracks")
             return True
+        # in first, then the old entries out: a refused or dropped add never
+        # leaves the playlist emptied (#2334)
+        ok, _after = self._add_then_check(playlist_id, playlist_name, desired, entries, desired)
+        if not ok:
+            return self.KEPT
         hdr = {'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()}
-        items_url = f"{self.base_url}/Playlists/{playlist_id}/Items"
-        # out first, then in: a server that skips adding a track the playlist
-        # still holds would otherwise lose the new order
         old = [eid for _tid, eid in entries if eid]
-        for i in range(0, len(old), 100):
-            r = requests.delete(items_url, params={'EntryIds': ','.join(old[i:i + 100])},
-                                headers=hdr, timeout=30)
-            if r.status_code not in (200, 204):
-                logger.warning(f"Jellyfin replace of '{playlist_name}': clearing failed, HTTP {r.status_code}")
-                return False
-        for i in range(0, len(desired), 100):
-            r = requests.post(items_url, params={'Ids': ','.join(desired[i:i + 100]), 'UserId': self.user_id},
-                              headers=hdr, timeout=30)
-            if r.status_code not in (200, 204):
-                logger.warning(f"Jellyfin replace of '{playlist_name}': adding failed, HTTP {r.status_code}")
-                return False
+        status = self._delete_entries(f"{self.base_url}/Playlists/{playlist_id}/Items", old, hdr)
+        if status is not None:
+            # the new tracks are in, the old ones are still beside them
+            self._refuse_write(playlist_name, f"jellyfin refused removing the old tracks (HTTP {status})")
+            return self.KEPT
         logger.info(f"Replaced the tracks of Jellyfin playlist '{playlist_name}' in place ({len(desired)} tracks)")
         return True
 
@@ -2024,8 +2095,8 @@ class JellyfinClient(MediaServerBase):
         if not self.ensure_connection():
             return False
         try:
-            import requests
             from core.sync.playlist_edit import plan_playlist_reconcile
+            self.last_playlist_write_refusal = None
             existing = self._target_playlist(playlist_name, playlist_id)
             if not existing:
                 logger.info(f"Jellyfin reconcile: '{playlist_name}' doesn't exist — creating")
@@ -2052,33 +2123,29 @@ class JellyfinClient(MediaServerBase):
                     desired_ids.append(tid)
 
             plan = plan_playlist_reconcile(current_ids, desired_ids)
+            if not desired_ids and entries:
+                # removing everything because nothing resolved is how a
+                # playlist ends at 0 (#2334)
+                self._refuse_write(playlist_name, "none of the matched tracks has a jellyfin id")
+                return False
             hdr = {'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()}
+            items_url = f"{self.base_url}/Playlists/{playlist_id}/Items"
 
             if plan['add']:
-                for i in range(0, len(plan['add']), 100):
-                    batch = plan['add'][i:i + 100]
-                    r = requests.post(
-                        f"{self.base_url}/Playlists/{playlist_id}/Items",
-                        params={'Ids': ','.join(batch), 'UserId': self.user_id},
-                        headers=hdr, timeout=30,
-                    )
-                    if r.status_code not in (200, 204):
-                        logger.error(f"Jellyfin reconcile add failed: HTTP {r.status_code}")
-                        return False
+                # read back before removing anything: an add jellyfin drops
+                # quietly must not turn into a playlist with most of it gone
+                ok, _after = self._add_then_check(
+                    playlist_id, playlist_name, plan['add'], entries, desired_ids)
+                if not ok:
+                    return False
 
             if plan['remove']:
                 remove_set = set(plan['remove'])
                 entry_ids = [eid for tid, eid in entries if tid in remove_set and eid]
-                for i in range(0, len(entry_ids), 100):
-                    batch = entry_ids[i:i + 100]
-                    r = requests.delete(
-                        f"{self.base_url}/Playlists/{playlist_id}/Items",
-                        params={'EntryIds': ','.join(batch)},
-                        headers=hdr, timeout=30,
-                    )
-                    if r.status_code not in (200, 204):
-                        logger.error(f"Jellyfin reconcile remove failed: HTTP {r.status_code}")
-                        return False
+                status = self._delete_entries(items_url, entry_ids, hdr)
+                if status is not None:
+                    logger.error(f"Jellyfin reconcile remove failed: HTTP {status}")
+                    return False
 
             logger.info(
                 f"Jellyfin reconcile '{playlist_name}': +{len(plan['add'])} / "
@@ -2231,8 +2298,18 @@ class JellyfinClient(MediaServerBase):
                 else:
                     logger.warning("Failed to create backup, continuing with sync")
             
-            if existing_playlist and self._replace_in_place(existing_playlist.id, playlist_name, tracks):
-                return True
+            self.last_playlist_write_refusal = None
+            if existing_playlist:
+                if not self._valid_track_ids(tracks):
+                    # nothing jellyfin can take: deleting it to make it again
+                    # would end with no playlist at all (#2334)
+                    self._refuse_write(playlist_name, "none of the matched tracks has a jellyfin id")
+                    return False
+                replaced = self._replace_in_place(existing_playlist.id, playlist_name, tracks)
+                if replaced == self.KEPT:
+                    return False
+                if replaced:
+                    return True
 
             is_public = False
             if existing_playlist:
