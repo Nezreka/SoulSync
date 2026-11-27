@@ -48,6 +48,32 @@ else
     echo "✅ User/Group IDs already correct"
 fi
 
+# GPU access for the player's video conversion. the card's /dev/dri nodes
+# (passed in with `devices: - /dev/dri:/dev/dri`) belong to the HOST's render
+# and video groups, whose ids differ between distros (render is 103, 104,
+# 105, 109, 989...). soulsync joins a group with each node's own gid, made
+# here when the image has none, so it can open the card without running as
+# root. nothing passed in: nothing to do, conversions run on the CPU.
+if [ -d /dev/dri ]; then
+    for node in /dev/dri/renderD* /dev/dri/card*; do
+        [ -e "$node" ] || continue
+        GID_OF_NODE=$(stat -c '%g' "$node")
+        [ "$GID_OF_NODE" = "0" ] && continue
+        GROUP_NAME=$(getent group "$GID_OF_NODE" | cut -d: -f1)
+        if [ -z "$GROUP_NAME" ]; then
+            GROUP_NAME="hostgpu$GID_OF_NODE"
+            groupadd -g "$GID_OF_NODE" "$GROUP_NAME" 2>/dev/null || true
+        fi
+        if ! id -nG soulsync | tr ' ' '\n' | grep -qx "$GROUP_NAME"; then
+            usermod -aG "$GROUP_NAME" soulsync 2>/dev/null || true
+            echo "🎞️  GPU: soulsync joined group $GROUP_NAME (gid $GID_OF_NODE) for $node"
+        fi
+    done
+    if ls /dev/dri/renderD* >/dev/null 2>&1 && ! gosu soulsync test -r "$(ls /dev/dri/renderD* | head -n1)" 2>/dev/null; then
+        echo "⚠️  WARNING: the GPU at /dev/dri isn't readable by soulsync; video conversions will use the CPU."
+    fi
+fi
+
 # Set umask for file creation permissions
 echo "🎭 Setting UMASK to $UMASK"
 umask "$UMASK"

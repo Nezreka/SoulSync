@@ -358,7 +358,7 @@ def _run(db: Any, job: Job) -> None:
         elif job.kind == "join":
             _join(job, part, progress)
         elif job.media == "video":
-            _ffmpeg(_video_cmd(_ffmpeg_bin(), job, part), job.duration, progress)
+            _convert_video(_ffmpeg_bin(), job, part, progress)
         else:
             _ffmpeg(_audio_cmd(_ffmpeg_bin(), job.input, part, job.quality, job.ext), job.duration, progress)
         os.replace(part, job.out)
@@ -418,16 +418,24 @@ def _ffmpeg_bin() -> str:
     return ffmpeg
 
 
-def _video_cmd(ffmpeg: str, job: Job, out: str) -> List[str]:
-    """h264 + aac in mp4, text subtitles as mov_text, chapters kept"""
+def _video_plan(job: Job):
     from core.player import transcode as T
     info = job.video
-    plan = T.plan(info.get("video_codec"), info.get("audio_codec"), quality=VIDEO_TO_TRANSCODE[job.quality],
-                  hdr=info.get("dynamic_range"), height=info.get("height"))
-    enc = T.encoder(ffmpeg) if not plan.copy_video else ("libx264", "CPU", [], "")
-    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
-    if not plan.copy_video:
-        cmd += list(enc[2])
+    return T.plan(info.get("video_codec"), info.get("audio_codec"), quality=VIDEO_TO_TRANSCODE[job.quality],
+                  hdr=info.get("dynamic_range"), height=info.get("height"),
+                  codec_facts={k: info[k] for k in ("bit_depth", "profile", "bitrate_kbps") if info.get(k)})
+
+
+def _video_cmd(ffmpeg: str, job: Job, out: str, enc: Any = None) -> List[str]:
+    """h264 + aac in mp4, text subtitles as mov_text, chapters kept. decoded
+    and encoded on the GPU where it can be (``enc``: encoder()'s answer by
+    default; the CPU's for a retry)"""
+    from core.player import transcode as T
+    plan = _video_plan(job)
+    enc = (enc if enc is not None else T.encoder(ffmpeg)) if not plan.copy_video else ("libx264", "CPU", [], "")
+    tonemap = plan.tonemap and T.has_filter(ffmpeg, "zscale")
+    pre, on_gpu, _dec = T.gpu_input(enc, plan, tonemap)
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", *pre]
     cmd += ["-i", job.input, "-map", "0:v:0", "-map", "0:a:0?"]
     for n in job.text_subs:
         cmd += ["-map", f"0:s:{n}"]
@@ -435,12 +443,31 @@ def _video_cmd(ffmpeg: str, job: Job, out: str) -> List[str]:
     if plan.copy_video:
         cmd += ["-c:v", "copy"]
     else:
-        cmd += T._video_args(enc, plan, plan.tonemap and T.has_filter(ffmpeg, "zscale"))
+        cmd += T._video_args(enc, plan, tonemap, on_gpu)
     cmd += ["-c:a", "aac", "-b:a", VIDEO_AUDIO, "-ac", "2"]
     if job.text_subs:
         cmd += ["-c:s", "mov_text"]
     cmd += ["-movflags", "+faststart", "-f", "mp4", "-progress", "pipe:1", "-nostats", out]
     return cmd
+
+
+def _convert_video(ffmpeg: str, job: Job, out: str, progress: Callable[[float], None]) -> None:
+    """on the GPU; a GPU that fails makes way for the CPU, and is checked and
+    marked once the CPU copy worked"""
+    from core.player import hwaccel
+    from core.player import transcode as T
+    plan = _video_plan(job)
+    enc = hwaccel.enc_for(T.encoder(ffmpeg)) if not plan.copy_video else hwaccel.CPU
+    try:
+        _ffmpeg(_video_cmd(ffmpeg, job, out, enc), job.duration, progress)
+    except RuntimeError as e:
+        if enc.key == "cpu":
+            raise
+        _pre, _gpu, hw_decode = T.gpu_input(enc, plan, plan.tonemap and T.has_filter(ffmpeg, "zscale"))
+        _unlink(out)
+        _ffmpeg(_video_cmd(ffmpeg, job, out, hwaccel.CPU), job.duration, progress)
+        # the CPU made it where the GPU didn't: now it's the GPU's fault
+        hwaccel.mark_failed(ffmpeg, enc, hw_decode, hwaccel._words(str(e).encode()))
 
 
 def _audio_cmd(ffmpeg: str, source: str, out: str, quality: str, ext: str) -> List[str]:

@@ -11,6 +11,9 @@ the player's own session and a paired device's token alike.
                                                       (?t= start, ?q= quality)
     GET .../transcode/<item_type>/<item_id>/start    where it really starts
                                                       (copied video: a keyframe)
+    GET|PUT /api/player/converting/settings          slots, GPU on/off/auto (admin)
+    POST    /api/player/converting/test              find the GPU again, run a
+                                                      real clip through it (admin)
 
 ``?part=`` picks a video's file version (a media file id) or an audiobook's
 part (0 based). item types: track, movie, episode, youtube, home, audiobook.
@@ -26,6 +29,7 @@ from flask import Blueprint, g, jsonify, make_response, request, send_file
 
 from core.connect.device_access import device_playback
 from core.permissions import public, requires_any
+from core.profile_context import admin_only
 from utils.logging_config import get_logger
 
 logger = get_logger("player.stream")
@@ -68,10 +72,46 @@ def _transcode_url(item_type: str, item_id: str, part, quality: str) -> str:
     return f"/api/player/transcode/{item_type}/{quote(item_id, safe='')}?" + "&".join(args)
 
 
-def _plan_for(source, quality: str, audio: int = 0, burn=None, delay_ms: int = 0):
+def _video_facts(source) -> dict:
+    """the picture's codec, bit depth, profile and bitrate, from the file's
+    header (probed once, shared with the tracks route). {} when unknown"""
+    try:
+        from api.player_tracks import source_tracks
+        from core.player import tracks as K
+        found = source_tracks(source)
+        full = K.cached(found[3]) if found else None
+    except Exception:  # noqa: BLE001 - no facts: the codec table alone decides
+        logger.debug("couldn't read the picture's facts", exc_info=True)
+        return {}
+    if not full:
+        return {}
+    video = (full.get("video") or [{}])[0]
+    out = {k: video.get(k) for k in ("codec", "bit_depth", "profile")}
+    fmt = full.get("format") or {}
+    bits = video.get("bitrate")
+    if not bits and fmt.get("bitrate"):
+        # mkv rarely says the picture's own bitrate: the file's, less its sound
+        bits = fmt["bitrate"] - sum(a.get("bitrate") or 0 for a in full.get("audio") or [])
+    if not bits:
+        f = (source.extra or {}).get("file") or {}
+        size, secs = f.get("size_bytes"), f.get("runtime_seconds") or source.duration
+        if size and secs:
+            bits = int(size) * 8 / float(secs)
+    if bits and bits > 0:
+        out["bitrate_kbps"] = int(bits / 1000)
+    return {k: v for k, v in out.items() if v is not None}
+
+
+CAST_COPYABLE = ({"h264"}, {"aac", "mp3"})
+
+
+def _plan_for(source, quality: str, audio: int = 0, burn=None, delay_ms: int = 0, copyable=None):
     """the plan for this source. a picked audio track other than the first,
-    or a subtitle to burn in, reads the file's tracks for the right codec."""
+    or a subtitle to burn in, reads the file's tracks for the right codec.
+    a picture that would be copied is checked first: 10-bit h264 and a
+    bitrate over the quality's ceiling are converted."""
     from core.player import transcode as T
+    from core.video.direct_play import _norm, stream_verdicts
     info = source.private
     audio_codec = info.get("audio_codec")
     if audio or burn is not None:
@@ -80,9 +120,12 @@ def _plan_for(source, quality: str, audio: int = 0, burn=None, delay_ms: int = 0
         tracks = found[0]["audio"] if found else []
         if audio < len(tracks):
             audio_codec = tracks[audio]["codec"]
-    return T.plan(info.get("video_codec"), audio_codec, quality=quality,
+    vcodec = info.get("video_codec")
+    copy_candidate = (_norm(vcodec) in copyable[0]) if copyable else stream_verdicts(vcodec, None)["video"] == "yes"
+    facts = _video_facts(source) if copy_candidate and burn is None else {}
+    return T.plan(vcodec, audio_codec, quality=quality,
                   hdr=info.get("dynamic_range"), height=info.get("height"), audio=audio, burn=burn,
-                  delay_ms=delay_ms)
+                  delay_ms=delay_ms, codec_facts=facts, copyable=copyable)
 
 
 def _int_arg(name):
@@ -163,7 +206,8 @@ def _offer_transcode(out, source, item_type, item_id, part, quality, audio=0, bu
         return
     out["url"] = url
     out["mime"] = T.MIME
-    out["transcode"] = p.public(T.encoder(ffmpeg)[1])
+    from core.player.hwaccel import enc_for
+    out["transcode"] = p.public(enc_for(T.encoder(ffmpeg)).label)
 
 
 @bp.route("/api/player/stream/<item_type>/<path:item_id>", methods=["GET"])
@@ -317,19 +361,26 @@ def _probe_cast_media(source) -> tuple[str, str, float | None]:
     return v_codec, a_codec, dur
 
 
+def _cast_plan(source):
+    """what a chromecast gets: h264 (8 bit) with aac or mp3 copied, the rest
+    converted, HDR tone mapped, 1080p at most. the same plan() as everyone"""
+    v_codec, a_codec, _ = _probe_cast_media(source)
+    private = dict(source.private or {})
+    private["video_codec"] = private.get("video_codec") or v_codec
+    private["audio_codec"] = private.get("audio_codec") or a_codec
+    from dataclasses import replace
+    return _plan_for(replace(source, private=private), "cast", copyable=CAST_COPYABLE)
+
+
 def _cast_needs_transcode(item_type: str, source) -> bool:
     if item_type not in VIDEO_TYPES:
         return False
     mime = (source.mime or "").lower()
     if mime not in _CAST_NATIVE_VIDEO_MIMES:
         return True
-    v_codec, a_codec, _ = _probe_cast_media(source)
-    # Most Chromecasts only decode H.264 + AAC/MP3 reliably in MP4; AV1/HEVC/Opus cause black screen or silence
-    if v_codec != "h264":
-        return True
-    if a_codec and a_codec not in ("aac", "mp3"):
-        return True
-    return False
+    # Most Chromecasts only decode 8-bit H.264 + AAC/MP3 reliably in MP4; AV1/HEVC/Opus/Hi10P cause
+    # black screen or silence
+    return _cast_plan(source).needed
 
 
 def _cast_lan_http_origin() -> str | None:
@@ -458,14 +509,7 @@ def cast_hls_segment(item_type, item_id, seg_idx):
     ffmpeg = T.ffmpeg_path()
     if not ffmpeg:
         return _add_cast_cors(jsonify({"success": False, "error": "no_ffmpeg"})), 503
-    v_codec, a_codec, _ = _probe_cast_media(source)
-    p = T.Plan(
-        copy_video=(v_codec == "h264"),
-        copy_audio=(a_codec in ("aac", "mp3")),
-        reasons=["chromecast-hls"],
-        quality="1080p",
-        tonemap=False,
-    )
+    p = _cast_plan(source)
     origin = source.path if source.mode == "file" else source.url
     session_key = f"cast-hls:{pid}:{item_type}:{item_id}"
     data = get_segment_bytes(
@@ -520,27 +564,25 @@ def cast_stream(item_type, item_id):
                 start_sec = max(0.0, float(request.args.get("t") or 0))
             except ValueError:
                 start_sec = 0.0
-            v_codec, a_codec, _ = _probe_cast_media(source)
-            p = T.Plan(
-                copy_video=(v_codec == "h264"),
-                copy_audio=(a_codec in ("aac", "mp3")),
-                reasons=["chromecast"],
-                quality="1080p",
-                tonemap=False,
-            )
+            p = _cast_plan(source)
             origin = source.path if source.mode == "file" else source.url
-            cmd = T.command(ffmpeg, origin, p, start_sec, T.encoder(ffmpeg), T.has_filter(ffmpeg, "zscale"))
+            job = T.build(ffmpeg, origin, p, start_sec, T.encoder(ffmpeg), T.has_filter(ffmpeg, "zscale"))
             try:
-                body = T.stream(cmd, owner=f"cast-{pid}")
-                resp = Response(
-                    body,
-                    mimetype=T.MIME,
-                    direct_passthrough=True,
-                    headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
-                )
-                return _add_cast_cors(resp)
-            except Exception:  # noqa: BLE001
-                logger.exception("cast transcode fallback failed for %s %s", item_type, item_id)
+                body = T.stream(job, owner=f"cast-{pid}")
+            except T.Busy:
+                # the raw file is what the cast couldn't play in the first place
+                return _add_cast_cors(jsonify({"success": False, "error": "busy",
+                                               "message": "The server is converting as many videos as it can."})), 503
+            except OSError:
+                logger.exception("cast transcode couldn't start for %s %s", item_type, item_id)
+                return _add_cast_cors(jsonify({"success": False, "error": "failed"})), 500
+            resp = Response(
+                body,
+                mimetype=T.MIME,
+                direct_passthrough=True,
+                headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+            )
+            return _add_cast_cors(resp)
     if source.mode == "file":
         try:
             resp = send_file(source.path, mimetype=source.mime, conditional=True, as_attachment=False)
@@ -584,9 +626,9 @@ def transcode(item_type, item_id):
     p = _plan_for(source, request.args.get("q") or "original", _int_arg("audio") or 0, _int_arg("burn"),
                   _int_arg("delay") or 0)
     origin = source.path if source.mode == "file" else source.url
-    cmd = T.command(ffmpeg, origin, p, start, T.encoder(ffmpeg), T.has_filter(ffmpeg, "zscale"))
+    job = T.build(ffmpeg, origin, p, start, T.encoder(ffmpeg), T.has_filter(ffmpeg, "zscale"))
     try:
-        body = T.stream(cmd, owner=_screen())
+        body = T.stream(job, owner=_screen())
     except T.Busy:
         return jsonify({"success": False, "error": "busy",
                         "message": "The server is already converting as many videos as it can. Try again in a moment."}), 503
@@ -635,3 +677,68 @@ def transcode_start(item_type, item_id):
     origin = source.path if source.mode == "file" else source.url
     start, seek = T.seek_point(T.ffprobe_for(ffmpeg), origin, t)
     return jsonify({"success": True, "start": start, "seek": seek})
+
+
+# ── converting: the admin's settings and the GPU test ──────────────────
+
+def _converting_status(**more):
+    from core.player import hwaccel
+    from core.player import transcode as T
+    out = hwaccel.status(T.ffmpeg_path())
+    out["in_use"] = getattr(T._slots, "in_use", None)
+    return jsonify({"success": True, **out, **more})
+
+
+@bp.route("/api/player/converting/settings", methods=["GET"])
+@admin_only
+def converting_settings():
+    """slots, GPU mode and device, what's in use, what was tried and why
+    anything is off"""
+    return _converting_status()
+
+
+@bp.route("/api/player/converting/settings", methods=["PUT"])
+@admin_only
+def converting_settings_put():
+    from core.player import hwaccel
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not body:
+        return jsonify({"success": False, "error": "bad_settings", "message": "expected one or more settings"}), 400
+    try:
+        hwaccel.save_settings({k: body[k] for k in ("slots", "gpu", "device") if k in body})
+    except ValueError as e:
+        return jsonify({"success": False, "error": "bad_settings", "message": str(e)}), 400
+    return _converting_status()
+
+
+@bp.route("/api/player/converting/test", methods=["POST"])
+@admin_only
+def converting_test():
+    """find the GPU again (anything marked broken gets another go) and run
+    the whole pipeline once on a real clip: decode, scale, encode"""
+    from core.player import hwaccel
+    from core.player import transcode as T
+    ffmpeg = T.ffmpeg_path()
+    if not ffmpeg:
+        return jsonify({"success": False, "error": "no_ffmpeg",
+                        "message": "SoulSync can't find ffmpeg, so it can't convert anything."}), 503
+    hwaccel.forget()
+    enc = hwaccel.detect(ffmpeg)
+    try:
+        result = hwaccel.full_test(ffmpeg, enc)
+        if not result["ok"] and result.get("hw_decode"):
+            # decoding on the card failed: decode on the CPU, encode on the card
+            hwaccel.mark_failed(ffmpeg, enc, ("h264", 8), result.get("reason") or "")
+            again = hwaccel.full_test(ffmpeg, enc)
+            if again["ok"]:
+                result = {**again, "note": "Decoding on the CPU: " + (result.get("reason") or "")}
+        if not result["ok"] and enc.key != "cpu":
+            # the one-frame test passed but the real pipeline didn't: off until tested again
+            reason = result.get("reason") or ""
+            hwaccel.mark_failed(ffmpeg, enc, None, reason, tester=lambda *_: (False, reason))
+            hwaccel.detect(ffmpeg)
+    except Exception as e:  # noqa: BLE001 - a test that can't run says so
+        logger.exception("converting test failed to run")
+        result = {"ok": False, "reason": str(e)[:200]}
+    result["label"] = enc.label
+    return _converting_status(test=result)

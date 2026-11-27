@@ -320,6 +320,26 @@ In the player's **Settings**, under **Downloads**:
 Whether a profile may download at all is set per person on the player's **Users & Downloads** page.
 `
         },
+        {
+            id: 'pconv-admin',
+            title: 'Converting and the GPU (Admin)',
+            needs: 'admin',
+            lede: 'Video a screen can\'t play is converted as it streams, on the GPU when there is one. Free, no subscription.',
+            body: `
+In the player's **Settings**, under **Converting**:
+
+- **Converting with** says what the server uses right now: a GPU (NVIDIA, Intel Quick Sync, VA-API for Intel and AMD on Linux, Apple, AMD AMF, or a Raspberry Pi's encoder) or the CPU.
+- **GPU**: **Auto** uses the first GPU that passes a real test encode. Pick one to use only that one, or **Off** for the CPU.
+- **Conversions at once**: players and casts together. Past it, a screen is told the server is busy.
+- **Test GPU** finds the GPU again and runs a real 1080p clip through it: decoded, scaled and encoded on the card. Anything marked off gets another go.
+
+Only what has to change is converted. A picture a screen plays is copied, so an H.264 file with AC3 sound only has its sound converted. The picture is converted when the codec doesn't play, for 10-bit H.264 (anime encodes), when a smaller quality is picked, and when a copied picture is over the quality's bitrate (1080p 8 Mbps, 720p 4 Mbps, 480p 1.5 Mbps).
+
+On a GPU the file is decoded, scaled and encoded on the card. HDR tone mapping and drawn-in subtitles still run on the CPU, with the GPU decoding and encoding. If the GPU fails before a stream starts, that stream runs again on the CPU at once and you only see a slower start. The server tests the GPU again; one that fails is off until you press **Test GPU**, with the reason under **Fell back to the CPU** and on the stream in **Server Activity**. A file the GPU can't decode (10-bit H.264 on NVIDIA) decodes on the CPU from then on, still encoding on the GPU.
+
+**Docker**: Intel and AMD need the card passed in: \`devices: - /dev/dri:/dev/dri\` in docker-compose.yml. The image has the drivers and joins the card's group itself. NVIDIA needs the NVIDIA Container Toolkit on the host and \`runtime: nvidia\` (or the \`deploy\` GPU block); both are in the compose file, commented. On a Raspberry Pi 5 there is no hardware encoder: copies and sound-only conversions are cheap, full conversions are slow.
+`
+        },
     ]
 });
 
