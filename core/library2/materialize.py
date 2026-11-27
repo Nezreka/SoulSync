@@ -144,7 +144,17 @@ def _album_artist(album: Dict[str, Any]) -> Dict[str, Any]:
     first = artists[0] if isinstance(artists, list) and artists else None
     if isinstance(first, str):
         return {"name": first}
-    return first if isinstance(first, dict) else {}
+    if isinstance(first, dict):
+        return first
+    # a source that names the album's artist as plain text: a compilation's
+    # "Various Artists" got lost and each track filed under its performer
+    for key in ("album_artist", "albumartist", "artist_name", "artist"):
+        value = album.get(key) if isinstance(album, dict) else None
+        if isinstance(value, dict):
+            value = value.get("name")
+        if isinstance(value, str) and value.strip():
+            return {"name": value.strip()}
+    return {}
 
 
 def _int_or_none(value: Any) -> Optional[int]:

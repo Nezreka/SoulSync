@@ -983,6 +983,31 @@ CREATE INDEX IF NOT EXISTS idx_vreq_profile ON video_requests(profile_id);
 CREATE INDEX IF NOT EXISTS idx_vreq_status  ON video_requests(status);
 CREATE INDEX IF NOT EXISTS idx_vreq_title   ON video_requests(kind, tmdb_id);
 
+-- a seerr request soulsync handled (#2324): seerr's webhook sends each request
+-- once per event, and soulsync answers each seerr request id once. what it
+-- told seerr back (approved / declined, partial / available) is kept so it is
+-- said once and the webhooks it causes are known as soulsync's own.
+CREATE TABLE IF NOT EXISTS seerr_request_links (
+    seerr_request_id    INTEGER PRIMARY KEY,
+    seerr_media_id      INTEGER,                   -- seerr's media id, for its media status
+    kind                TEXT NOT NULL,             -- movie | show
+    tmdb_id             INTEGER NOT NULL,
+    profile_id          INTEGER,                   -- the profile it was asked as
+    soulsync_request_id INTEGER,                   -- video_requests.id while it waits for an admin
+    seasons             TEXT,                      -- json list asked for, NULL = every season
+    all_seasons         INTEGER NOT NULL DEFAULT 1,-- the seasons asked are the whole show
+    is4k                INTEGER NOT NULL DEFAULT 0,
+    notification_type   TEXT,                      -- the webhook event it came in on
+    requester           TEXT,                      -- seerr's name for who asked
+    outcome             TEXT NOT NULL,             -- processing | added | waiting | exists | refused | gone
+    seerr_status        INTEGER,                   -- seerr's request status: 1 pending, 2 approved, 3 declined
+    pushed_decision     TEXT,                      -- approved | declined, said to seerr
+    pushed_media        TEXT,                      -- partial | available, said to seerr
+    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_seerr_links_outcome ON seerr_request_links(outcome);
+
 -- every request a profile filed, kept when the request row is withdrawn or
 -- cleared from the history: the request limit counts asks from here, so
 -- deleting your own rows doesn't hand the asks back (v73)

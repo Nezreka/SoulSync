@@ -387,12 +387,31 @@ def normalize_title(s: Any) -> str:
     s = s.lower().replace("&", " and ")
     s = re.sub(r"[^a-z0-9]+", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
-    if not s:
+    if not s or _has_non_latin_letters(raw):
         # #1306: a title in a non-latin script folded to nothing, and a
         # wanted title of nothing let ANY release through. keep its letters.
+        # a korean or japanese title with a number in it ('100일의 거짓말')
+        # used to fold to just '100', the same as 'The 100', so the scene
+        # releases of The 100 were taken as that show's. keep its letters too
         from core.text.fold import fold_title
-        return fold_title(raw.replace("&", " and "), drop_brackets=False)
+        folded = fold_title(raw.replace("&", " and "), drop_brackets=False)
+        return _ARTICLE.sub("", folded, count=1)
     return _ARTICLE.sub("", s, count=1)
+
+
+def _has_non_latin_letters(raw: str) -> bool:
+    """true when a title has a letter outside the latin script (hangul, kana,
+    han, cyrillic...), which the ascii fold would drop. a latin letter with an
+    accent or a stroke ('ø', 'ß') is not one: it folds as it always has."""
+    for ch in raw:
+        if ord(ch) < 128 or not ch.isalpha():
+            continue
+        try:
+            if not unicodedata.name(ch).startswith("LATIN"):
+                return True
+        except ValueError:
+            return True
+    return False
 
 
 def acceptable_titles(want_title: Any) -> set:
@@ -522,6 +541,11 @@ def titles_match(release_name: Any, want_title: Any, want_year: Any = None) -> b
         if not got:
             continue
         saw_any = True
+        anime = _anime_title(cand)
+        if anime and anime in wants:
+            return True                                  # '[SubsPlease] One Piece - 1071'
+        if any(got == w + " " + e for w in wants for e in _absolute_tail(got)):
+            return True                                  # 'One.Piece.E1071.1080p'
         if year_wants:
             rel_year = _release_title_year(cand)
             if rel_year and any(got == base and abs(rel_year - year) <= 1
@@ -541,6 +565,24 @@ def titles_match(release_name: Any, want_title: Any, want_year: Any = None) -> b
                                    want_year if multi else None):
                     return True
     return not saw_any
+
+
+# a fansub name: '[SubsPlease] One Piece - 1071 (1080p) [ABCD].mkv'
+_FANSUB_NAME = re.compile(r"^\s*(?:\[[^\]]*\]\s*)+(.+?)\s+-\s+\d{1,4}(?:v\d+)?(?:\s|\.|\(|\[|$)")
+
+
+def _anime_title(cand: str):
+    """the show's name in a fansub release (group tag first, absolute
+    number after a dash), normalized, or None for any other name"""
+    m = _FANSUB_NAME.match(cand)
+    return normalize_title(m.group(1)) if m else None
+
+
+def _absolute_tail(got: str) -> list:
+    """the E-prefixed absolute number a scene-style anime name ends its title
+    with ('one piece e1071'), as a one-item list, or []"""
+    m = re.search(r"\b(e\d{1,4})$", got)
+    return [m.group(1)] if m else []
 
 
 def search_title(release_name: Any) -> str:

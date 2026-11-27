@@ -626,3 +626,78 @@
     display: none;
   }
 }
+
+/* ── a pasted youtube link (#2322) ────────────────────────────────────── */
+
+.linkHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: var(--bs-raised);
+}
+
+.linkThumb {
+  width: 120px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+}
+
+.linkHead .meta {
+  flex: 1 1 200px;
+}
+
+.linkActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.linkActions .download:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.linkArt {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  background: var(--bs-raised-2);
+}
+
+.rowPick {
+  grid-template-columns: auto 48px minmax(0, 1fr) auto auto;
+}
+
+.pick {
+  width: 16px;
+  height: 16px;
+  accent-color: rgb(var(--accent-rgb));
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .linkArt {
+    width: 44px;
+    height: 44px;
+  }
+
+  .rowPick {
+    grid-template-columns: auto 44px minmax(0, 1fr) auto;
+  }
+
+  .rowPick .facts {
+    grid-column: 3 / 4;
+  }
+
+  .rowPick .download {
+    grid-column: 4;
+  }
+
+  .linkThumb {
+    width: 96px;
+  }
+}

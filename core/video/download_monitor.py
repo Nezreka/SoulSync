@@ -429,7 +429,8 @@ def _make_organizer(db):
                            ids=ids,
                            series_name=_series_name(db, dl, named, ids, owned_dir),
                            locked=title_locked(db, dl),
-                           absolute_of=absolute_lookup(db, ids, named, dl))
+                           absolute_of=absolute_lookup(db, ids, named, dl),
+                           want_titles=_import_titles(db, dl))
         if _pre_persist_dest and plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
                 db.update_video_download(dl["id"], dest_path=plan["dest"]["path"])
@@ -450,6 +451,32 @@ def _make_organizer(db):
         return patch
 
     return organize
+
+
+def _import_titles(db, dl) -> list:
+    """every name the download's title goes by, for the importer's check that
+    the file is that title: the list the search used, or for a row that never
+    carried one (a hand grab) the title's own name and its aliases. [] when
+    nothing is known, and the importer then skips the check."""
+    try:
+        kind, tmdb_id, season, _ep, ctx = _wishlist_ids(db, dl)
+    except Exception:   # noqa: BLE001 - an assist, never the import
+        return []
+    if kind not in ("movie", "episode"):
+        return []
+    titles = ctx.get("titles")
+    if titles:
+        return list(titles)
+    primary = ctx.get("title") or dl.get("title")
+    if not primary:
+        return []
+    try:
+        from core.automation.handlers.video_process_wishlist import _acceptable_titles
+        return _acceptable_titles(primary, "movie" if kind == "movie" else "show",
+                                  tmdb_id, season)
+    except Exception:   # noqa: BLE001 - same
+        logger.debug("import titles unavailable for %s", dl.get("id"), exc_info=True)
+        return [primary]
 
 
 def keep_probe(db, dest_path, probe_info) -> None:
