@@ -4,11 +4,11 @@
   <img src="./assets/trans.png" alt="SoulSync" width="420">
 </p>
 
-<h3 align="center">The self-hosted home for your music, movies, TV and YouTube.</h3>
+<h3 align="center">Your own media ecosystem: music, movies, TV, YouTube, audiobooks and podcasts, with a player of its own.</h3>
 
 <p align="center">
-  Find it, fetch it, verify it, tag it, file it, play it.<br>
-  One app in place of a stack of *arr apps, taggers and scripts, and it actually knows your library.
+  Find it, fetch it, verify it, tag it, file it, play it, anywhere.<br>
+  One self-hosted app in place of a stack of *arr apps, taggers and scripts, with its own player and free remote streaming.
 </p>
 
 <p align="center">
@@ -24,6 +24,8 @@
 <p align="center">
   <a href="https://www.ssync.net/"><b>Website</b></a> &nbsp;·&nbsp;
   <a href="#quick-start"><b>Quick start</b></a> &nbsp;·&nbsp;
+  <a href="#the-player"><b>The player</b></a> &nbsp;·&nbsp;
+  <a href="#remote-streaming"><b>Remote streaming</b></a> &nbsp;·&nbsp;
   <a href="#installation"><b>Install</b></a> &nbsp;·&nbsp;
   <a href="#setup-guide"><b>Setup guide</b></a> &nbsp;·&nbsp;
   <a href="https://discord.gg/wGvKqVQwmy"><b>Discord</b></a> &nbsp;·&nbsp;
@@ -34,9 +36,11 @@
   <img src="./assets/pages.gif" alt="A tour of SoulSync's pages" width="900">
 </p>
 
+SoulSync manages your **music, movies, TV, YouTube, audiobooks and podcasts** and plays them in **its own player**, in a browser or in the **SoulSync Player app** on Android phones, tablets and Android TV. It finds what you want on Soulseek, torrent, usenet, YouTube, Tidal, Qobuz, Deezer and more, checks every file before it lands, tags and files it, and keeps your library honest. **Remote streaming is free**: pair the app with a one-time code and it streams straight from your server, with no subscription, no account to buy and no cloud in the middle. Plex, Jellyfin (or Emby) and Navidrome are welcome, and none of them is required.
+
 ## Why SoulSync
 
-Most self-hosted media setups are a relay race: one app wants things, another searches, a third downloads, a fourth tags, a fifth tells the server, and when a handoff fails nobody notices. SoulSync runs the whole race itself and keeps the receipts.
+Most self-hosted media setups are a relay race: one app wants things, another searches, a third downloads, a fourth tags, a fifth serves it, and when a handoff fails nobody notices. SoulSync runs the whole race itself and keeps the receipts.
 
 <table>
 <tr>
@@ -56,19 +60,25 @@ Downloads are fingerprinted, sanity checked, quality ranked and quarantined when
 <tr>
 <td valign="top">
 
-**It explains itself**<br>
-Stuck wishlist rows show exactly which releases were refused and why. Every download has an audit trail.
+**It plays everything itself**<br>
+Movies, shows, music, YouTube, audiobooks, podcasts, home videos and a live TV guide, on the web, phones, tablets and TVs, at home or away.
 
 </td>
 <td valign="top">
 
 **It's one app for the whole house**<br>
-Music, movies, TV, YouTube, podcasts and audiobooks, with profiles so everyone gets their own taste, playlists and history.
+Profiles give everyone their own taste, rows, libraries, playlists, history and limits, with templates from Adult to Kids.
 
 </td>
 </tr>
 <tr>
-<td colspan="2" valign="top">
+<td valign="top">
+
+**It explains itself**<br>
+Stuck wishlist rows show exactly which releases were refused and why. Every download has an audit trail.
+
+</td>
+<td valign="top">
 
 **It's only as big as you want it**<br>
 Use one part or all of it. **Customize** in the sidebar hides what you don't use, and each profile picks its own.
@@ -85,20 +95,36 @@ docker compose up -d
 # open http://localhost:8008
 ```
 
-First-run setup finds your media server and download clients on its own. You don't need any of them to start: SoulSync Standalone runs without a media server, and HiFi, YouTube and Deezer need no extra software. Unraid, plain Python and the release channels are under [Installation](#installation).
+First-run setup finds your media server and download clients on its own. You don't need any of them to start: SoulSync Standalone runs without a media server, and HiFi, YouTube and Deezer need no extra software. Then press **Open the player** at the top of the sidebar. Unraid, plain Python and the release channels are under [Installation](#installation).
 
 > [!IMPORTANT]
 > If you use Soulseek, **share files in slskd** (`http://localhost:5030/shares`). Leechers get banned by the network.
+
+## The ecosystem
+
+SoulSync is one server with a few faces. Everything below talks to your own server and nothing else.
+
+| Part | What it is |
+|---|---|
+| **The manager** | The SoulSync web app at `http://<server>:8008`: search, downloads, playlist sync, library, tools, automations, settings and people. Where you run the place. |
+| **[The player](#the-player)** | A Plex-style watch-and-listen app at `/player`: home, movies, TV, music, YouTube, audiobooks, podcasts, home videos and a live guide, for every profile. Runs in any browser. |
+| **[SoulSync Player app](https://github.com/Nezreka/soulsync-mobile-app/releases/latest)** | The player as a native Android app for phones, tablets and Android TV (Shield included), with downloads for offline. Paired from Settings > Devices, then [streams directly from your server](#remote-streaming), at home or away. |
+| **[Music apps](#music-apps-subsonic)** | A Subsonic / OpenSubsonic API at `/rest`, so Symfonium, Feishin, Amperfy, Music Assistant and friends play your library as one profile. |
+| **[SoulSync Companion](#companion-browser-extension)** | A Chrome and Firefox extension that shows what you own while you browse Spotify, YouTube, Bandcamp and others, and wishlists in one click. |
+| **[MetaSync](#metasync--soulsync-charts)** | An optional companion program that shares anonymous weekly taste signals with other installs and brings back **SoulSync Charts**. Off unless you install it. |
 
 ## At a glance
 
 | | |
 |---|---|
+| **Player** | Its own web player and Android / Android TV app: rows you arrange, libraries (4K, Kids, Anime, home videos), a live guide with channels, watch parties, Chromecast, chapters and skip intro, downloads for offline, notifications |
+| **Remote streaming** | Free. Pair with a one-time code, then direct, certificate-pinned HTTPS between the app and your server. No subscription and no media through any cloud |
 | **Download sources** | Soulseek (slskd), Tidal, Qobuz, Deezer, HiFi, YouTube, SoundCloud, Lidarr, Torrent and Usenet (via Prowlarr). One source or a drag-ordered hybrid chain. |
 | **Metadata** | Spotify (with or without an account), Apple Music / iTunes, Deezer, Discogs, MusicBrainz, plus 14 background enrichment workers |
-| **Media servers** | Plex, Jellyfin, Navidrome, or **SoulSync Standalone** (no server needed) |
+| **Media servers** | Plex, Jellyfin / Emby, Navidrome, or **SoulSync Standalone** (no server needed) |
 | **Playlist sources** | Spotify, Tidal, Qobuz, Deezer, YouTube, YouTube Music, Apple Music links, ListenBrainz, Last.fm, Beatport, SoulSync's own mixes, CSV / TSV / TXT / M3U files, and NewPipe backups |
 | **Video** | Movies, TV and YouTube channels with TMDB / TVDB, Prowlarr, qBittorrent / Transmission / Deluge / SABnzbd / NZBGet, Plex, Jellyfin, or **Standalone** (SoulSync scans your own folders, no server needed). Plex and Jellyfin can be linked as one library with watched kept in step |
+| **Audiobooks & podcasts** | Audible's catalogue with Soulseek / torrent / usenet fetching, RSS and Apple Podcasts with auto-download, both playable in the player |
 | **Automation** | Visual WHEN → DO → THEN builder, 60+ triggers and actions, Discord / Telegram / Pushbullet / webhook notifications |
 | **Network (optional)** | **MetaSync** companion: share anonymous weekly taste signals with other SoulSync installs and get **SoulSync Charts** back as ready-to-sync playlists |
 | **Runs on** | Docker (amd64 + arm64), Unraid, or plain Python 3.11 |
@@ -107,11 +133,28 @@ First-run setup finds your media server and download clients on its own. You don
 
 <table>
 <tr>
-<th width="33%">Music</th>
-<th width="33%">Video</th>
-<th width="33%">Platform</th>
+<th width="25%">Player</th>
+<th width="25%">Music</th>
+<th width="25%">Video</th>
+<th width="25%">Platform</th>
 </tr>
 <tr>
+<td valign="top">
+
+[Overview](#the-player)<br>
+[Setup & libraries](#setup--libraries)<br>
+[Home & rows](#home--rows-you-arrange)<br>
+[Watching](#watching)<br>
+[Music, audiobooks & podcasts](#music-audiobooks--podcasts)<br>
+[Live guide](#live-guide)<br>
+[Watch parties](#watch-parties--watching-now)<br>
+[Downloads & offline](#downloads--offline)<br>
+[Notifications](#notifications)<br>
+[Home videos](#home-videos)<br>
+[Server Activity](#server-activity)<br>
+[Remote streaming](#remote-streaming)
+
+</td>
 <td valign="top">
 
 [Dashboard](#dashboard)<br>
@@ -124,7 +167,6 @@ First-run setup finds your media server and download clients on its own. You don
 [Import](#import)<br>
 [Tools & library maintenance](#tools--library-maintenance)<br>
 [Listening stats & scrobbling](#listening-stats--scrobbling)<br>
-[Player & radio](#player--radio)<br>
 [Sample Studio](#sample-studio)<br>
 [Podcasts & audiobooks](#podcasts--audiobooks)
 
@@ -149,6 +191,7 @@ First-run setup finds your media server and download clients on its own. You don
 [Profiles & access](#profiles--access)<br>
 [Chat & arcade](#chat--arcade)<br>
 [API & webhooks](#api--webhooks)<br>
+[Help](#help)<br>
 [Mobile, PWA & theming](#mobile-pwa--theming)<br>
 [Companion browser extension](#companion-browser-extension)<br>
 [MetaSync & SoulSync Charts](#metasync--soulsync-charts)
@@ -158,6 +201,140 @@ First-run setup finds your media server and download clients on its own. You don
 </table>
 
 **Running it:** [Installation](#installation) · [Setup guide](#setup-guide) · [Architecture](#architecture) · [How SoulSync is built](#how-soulsync-is-built) · [Contributing](#contributing) · [License](#license)
+
+---
+
+# The player
+
+<a id="player--radio"></a>
+
+SoulSync has its own watch-and-listen app, like a Plex or Jellyfin client, playing straight from your SoulSync server. Open it with **Open the player** at the top of the sidebar, or go to `/player`. It runs in any browser, and the **[SoulSync Player app](https://github.com/Nezreka/soulsync-mobile-app/releases/latest)** brings the same pages to Android phones, tablets and Android TV (Android 8.0 or newer, server on 3.7.0 or newer).
+
+Every page is there: **Home, Movies, TV, Music, YouTube, Audiobooks, Podcasts, Home videos and the Guide**, plus Watchlist, Watching now, a release calendar, Downloads, and pages for people, studios, networks, collections and keywords.
+
+## Setup & libraries
+
+- **First-run setup**: the first time, an admin names the server, sorts folders into libraries, and sets the sidebar order and what is hidden for everyone. Members see a "being set up" screen until then. It can be run again from the player's settings.
+- **Libraries**: a library is a named group of folders. You start with Movies and TV Shows, and can move a drive into a new one (4K, Kids, Anime), rename it and give it its own page in the sidebar.
+- **Hidden means hidden**: a library hidden from a profile is gone from its search, rows, the guide and direct links. Rating limits and hidden explicit music apply everywhere too.
+- **Your sidebar**: each profile orders and hides the sidebar's places. The server's order is the default.
+
+## Home & rows you arrange
+
+- **One row layout per profile** for Home, Movies, TV, Music and YouTube: reorder, hide, pick a style, for this screen or all of them. Arrange a page in a browser and the app follows.
+- **Extra rows** that stay off until you want them: new releases, top 10, by decade, studios, quick watches, most played and more. A library's page has its own layout.
+- **A home that knows your libraries**: "Recently added in" and "Continue in" rows for any library, a film you have in two libraries shown once with a 4K chip, and **On this day** for home videos filmed on today's date.
+- **Card previews**: rest on a movie or show (mouse or remote) and the card opens with its backdrop, year, length, rating and overview. A right-click menu on every card.
+
+## Watching
+
+- **Plays anything**: files a browser can't play are converted on the fly by the server (on the GPU when it works), with seeking.
+- **Chapters and skip intro**: a file's own chapter marks show in the chapter menu, and a chapter named intro, recap or credits gets a skip button. Nothing is guessed.
+- **Find subtitles while you watch** from SoulSync's own subtitle providers, best match first. The one you pick is saved beside the video and switched on at once.
+- **The end of a video**: the next episode counts down, what you were in the middle of sits beside it, and a long unattended run asks "are you still watching?".
+- **Casting**: Chromecast plays anything, with files the TV can't decode converted on the way.
+- **Info and stats**: an info sheet on every item says what it is and what file it is. **Stats for nerds** shows the stream live: the file, direct play or converted (and why), the tracks in use, dropped frames and buffer.
+- **Detail pages** with trailers, title logos, cast, extras (trailers, featurettes and deleted scenes beside a title play in place), and albums that name the songs you don't have yet.
+- **Ask for what you don't have**: a profile that may download gets it at once, one that asks files a request, under the server's quotas and rules. **Report issue** works on anything.
+- **Comments and moments**: leave a comment on a title for others on the server, and mark a moment on the seek bar that others can jump to.
+
+## Music, audiobooks & podcasts
+
+- **A music hub** with artists, albums, playlists, your mixes and artist mixes, a full now-playing view with synced lyrics, a queue, and visuals that move to the song.
+- **Audiobooks and podcasts** with chapters, resume and progress kept across every screen.
+- **YouTube**: a video you downloaded plays in the player with resume and queue; one you haven't plays in YouTube's own embed.
+- **Plays count**: a song played in the player is a play in your stats, mixes and scrobbles.
+- **The manager's sidebar player** is still there for music while you work: a Now Playing view with album-colour glow, synced lyrics, visualizers, crossfade, a sleep timer and OS media controls; a reorderable queue that can **auto-download** tracks you don't own yet; and **Radio mode**, **Artist Radio** and **Library Radio** (an endless shuffle of your own collection).
+
+## Live guide
+
+- **Channels from your own library** that run on the server's clock, so every device shows the same thing airing. Tune in at the minute it's on, then channel up and down like a TV (page up / down, a remote's channel keys, or type a channel number).
+- **Make channels**: movies, TV or one show start to finish; genres, decades, studios, networks, a film series, a lowest score, only what's new, kids only; shuffled or in order. Admins make them for everyone, anyone can make their own, and each profile arranges its own lineup.
+- **Premieres** are decided by the server, YouTube can be a channel source, and **retro commercial breaks** are an opt-in.
+- **Reminders** ring on whichever screen you have open, set on the TV and heard on the phone. Faces on a channel show who else is watching, and you can join them where they are.
+
+## Watch parties & watching now
+
+- **Watching now** shows everyone sharing what they watch on this server, and "watching the same thing" starts a party in one click.
+- **Watch parties**: a waiting room with seats, ready checks and lobby music from your library, a synced countdown, live chat and reactions on screen, a break button, scheduled premieres, and everyone steers.
+
+## Downloads & offline
+
+- **A Download button on everything**: movie, episode, season, show, album, playlist, audiobook and podcast, saying where it already is (**Waiting**, **60%**, **On Pixel 8**, **Downloaded**).
+- **Pick a quality with real sizes**: the original, or a smaller copy the server makes first (1080p / 720p / 480p, or 320 / 256 / 128 kbps), never above the source. Subtitles and chapters come along.
+- **To this computer or to a phone**: a phone picks the download up the next time the app is online, and keeps going with the app closed, with Wi-Fi only and a storage limit.
+- **Smart downloads**: keep the next 1, 3 or 5 episodes ready and delete what's watched, keep a playlist in step, keep a podcast's newest episodes.
+- **Offline play** on phones and tablets sends plays, positions and watched marks back when it reconnects. The **Downloads** page manages every device's downloads from any screen, and the TV app sends things to a phone.
+- **Admins decide** who may download (Users & Downloads), whether members get smaller copies, how many copies are made at once and how much disk they may use.
+
+## Notifications
+
+- A bell in the player, browser notifications if you allow them, and system notifications in the app, fetched from your own server (nothing goes through Google).
+- New episodes of shows you watch (one a day per show), well-reviewed films (never more than 3 a week), watchlist titles that arrived, finished requests, season premieres, watch party invites and admin messages, plus new albums and home video memories if you like.
+- Every kind is a switch per profile, with quiet hours and a daily digest. Hidden libraries and rating limits apply.
+
+## Home videos
+
+Clips from your phone or camera (a Plex "Other videos" or Jellyfin "Home videos" library, or a folder on disk) as a library of their own: On this day, folders as albums, a month-by-month timeline. Never looked up or renamed: named and dated from the clip itself, with your own names, dates, pictures and notes kept through every rescan. Set up from Player setup, and on phones and TVs too.
+
+## Server Activity
+
+What's playing on SoulSync's own player, Plex and Jellyfin in one drawer (admins only, options under Settings, Connections):
+
+- The file against what's sent, why a stream is converted in plain words, the transcoder, where a remote viewer is, and chapter and whole-book progress for audiobooks.
+- **Stop a stream with a message** on Plex, Jellyfin, SoulSync's player or the app. On SoulSync's own player and app, a message can also go without stopping anything.
+- SoulSync keeps its own play log (forever by default, with a retention setting and a clear button), so **History** and **Stats** show how long, how well and from where, with Plex's own history filling in the time before.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
+
+---
+
+# Remote streaming
+
+Watch and listen away from home for free. There is no paid tier, no account to buy, and your media never passes through anyone's cloud.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Nezreka/soulsync-mobile-app/main/docs/soulsync-connect-architecture.jpg" alt="How SoulSync Connect pairs the app and then streams directly" width="820">
+</p>
+
+## How pairing works
+
+1. **Your server checks in.** SoulSync keeps one outgoing connection to the pairing service at `connect.ssync.net`, and gets itself a free Let's Encrypt certificate for its own name there. No port is opened for this.
+2. **Add a device.** In **Settings > Devices > Add a device**, SoulSync shows a one-time code (`XXXX-XXXX-XXXX-XXXX`, 10 minutes, used once) and a QR. A phone's camera opens the app with the code filled in.
+3. **The app finds your server.** The pairing service only ever sees a hash of the code. Your server answers with its addresses and certificate fingerprint sealed for that one app (HPKE, RFC 9180) and signed with the server's own key, so the service can't read or change them.
+4. **Check the fingerprint.** The app shows the server's 12-character fingerprint, the same one shown under **This server** in Settings > Devices. Pick a profile (with its PIN or password), and the app pins the server's certificate.
+5. **Then it's direct.** Browsing, artwork and every stream go straight between the app and your server over HTTPS, home addresses first, your public address when you're out. If the pairing service is down, playback carries on.
+
+## What you need away from home
+
+At home, nothing: the app uses your home network address. Outside, your router has to let the app reach SoulSync's streaming port (TCP `8443`). Pick one:
+
+- **Automatic remote access (UPnP / NAT-PMP)** in Settings > Devices. Off by default. When your router answers, SoulSync opens the port, renews it and says which one is active (it steps to another port if the router's own admin page sits on 8443).
+- **Forward TCP 8443** on your router to the SoulSync machine yourself.
+
+In Docker, publish the port as well (`- "8443:8443"` under `ports:`); the default compose file only publishes 8008.
+
+**Check reachability** in Settings > Devices fetches a one-time link through your remote address, and shows the same link as a QR to open on your phone with Wi-Fi off, so you see it reach the server from outside. If your internet provider gives you no public address of your own (CGNAT), no port forward will work; a tunnel or Tailscale (below) still does for browsers and music apps.
+
+## Browsers and music apps
+
+The web player and the manager are ordinary web pages, so outside your home they need an address you give them:
+
+- Your own domain with a reverse proxy (Caddy, nginx, Traefik) and a certificate, a forwarded port behind https, a **Cloudflare Tunnel**, or **Tailscale**.
+- Put it in **Settings > Devices** as the **Remote address**, and any others (a Tailscale name, say) as **Extra addresses**. A plain `http://` remote address gets a loud warning.
+
+<a id="music-apps-subsonic"></a>
+
+**Music apps** (Subsonic / OpenSubsonic API at `/rest`): **Set up a music app** in Settings > Devices gives one profile its own app password and API key (shown once, with a QR). Browsing, search, album lists, streaming with on-the-fly MP3 / Opus conversion, offline downloads, lyrics, cover art, stars (they are Liked Songs), ratings, playlists (yours editable, mirrored ones and Daily Mixes read-only), the play queue, and plays recorded like the web player's. Each app sees only its own profile, hidden explicit music stays hidden, and files SoulSync can't read can be played through your media server if you turn that on.
+
+## What a paired device can do
+
+- It acts as the profile it picked, **only to play**: browse, stream, lyrics, artwork, plays, favorites, playlists and the queue. Never settings, downloads admin, people or API keys, even on an admin's profile.
+- **Use music apps** is a permission, off on the Kids template, and turning it off stops a device that already picked that profile.
+- **Unpair** any device at once. Signing out everywhere, a new password or turning a profile off unpairs its devices too.
+- Codes and device tokens are never stored as themselves, only their hashes.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
 
 ---
 
@@ -207,7 +384,7 @@ Bring a playlist in from anywhere, keep a mirror of it, and keep your media serv
 
 One search box with three modes, and a note button that identifies what is playing.
 
-- **Identify a song**: the note button in the search field records a short clip (or takes an audio file you drop in) and asks Shazam to name it, then opens the song's usual analysis box with Add to Wishlist. The clip goes to Shazam, a third-party service; SoulSync does not keep it. Microphone capture needs an https address — over plain http the button offers the file path instead.
+- **Identify a song**: the note button in the search field records a short clip (or takes an audio file you drop in) and asks Shazam to name it, then opens the song's usual analysis box with Add to Wishlist. The clip goes to Shazam, a third-party service; SoulSync does not keep it. Microphone capture needs an https address; over plain http the button offers the file path instead.
 - **Catalog**: search Spotify, Apple Music, Deezer, Discogs, MusicBrainz or Amazon, or **All sources** at once with the same release shown once. Results show *In library* and *In wishlist*; albums open a download-missing view, artists and labels open their pages.
 - **Videos**: official music videos from YouTube, downloaded straight into your library.
 - **Files**: search a download source directly (like classic Soulseek), filter by format and quality, then choose how it comes in:
@@ -323,7 +500,7 @@ A personal front page shaped by your library, your listening and your watchlist.
   - Browse it as a **Nebula** (an orb per artist, grouped by what's stuck: no match found, or downloaded then rejected) or a dense list.
   - Open an artist to see why each track failed in plain words, retry it, or pick a source by hand.
   - Export it as CSV or JSON (the video wishlist too: everything, movies or TV shows).
-- **Requests**: Overseerr-style, for music too. Profiles without download rights add to their wishlist like anyone else, and the scheduled run only downloads what an admin or a moderator approved. Per kind (music, movies, TV, audiobooks), approved requests can wait for you to pick the exact release instead of grabbing the best match.
+- **Requests**: Overseerr-style, for music too. Profiles without download rights add to their wishlist like anyone else, and the scheduled run only downloads what an admin or a moderator approved. Per kind (music, movies, TV, audiobooks), approved requests can wait for you to pick the exact release instead of grabbing the best match. The songs a playlist sync asks for arrive as one request under the playlist's name, approved whole or song by song.
 
 ## Import
 
@@ -339,7 +516,8 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 - **Library health score** with a findings inbox that turns thousands of findings into a few decisions, and **Fix all safe** for metadata-only repairs.
 - Findings sorted by what a fix would do (safe, needs your call, review only), **undo** on every dismiss, and keyboard triage (`j` / `k` / `f` / `d`).
 - **Over 40 maintenance jobs**, each with its own schedule.
-- **Database updater** (incremental, full refresh or deep scan), manual library matching, **backups with restore** (each backup is checked, the newest five are kept, the player's and audiobooks' databases are backed up with the music one, and a restore checks the backup and keeps a copy of what was there before it touches anything), a metadata cache browser, and **config export/import** (optionally with credentials).
+- **Database updater** (incremental, full refresh or deep scan), manual library matching, a metadata cache browser, and **config export/import** (optionally with credentials).
+- **Backups** on one page under Settings > System: every database (music, video, player, audiobooks) with what each backup holds, back up now, restore and delete. Each backup is checked, the newest five are kept, a restore verifies first and keeps what was there, and the encryption key file can be downloaded. A damaged database is reported in the bell and can be **repaired** in place, or restored from the newest healthy backup.
 - **Update file locations** after moving the music library folder: the library's records follow the files to the new folder (checked, grouped by folder, undoable; scans do it on their own once the old folder is gone).
 
 <details>
@@ -368,17 +546,6 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 - **History import** from Last.fm, ListenBrainz, Maloja and Koito, and **Spotify streaming history** from Spotify's privacy export (account data or extended history). The export is read in your browser and only music plays are sent; plays under 30 seconds, podcasts and private-session plays stay out. Plays already in your history from ListenBrainz or Last.fm aren't doubled, it can count in Stats and Your Year or feed only your mixes and recommendations, and **Remove this import** takes it back out.
 - **You and this artist**: on every artist page you've played, your plays, your rank for them, first and last listened, a year of plays per month, and the songs of theirs you play most.
 
-## Player & radio
-
-A full web player built into the sidebar.
-
-- Now Playing view with album-colour glow, synced lyrics, audio-reactive visualizers, crossfade, a sleep timer, and OS media controls.
-- A persistent, reorderable queue that can **auto-download** tracks you don't own yet.
-- **Radio mode**, **Artist Radio** and **Library Radio** (an endless shuffle of your own collection).
-- Tracks you don't own stream from a preview source, so you can hear before you grab.
-- **Home videos**: clips from your phone or camera (a Plex "Other videos" or Jellyfin "Home videos" library, or a folder on disk) as a player library of their own: On this day, folders as albums, a month-by-month timeline. Never looked up or renamed; named and dated from the clip itself, with your own names, dates, pictures and notes kept through every rescan. Set up from Player setup.
-- **Notifications**: a bell in the player (and system notifications in the phone app) for what's new for you: new episodes of shows you watch (one a day per show), well-reviewed films (never more than 3 a week), watchlist titles that arrived, finished requests, season premieres, watch party invites and admin messages, plus new albums and home video memories if you like. Every kind is a switch per profile, with quiet hours and a daily digest. Hidden libraries and rating limits apply.
-
 ## Sample Studio
 
 Turn your library into a sample pack.
@@ -392,6 +559,7 @@ Turn your library into a sample pack.
 
 - **Podcasts**: discover via Apple Podcasts search or add any RSS feed (private and Patreon feeds included), OPML import/export, show notes and transcripts, and a watchlist that auto-downloads new episodes and cleans up old ones.
 - **Audiobooks**: browse Audible's catalogue by genre, series, author and narrator, follow authors for new books, and fetch releases from Soulseek, torrent or usenet. SoulSync looks inside each release before downloading, matches your existing books to catalogue editions (across extra folders on other drives too), and keeps its own wishlist, blocklist and recycle bin.
+- Both play in [the player](#music-audiobooks--podcasts), on the web and in the app.
 
 <p align="right"><a href="#top">↑ back to top</a></p>
 
@@ -411,7 +579,9 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 
 ## Video library
 
-- Movies, shows and YouTube channels from **Plex** or **Jellyfin**, with incremental, full and deep scans, per-title sync, and a path resolver for mismatched Docker / NAS mounts.
+- Movies, shows and YouTube channels from **Plex**, **Jellyfin**, or **SoulSync Standalone**, which scans your folders itself (titles from .nfo files, folder tags, names and a file hash, editions read, folders watched for changes). Incremental, full and deep scans, per-title sync, and a path resolver for mismatched Docker / NAS mounts.
+- **Plex and Jellyfin as one library** (off by default): the same file is linked across both and watched state goes both ways.
+- A download is in the library the moment it lands, with no wait on a server scan.
 - **15 enrichment workers** fill in ratings, artwork, subtitles, anime data, streaming availability and more.
 - **Bulk edit & field locks**: edits are written to SoulSync and pushed to your server, and locked fields are never overwritten by enrichment.
 
@@ -531,14 +701,14 @@ The Library page is your movies and shows three ways: posters, a sortable table 
 - **Collection Studio**: smart-filter and list collections from TMDB, IMDb, Trakt and MDBList, with presets, seasonal windows, generated artwork, and wishlisting missing members.
 - **Poster Manager** for TMDB posters, including textless ones.
 - **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more, on the same Tools page as music (health score, findings inbox, fix-all in the background). Plus backups and mass rename. A name that uses an id the title has none stored for (`{imdb-$imdbid}`) is left alone rather than renamed without its tag, and the naming check says which titles wait on an id.
-- **Server Activity**: what's playing on Plex and Jellyfin in one drawer: the file against what's sent, why a stream is converted in plain words, the transcoder, where a remote viewer is, chapter and whole-book progress for audiobooks, and stop with a message on both servers. SoulSync keeps its own play log (forever by default, with a retention setting and a clear button), so History and Stats (the same drawer, widened) show how long, how well and from where, with Plex's own history filling in the time before. Admins only; its options sit under Settings, Connections.
-- **Watch Together** in chat: vote on a title and watch together.
+- **[Server Activity](#server-activity)**: what's playing on SoulSync's player, Plex and Jellyfin in one drawer, with its own history and stats.
+- **Watch Together** in chat: vote on a title and watch together, or start a [watch party](#watch-parties--watching-now) in the player.
 
 ## YouTube
 
 - Follow channels and playlists as TV shows, with no API key.
 - Per-channel resolution, codec, length and title filters, and retention.
-- Everything lands as a Plex "TV by date" show.
+- Everything lands as a Plex "TV by date" show, and each channel is a library in SoulSync with its files, what needs attention, delete with undo and clean now.
 
 <p align="right"><a href="#top">↑ back to top</a></p>
 
@@ -574,13 +744,12 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
   - **Members see only what they can use**, with a "What you can do" card on their own account page. That covers help too: Help & Docs and the help search show a member only the guides for what they can use, the notification panel holds their own notes, downloads and automations (the server's health, numbers and jobs are the admin's, and so are the enrichment workers and Manage Workers on both dashboards), and library actions that download right away (Automatic Search, Enhance Quality) are there only for a profile that may download.
   - **Import from Plex**: a profile for everyone your Plex server is shared with, picked one by one or all at once, with their Plex name and picture, on the template you choose. Each is linked to their Plex account, so Sign in with Plex lands on it and Seerr apps can ask for them before they ever sign in; anyone already here is never imported twice.
   - Add person, invites, Plex imports and Plex / OIDC sign-ups start from a template. Every route on the server checks the same rules, and so do automations, scans, Seerr apps and other background adds.
-- **Per-profile everything**: watchlists, wishlists, playlists, queues and listening history.
+- **Per-profile everything**: watchlists, wishlists, playlists, queues, listening history, the player's rows, sidebar and notifications, and which libraries each profile sees. A shared device switches profiles behind the profile's PIN.
 - **My Account** for non-admins: their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
 - **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** or **Everything**, then switch single parts on or off. Each template has its own Sidebar & look, and admins can set it for one person and lock it.
 - **Own library per profile** (Plex / Jellyfin / Navidrome 0.58+): a profile can have its own folder and server library. On Navidrome the profile picks its library under its own Navidrome login; its scans read only that library and its playlists are written as that user.
 - **Content caps**: G / PG / PG-13 / R per profile for movies, with TV following it or set on its own, and hide explicit music.
-- **Devices** (Settings > Devices): pair a phone, car or speaker app with a one-time code (or its QR: a phone camera opens it straight in the SoulSync Player app). Each device picks a profile, with that profile's PIN or password, and can only play: never settings, downloads or people. Unpair any device at once. **Use music apps** is a permission, off on the Kids template. The page also holds this server's addresses (home ones found on their own, plus your remote address), a reachability check with a phone link for mobile data, and person invites.
-- **Music apps** (Subsonic / OpenSubsonic API at `/rest`): play your library in any music app that speaks it. **Set up a music app** in Settings > Devices gives one profile its own app password and API key (shown once, with a QR). Browsing, search, album lists, streaming with on-the-fly MP3/Opus conversion, offline downloads, lyrics, cover art, stars (they are Liked Songs), ratings, playlists (yours editable, mirrored ones and Daily Mixes read-only), the play queue and plays recorded like the web player's. Each app sees only its own profile, hidden explicit music stays hidden, and files SoulSync can't read can be played through your media server if you turn that on.
+- **Devices and music apps** (Settings > Devices): pair the SoulSync Player app or a Subsonic music app to one profile, play only. See [Remote streaming](#remote-streaming).
 
 ### Security
 
@@ -638,6 +807,7 @@ The MCP server and the Lidarr and Seerr compatible APIs are off until you turn t
 ## Mobile, PWA & theming
 
 - Fully responsive, and installable as a **PWA** (cover art cached for speed, never stale pages).
+- For phones, tablets and TVs, the **[SoulSync Player app](https://github.com/Nezreka/soulsync-mobile-app/releases/latest)** (Android and Android TV) plays everything, with downloads for offline. See [The player](#the-player).
 - Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce visual effects** / **Max performance** switches for low-power devices (kept per device).
 
 ## Companion browser extension
@@ -760,6 +930,7 @@ The image runs as a non-root user with `PUID` / `PGID` / `UMASK` support, and bu
 | `8008` | Web UI and API |
 | `8888` | Spotify OAuth callback |
 | `8889` | Tidal OAuth callback |
+| `8443` | SoulSync Connect: the HTTPS port the SoulSync Player app streams from. Not in the default compose file; add `- "8443:8443"` to use the app. See [Remote streaming](#remote-streaming). |
 
 ### Release channels
 
@@ -836,6 +1007,7 @@ cd webui && npm ci && npm run dev
 | **A media server** | Optional: Plex, Jellyfin or Navidrome. |
 | **Prowlarr** | Plus a torrent or usenet client, for the torrent / usenet sources and the video side. |
 | **TMDB and TVDB keys** | For the video side. |
+| **The SoulSync Player app** | Optional, Android 8.0 or newer. [Download the APK](https://github.com/Nezreka/soulsync-mobile-app/releases/latest). |
 
 ### 1. Connect slskd (optional)
 
@@ -902,6 +1074,13 @@ If your media server keeps music on more drives than SoulSync's library folder, 
 
 To let people sign in with Pocket ID, Authentik, Authelia, Keycloak or another OpenID Connect provider, follow [docs/guides/OIDC.md](docs/guides/OIDC.md).
 
+### 6. Open the player and pair the app (optional)
+
+1. Press **Open the player** at the top of the sidebar and run the short player setup: name the server, sort folders into libraries, choose who sees what.
+2. Install the [SoulSync Player app](https://github.com/Nezreka/soulsync-mobile-app/releases/latest) on a phone, tablet or Android TV (sideload it on a TV with a file manager or `adb install`).
+3. **Settings > Devices > Add a device**, then scan the QR with the phone's camera or type the code. Check the fingerprint and pick a profile.
+4. For away from home, turn on **Automatic remote access** or forward TCP 8443 (and publish it in Docker). See [Remote streaming](#remote-streaming).
+
 ### More guides
 
 [Docker](Support/DOCKER.md) · [Docker permissions](Support/DOCKER_PERMISSIONS.md) · [Reverse proxy](Support/REVERSE-PROXY.md) · [Unraid](Support/UNRAID.md) · [Import & staging](Support/IMPORT-STAGING-GUIDE.md) · [Automations](Support/AUTOMATIONS.md) · [API](Support/API.md)
@@ -912,8 +1091,9 @@ To let people sign in with Pocket ID, Authentik, Authelia, Keycloak or another O
 
 | Layer | What it is |
 |---|---|
-| **Backend** | Python 3.11, Flask + Flask-SocketIO on Gunicorn, SQLite in WAL mode (separate music and video databases). Settings live in the database, and secrets are encrypted at rest. |
-| **Frontend** | A React 19 + TypeScript app (TanStack Router and Query, Vite) running alongside the original vanilla-JS shell, which is being migrated page by page. Live updates arrive over WebSockets. |
+| **Backend** | Python 3.11, Flask + Flask-SocketIO on Gunicorn, SQLite in WAL mode (separate music, video, player and audiobook databases). Settings live in the database, and secrets are encrypted at rest. |
+| **Frontend** | A React 19 + TypeScript app (TanStack Router and Query, Vite) running alongside the original vanilla-JS shell, which is being migrated page by page. The player is React end to end. Live updates arrive over WebSockets. |
+| **Player app** | A native Android and Android TV client (Kotlin, Jetpack Compose, Media3 ExoPlayer) in [soulsync-mobile-app](https://github.com/Nezreka/soulsync-mobile-app). |
 
 **Core pieces**
 
@@ -923,6 +1103,7 @@ To let people sign in with Pocket ID, Authentik, Authelia, Keycloak or another O
 - **Enrichment workers**: 14 music and 15 video, each yielding to user activity.
 - **Automation engine**: event bus, signal chains, cycle guards.
 - **SoulID**: deterministic cross-instance IDs for artists, albums and tracks.
+- **SoulSync Connect**: the server's own Ed25519 identity, one-time device codes, sealed pairing answers through a blind relay, an automatic certificate, and play-only device tokens.
 
 ---
 
