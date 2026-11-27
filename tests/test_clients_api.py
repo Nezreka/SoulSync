@@ -201,7 +201,15 @@ def test_a_broken_known_items_getter_never_breaks_the_listing(monkeypatch):
 
 
 class _FakeOrchestrator:
-    """the shape web_server actually injects: is_configured(), no base_url."""
+    """the shape web_server actually injects: no base_url, and its
+    get_all_downloads lists every source, not just slskd."""
+
+    def __init__(self, soulseek=None):
+        self.soulseek = soulseek if soulseek is not None else _FakeSlskd()
+        self.cleared = False
+
+    def client(self, name):
+        return self.soulseek if name == 'soulseek' else None
 
     def is_configured(self):
         return True
@@ -209,17 +217,47 @@ class _FakeOrchestrator:
     async def get_all_downloads(self):
         return [DownloadStatus(id='d2', filename='b.flac', username='tidal',
                                state='InProgress', progress=10.0, size=50,
-                               transferred=5, speed=1)]
+                               transferred=5, speed=1),
+                DownloadStatus(id='t1', filename='ssc1-abc||Alice Cooper [Flac]',
+                               username='torrent', state='InProgress', progress=10.0,
+                               size=50, transferred=5, speed=1)]
+
+    async def clear_all_completed_downloads(self):
+        self.cleared = True
+        return True
 
 
-def test_an_orchestrator_shaped_client_lists_fine(monkeypatch):
-    """no base_url attr - the configured check must use is_configured().
-    the first wiring keyed on base_url and would have reported the whole
-    tab unconfigured once the getter itself was fixed."""
+def test_an_orchestrator_shaped_client_lists_only_slskd(monkeypatch):
+    """the orchestrator lists every source, so torrent grabs showed in the
+    soulseek tab as ssc1-<token>||<release> (hrk_hrk). only the soulseek
+    plugin's own transfers belong there."""
     c = _client(monkeypatch, slskd=_FakeOrchestrator())
     data = c.get('/api/clients/slskd').get_json()
     assert data['configured'] is True and data['connected'] is True
-    assert data['items'][0]['username'] == 'tidal'
+    assert [r['username'] for r in data['items']] == ['uploader']
+    assert not any('ssc1-' in r['filename'] for r in data['items'])
+
+
+def test_slskd_clear_completed_never_clears_other_sources(monkeypatch):
+    class _Slskd(_FakeSlskd):
+        cleared = False
+
+        async def clear_all_completed_downloads(self):
+            self.cleared = True
+            return True
+    orch = _FakeOrchestrator(soulseek=_Slskd())
+    c = _client(monkeypatch, slskd=orch)
+    assert c.post('/api/clients/slskd/clear-completed').get_json() == {'success': True}
+    assert orch.soulseek.cleared is True and orch.cleared is False
+
+
+def test_an_orchestrator_without_soulseek_reports_unconfigured(monkeypatch):
+    class _NoSlskd(_FakeOrchestrator):
+        def client(self, name):
+            return None
+    c = _client(monkeypatch, slskd=_NoSlskd())
+    data = c.get('/api/clients/slskd').get_json()
+    assert data['configured'] is False and data['items'] == []
 
 
 def test_a_getter_that_raises_returns_json_not_flask_html(monkeypatch):

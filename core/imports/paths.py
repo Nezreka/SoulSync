@@ -6,6 +6,7 @@ import contextvars
 import json
 import os
 import re
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -1131,13 +1132,51 @@ def auto_disc_folder(template: str, total_discs: int, disc_number: int, disc_lab
     return f"{disc_label} {disc_number}"
 
 
+_ALBUM_QUALITY_PINS: dict = {}
+_ALBUM_QUALITY_PINS_MAX = 2000
+_album_quality_lock = threading.Lock()
+
+
+def pin_album_quality(album_key, quality: str) -> str:
+    """the quality an album's folder uses for ``$quality``.
+
+    the first track of an album to land pins it, and every later track of the
+    same album gets the same value, so one album never splits across a
+    ``FLAC 16bit`` and a ``FLAC 24bit`` folder when its tracks differ. across
+    restarts the existing album folder reuse (#829) keeps later tracks in the
+    folder the first ones made."""
+    quality = str(quality or "")
+    if not album_key or not quality:
+        return quality
+    with _album_quality_lock:
+        pinned = _ALBUM_QUALITY_PINS.get(album_key)
+        if pinned:
+            return pinned
+        if len(_ALBUM_QUALITY_PINS) >= _ALBUM_QUALITY_PINS_MAX:
+            _ALBUM_QUALITY_PINS.pop(next(iter(_ALBUM_QUALITY_PINS)))
+        _ALBUM_QUALITY_PINS[album_key] = quality
+        return quality
+
+
+def _folder_quality_template(template: str) -> str:
+    """``${quality}`` in a folder becomes ``$quality`` so the folder pass gives
+    it the album's quality, not the one file's."""
+    parts = template.split("/")
+    if len(parts) < 2 or "${quality}" not in template:
+        return template
+    return "/".join([p.replace("${quality}", "$quality") for p in parts[:-1]] + parts[-1:])
+
+
 def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str,
-                          template_has_disc: bool = False) -> str:
+                          template_has_disc: bool = False,
+                          quality_value: str = "") -> str:
     """Resolve one FOLDER segment of a rendered path template.
 
-    ``$quality`` is the one variable the settings page documents as
-    filename-only, and it is stripped here. ``$disc`` and ``$discnum`` used to
-    be stripped alongside it, undocumented — so a user asking for a disc folder
+    ``$quality`` used to be stripped here as filename-only, so
+    ``$album. $quality/$track`` gave a folder with no quality (hrk_hrk). it now
+    takes the album's quality (``album_quality``, pinned so every track of one
+    album lands in one folder). ``$disc`` and ``$discnum`` used to be stripped
+    alongside it, undocumented — so a user asking for a disc folder
     got the folder silently deleted from their path, while ``$cdnum`` and the
     ``${...}`` bracket forms (substituted globally, before the path is split)
     worked. Same family of variables, three different behaviours. They now
@@ -1149,7 +1188,7 @@ def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str,
     directory name.
     """
     had_disc_var = template_has_disc or "$discnum" in part or "$disc" in part
-    part = part.replace("$quality", "")
+    part = part.replace("$quality", quality_value)
     part = part.replace("$discnum", disc_value_raw)
     part = part.replace("$disc", disc_value)
     part = part.replace("$cdnum", "")
@@ -1177,7 +1216,9 @@ def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, 
         template = with_track_disambiguation(
             template, context.get("track_disambiguation", ""), context.get("title", ""))
     _template_has_disc = template_uses_disc_variable(template)
+    template = _folder_quality_template(template)
     full_path = apply_path_template(template, context)
+    folder_quality = context.get("album_quality") or context.get("quality", "")
 
     quality_value = context.get("quality", "")
     disc_number = _coerce_int(context.get("disc_number", 1), 1)
@@ -1194,7 +1235,7 @@ def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, 
         cleaned_folders = []
         for part in folder_parts:
             part = _clean_folder_segment(part, disc_value, disc_value_raw,
-                                         _template_has_disc)
+                                         _template_has_disc, folder_quality)
             if part:
                 cleaned_folders.append(part)
 
@@ -1322,7 +1363,9 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
         template = with_track_disambiguation(
             template, context.get("track_disambiguation", ""), context.get("title", ""))
     _template_has_disc = template_uses_disc_variable(template)
+    template = _folder_quality_template(template)
     full_path = apply_path_template(template, context)
+    folder_quality = context.get("album_quality") or context.get("quality", "")
 
     path_parts = full_path.split("/")
     quality_value = context.get("quality", "")
@@ -1343,7 +1386,7 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
         cleaned_folders = []
         for part in folder_parts:
             part = _clean_folder_segment(part, disc_value, disc_value_raw,
-                                         _template_has_disc)
+                                         _template_has_disc, folder_quality)
             if part:
                 cleaned_folders.append(part)
 
@@ -1899,6 +1942,15 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                             )
                 except Exception as _disc_err:
                     logger.warning("[Multi-Disc] Could not resolve total_discs: %s", _disc_err)
+
+        # $quality in a folder is the album's: the first track's, pinned so
+        # the album never splits across two quality folders
+        template_context["album_quality"] = pin_album_quality(
+            (str(template_context.get("albumartist") or "").casefold(),
+             str(template_context.get("album") or "").casefold(),
+             str(template_context.get("year") or ""),
+             str(template_context.get("disambiguation") or "").casefold()),
+            template_context.get("quality", ""))
 
         # Now that total_discs is fully resolved, expose it to the template
         # so $cdnum can decide between "CDxx" and an empty string.
