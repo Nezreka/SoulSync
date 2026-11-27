@@ -202,6 +202,16 @@ def until_cutoff_profile_ids(database) -> Optional[set]:
             conn.close()
 
 
+def _whole_album_profile_ids(conn) -> set:
+    """Profiles that upgrade whole albums: their tracks are never applied one
+    by one from a finding."""
+    try:
+        return {r[0] for r in conn.execute(
+            "SELECT id FROM quality_profiles WHERE upgrade_whole_albums=1")}
+    except Exception:  # noqa: BLE001 - an older table has none
+        return set()
+
+
 def until_cutoff_finding_ids(database, limit: int = 100, *, profile_id: int = 1) -> List[int]:
     """Native, already-wanted audit proposals and preserved legacy findings.
 
@@ -221,6 +231,7 @@ def until_cutoff_finding_ids(database, limit: int = 100, *, profile_id: int = 1)
         row = conn.execute(
             "SELECT id FROM quality_profiles WHERE is_default = 1 ORDER BY id LIMIT 1").fetchone()
         default_id = row['id'] if row else None
+        whole_albums = _whole_album_profile_ids(conn)
         rows = conn.execute(
             "SELECT id, job_id, entity_id, file_path, details_json FROM repair_findings "
             "WHERE status='pending' AND entity_type='track' AND (job_id='quality_upgrade' "
@@ -245,7 +256,8 @@ def until_cutoff_finding_ids(database, limit: int = 100, *, profile_id: int = 1)
                 continue
         elif (profile_id != 1 or not details.get('matched_track_data')
               or details.get('quality_issue') in ('format_not_in_profile', 'format_not_targeted')
-              or (details.get('quality_profile_id') or default_id) not in profiles):
+              or (details.get('quality_profile_id') or default_id) not in profiles
+              or (details.get('quality_profile_id') or default_id) in whole_albums):
             continue
         ids.append(row['id'])
         if len(ids) >= limit:
@@ -283,6 +295,10 @@ def _native_finding_is_current(database, finding, details: dict, profile_id: int
                 return False
             profile = effective_track_profile(conn, tid)
             if profile.get('upgrade_policy') not in UNTIL_CUTOFF_POLICIES:
+                return False
+            # the whole-album upgrade owns this track: never one track alone
+            from core.library2.album_upgrade import upgrades_whole_albums
+            if upgrades_whole_albums(profile):
                 return False
             observed, _measured = probe_profile_file(file)
             return quality_issue(observed, profile) == 'below_cutoff'

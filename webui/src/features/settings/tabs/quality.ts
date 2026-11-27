@@ -46,6 +46,8 @@ export interface Ladder {
   releaseImportMode: 'requested_tracks' | 'album_tracks';
   upgradePolicy: 'none' | 'acceptable' | 'until_cutoff';
   cutoff: number;
+  /** upgrade an album as one release, never track by track */
+  wholeAlbums: boolean;
 }
 
 /** the eight controls a profile captures beyond the ladder */
@@ -120,6 +122,7 @@ export const EMPTY_LADDER: Ladder = {
   releaseImportMode: 'requested_tracks',
   upgradePolicy: 'none',
   cutoff: 0,
+  wholeAlbums: false,
 };
 
 /**
@@ -148,6 +151,10 @@ export function ladderFrom(profile: ServerProfile, previous: Ladder): Ladder {
           ? 'acceptable'
           : 'none',
     cutoff: clampCutoff(index, targets),
+    wholeAlbums:
+      'upgrade_whole_albums' in profile
+        ? profile.upgrade_whole_albums === true || profile.upgrade_whole_albums === 1
+        : previous.wholeAlbums,
   };
 }
 
@@ -218,6 +225,7 @@ export function collectLadder(ladder: Ladder) {
     release_import_mode: ladder.releaseImportMode,
     upgrade_policy: ladder.upgradePolicy,
     upgrade_cutoff_index: clampCutoff(ladder.cutoff, ladder.targets),
+    upgrade_whole_albums: ladder.wholeAlbums,
     ranked_targets,
   };
 }

@@ -144,6 +144,8 @@ Some answer a member with less instead of a `403`:
 
 In the music library, `POST /api/library/v2/<entity>/<id>/search` (Automatic Search) and `/enhance` (Enhance Quality, Upgrade) download right away, so a profile that asks first is refused them; its way in is the Wishlist. `GET /api/library/v2/enabled` says what the caller may do: `can_wish`, `can_download`, and `can_grab` (an Interactive Search pick for a library row).
 
+Under a quality profile with `upgrade_whole_albums` on, Automatic Search and Enhance Quality never fetch one track of an album you own: the album is upgraded as one release in the background (the job result's `album_upgrades` counts them), or left as it is. `GET /api/quality-profile/album-upgrades?limit=` lists what those upgrades did, newest first: `{album_id, album_title, artist_name, outcome: upgraded|no_complete_release|skipped|failed, source, release, reason, tried, created_at}`.
+
 ### Approved requests that wait for a release pick (web UI routes)
 
 Each kind (music, movies, TV, audiobooks) can be set to have an admin pick the release instead of grabbing the best match. Everything starts on automatic. Music videos, YouTube videos and podcast episodes always download right away.

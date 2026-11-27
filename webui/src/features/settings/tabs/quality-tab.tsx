@@ -371,6 +371,7 @@ export function MusicQualityTab({ store }: SettingsTabProps) {
             upgrade_policy: l.upgradePolicy,
             upgrade_cutoff_index: clampCutoff(l.cutoff, l.targets),
             release_import_mode: l.releaseImportMode,
+            upgrade_whole_albums: l.wholeAlbums,
           },
           false,
         );
@@ -1038,6 +1039,34 @@ export function MusicQualityTab({ store }: SettingsTabProps) {
           </Select>
         </Row>
         <Row
+          id="quality-whole-albums-group"
+          sub
+          hidden={ladder.upgradePolicy === 'none'}
+          label="Upgrade whole albums"
+          htmlFor="quality-whole-albums"
+          help="An album with a track below the cutoff is upgraded as one release, from one source."
+          more={
+            <>
+              The complete album is downloaded from one source (a Soulseek folder from one user, a
+              torrent, usenet or Lidarr release, or the album on Qobuz, Tidal or Deezer) and every
+              file is checked: all your tracks, nothing extra, the same lengths, a clean decode and
+              your cutoff. Only then are the old files swapped out in one go, to the deleted-files
+              folder like any upgrade. If no complete album passes, the album stays as it is and the
+              reason shows in the upgrade activity; its tracks are never downloaded one at a time.
+            </>
+          }
+        >
+          <Switch
+            id="quality-whole-albums"
+            checked={ladder.wholeAlbums}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              editLadder((l) => ({ ...l, wholeAlbums: checked }));
+            }}
+          />
+        </Row>
+        {ladder.wholeAlbums && ladder.upgradePolicy !== 'none' ? <AlbumUpgradeActivity /> : null}
+        <Row
           label="Search strategy"
           htmlFor="quality-search-mode"
           help="Source priority uses the first source that has it. Best quality checks every source and takes the best."
@@ -1325,3 +1354,55 @@ export function MusicQualityTab({ store }: SettingsTabProps) {
 
 const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth'];
 const ordinal = (n: number) => ORDINALS[n - 1] ?? `number ${n}`;
+
+interface AlbumUpgradeAttempt {
+  id: number;
+  album_title?: string | null;
+  artist_name?: string | null;
+  outcome: string;
+  source?: string | null;
+  reason?: string | null;
+  created_at?: string;
+}
+
+/** what the whole-album upgrades did lately, newest first */
+export function AlbumUpgradeActivity() {
+  const [attempts, setAttempts] = useState<AlbumUpgradeAttempt[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    call('/api/quality-profile/album-upgrades?limit=5')
+      .then((data) => {
+        if (live) setAttempts((data.attempts as AlbumUpgradeAttempt[] | undefined) ?? []);
+      })
+      .catch(() => {
+        if (live) setAttempts([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!attempts) return null;
+  return (
+    <div className={s.cardPad} data-testid="album-upgrade-activity">
+      <p className={s.fieldNote}>
+        <strong>Recent whole-album upgrades</strong>
+      </p>
+      {attempts.length ? (
+        attempts.map((a) => {
+          const name = [a.artist_name, a.album_title].filter(Boolean).join(' - ') || 'An album';
+          const what =
+            a.outcome === 'upgraded'
+              ? `upgraded${a.source ? ` from ${a.source}` : ''}`
+              : `left as it is: ${a.reason || 'no complete release'}`;
+          return (
+            <p key={a.id} className={s.fieldNote}>
+              {name}, {what}
+            </p>
+          );
+        })
+      ) : (
+        <p className={s.fieldNote}>None yet. Albums are looked at by the hourly reconcile.</p>
+      )}
+    </div>
+  );
+}

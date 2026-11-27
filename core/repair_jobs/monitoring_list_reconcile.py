@@ -34,7 +34,10 @@ class MonitoringListReconcileJob(RepairJob):
         "that found nothing better waits before it is asked for again, and the "
         "wait doubles each time, starting at Upgrade retry days. A search that "
         "found nothing in 12 hours leaves the Wishlist until its next turn. "
-        "Enhance Quality asks for chosen tracks right away."
+        "Enhance Quality asks for chosen tracks right away.\n\n"
+        "A quality profile set to upgrade whole albums gets its albums done "
+        "as one release each instead (Album upgrades per run, in the "
+        "background); an album with no complete release stays as it is."
     )
     icon = "refresh-cw"
     default_enabled = True
@@ -42,8 +45,11 @@ class MonitoringListReconcileJob(RepairJob):
     # upgrades_per_run: owned tracks below their quality profile asked for a
     # better copy each run (0 turns automatic upgrades off);
     # upgrade_retry_days: the first wait before a track is asked for again
+    # album_upgrades_per_run: albums of a whole-album profile handed to the
+    # album upgrade each run (it downloads in the background)
     default_settings = {"batch_size": 500, "keep_done": 500,
-                        "upgrades_per_run": 5, "upgrade_retry_days": 7}
+                        "upgrades_per_run": 5, "upgrade_retry_days": 7,
+                        "album_upgrades_per_run": 1}
     auto_fix = True
 
     def _settings(self, context: JobContext) -> dict:
@@ -58,7 +64,8 @@ class MonitoringListReconcileJob(RepairJob):
             logger.debug("monitoring-list settings lookup failed: %s", exc)
         for key, minimum, maximum in (("batch_size", 1, 5000), ("keep_done", 0, 10000),
                                       ("upgrades_per_run", 0, 500),
-                                      ("upgrade_retry_days", 1, 90)):
+                                      ("upgrade_retry_days", 1, 90),
+                                      ("album_upgrades_per_run", 0, 20)):
             try:
                 settings[key] = max(minimum, min(int(settings[key]), maximum))
             except (TypeError, ValueError):
@@ -133,6 +140,7 @@ class MonitoringListReconcileJob(RepairJob):
                 )
                 result.scanned += int(wishlist_stats["scanned"]) + int(wishlist_stats.get('intent_repaired', 0))
                 result.auto_fixed += int(wishlist_stats["mirrored"]) + int(wishlist_stats.get('intent_repaired', 0))
+                self._queue_album_upgrades(context, settings, profile_id)
 
             with closing(context.db._get_connection()) as conn:
                 prune_done(conn, keep=settings["keep_done"])
@@ -141,6 +149,23 @@ class MonitoringListReconcileJob(RepairJob):
             logger.error("monitoring-list reconcile failed: %s", exc, exc_info=True)
             result.errors += 1
         return result
+
+    @staticmethod
+    def _queue_album_upgrades(context: JobContext, settings: dict, profile_id: int) -> None:
+        """Hand the due whole-album upgrades to the background worker. 0 upgrades
+        per run means no automatic upgrades at all, albums included."""
+        limit = settings.get("album_upgrades_per_run", 0)
+        if not limit or not settings.get("upgrades_per_run"):
+            return
+        try:
+            from core.library2.album_upgrade import pending_album_ids, queue_album_upgrades
+            with closing(context.db._get_connection()) as conn:
+                albums = pending_album_ids(conn, profile_id=profile_id, limit=limit,
+                                           retry_after_days=settings["upgrade_retry_days"])
+            if albums:
+                queue_album_upgrades(context.db, albums, profile_id=profile_id)
+        except Exception as exc:  # noqa: BLE001 - the reconcile itself is done
+            logger.warning("whole-album upgrades could not be queued: %s", exc)
 
 
 __all__ = ["MonitoringListReconcileJob"]

@@ -1381,7 +1381,9 @@ def reconcile_track_wishlist(
                     len(expired), upgrade_attempts.WINDOW_HOURS)
             below_target = [
                 t for t in upgrade_candidate_track_ids(
-                    conn, profile_id=profile_id, definite_only=True)
+                    conn, profile_id=profile_id, definite_only=True,
+                    # whole-album profiles are upgraded album by album
+                    whole_albums=False)
                 if t not in wishlisted_set]
             upgrades = upgrade_attempts.due_tracks(
                 conn, below_target, retry_days=upgrade_retry_days,
