@@ -606,7 +606,7 @@ function LibraryRow({
               Chapter pictures
               <small>
                 A picture for every chapter, made in the background while nobody is watching
-                </small>
+              </small>
             </span>
           </label>
           <label className={s.libCheck}>
