@@ -167,6 +167,7 @@ Quality profiles define which formats are acceptable for downloads, and when a f
 
 - **Quality priority** (first is most preferred; drag a row, or use its ⋯ menu or the arrow keys) — the ranked list of format targets (e.g. FLAC first, then MP3 320); a download source that matches no target is skipped
 - **Upgrade until** — **Any accepted target** stops once a file matches any target; **Selected target or better** keeps replacing lower-quality files until they reach the selected cutoff target or better
+- **Upgrade whole albums** (off by default) — an album with a track below the cutoff is upgraded as one release from one source (a Soulseek folder from one user, a torrent, usenet or Lidarr release, or the album on Qobuz, Tidal or Deezer). Every file is checked first (all your tracks and nothing extra, the same lengths, a clean decode, your cutoff), then the old files are swapped out in one go and go to the deleted-files folder. If no complete album passes, the album stays as it is, the reason shows in the activity feed and under the setting, and its tracks are never downloaded one at a time
 - **Quick presets** — one-click starting points for common quality setups
 
 ![Quality profile settings: the format priority ladder, upgrade rules and quick presets](dl-quality-profiles.jpg)

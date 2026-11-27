@@ -5822,17 +5822,30 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     if track_ids and not direct_track_search else {}
                 search_ids: List[str] = []
                 direct_payloads: List[Dict[str, Any]] = []
+                # tracks a whole-album profile keeps off the per-track path:
+                # their album is upgraded as one release instead
+                whole_albums: set = set()
+
+                def _whole_album(payload):
+                    info = (payload or {}).get("_source_info") or {}
+                    if info.get("quality_evaluation") == "album_upgrade" and info.get("lib2_album_id"):
+                        whole_albums.add(int(info["lib2_album_id"]))
+
                 for track_id in track_ids:
                     if direct_track_search:
                         direct_payload = track_direct_download_payload(conn, track_id)
                         if direct_payload:
                             direct_payloads.append(direct_payload)
+                        else:
+                            _whole_album(track_wishlist_payload(conn, track_id))
                         continue
                     if not states.get(track_id):
                         continue
                     payload = track_wishlist_payload(conn, track_id)
                     if payload and payload.get("_should_queue"):
                         search_ids.append(payload["id"])
+                    else:
+                        _whole_album(payload)
 
                 batch_id = None
                 dispatch_error = None
@@ -5859,13 +5872,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                             entity, eid, dispatch_count, dispatch_error,
                         )
 
-                _job_registry.update(job_id, result={
+                album_upgrades = 0
+                if whole_albums:
+                    from core.library2.album_upgrade import queue_album_upgrades
+                    album_upgrades = queue_album_upgrades(
+                        db, sorted(whole_albums), profile_id=active_profile)
+
+                result = {
                     "checked": len(track_ids),
                     "queued": queued,
                     "searching": dispatch_count,
                     "batch_id": batch_id,
                     "dispatch_error": dispatch_error,
-                })
+                }
+                if album_upgrades:
+                    result["album_upgrades"] = album_upgrades
+                _job_registry.update(job_id, result=result)
             except Exception as e:  # noqa: BLE001
                 logger.error("Scoped search failed (%s %s): %s", entity, eid, e, exc_info=True)
                 _job_registry.update(job_id, error=str(e))

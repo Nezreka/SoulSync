@@ -370,6 +370,7 @@ describe('the values', () => {
       release_import_mode: 'requested_tracks',
       upgrade_policy: 'until_cutoff',
       upgrade_cutoff_index: 1,
+      upgrade_whole_albums: false,
       ranked_targets: DEFAULT.ranked_targets,
       acoustid_required: false,
       downsample_enabled: false,

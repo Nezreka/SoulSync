@@ -3730,6 +3730,10 @@
     },
     "success": true
   },
+  "/api/quality-profile/album-upgrades?limit=5": {
+    "attempts": [],
+    "success": true
+  },
   "/api/quality-profile/custom": {
     "profiles": [
       {
