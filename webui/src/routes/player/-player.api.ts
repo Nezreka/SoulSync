@@ -417,10 +417,18 @@ export type PlayerAccentColor = 'emerald' | 'violet' | 'ocean' | 'amber' | 'rose
 export type CommercialEra = 'auto' | '70s' | '80s' | '90s' | '2000s' | 'kids' | 'mix';
 export type CommercialMode = 'short' | 'cable';
 
+/** what happens at an intro, credits or a recap: a button, skipped on its own, or nothing */
+export type SkipMode = 'ask' | 'auto' | 'never';
+
 export interface PlayerSettings {
   share_activity: boolean;
   autoplay_next: boolean;
   still_watching_after: number;
+  skip_intro?: SkipMode;
+  skip_credits?: SkipMode;
+  skip_recap?: SkipMode;
+  /** the next episode counts down from where the credits start */
+  next_at_credits?: boolean;
   show_movie_ratings: boolean;
   show_tv_episode_count: boolean;
   show_year_on_cards: boolean;

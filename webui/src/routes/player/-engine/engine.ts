@@ -28,7 +28,7 @@ import {
   startEqualPowerCrossfade,
 } from './crossfade';
 import * as Q from './queue';
-import { bookTime, locate, nextChapterStart, previousChapterStart } from './timeline';
+import { bookTime, creditsStart, locate, nextChapterStart, previousChapterStart } from './timeline';
 import { pickAudio, pickSubtitle } from './tracks';
 import { LONG_FORM, MEDIA_KIND } from './types';
 import { parseVtt } from './vtt';
@@ -964,7 +964,14 @@ export class PlayerEngine {
     const duration = this.state.duration;
     if (!item || (item.type !== 'movie' && item.type !== 'episode')) return;
     if (this.state.live && item.type !== 'movie') return;
-    if (!duration || position < duration * WATCHED_AT) return;
+    if (!duration) return;
+    // the credits starting counts as watched, when a marker says where they start
+    const credits = creditsStart(this.state.tracks?.markers);
+    const mark =
+      credits !== null && credits > duration * 0.5
+        ? Math.min(credits, duration * WATCHED_AT)
+        : duration * WATCHED_AT;
+    if (position < mark) return;
     const key = `${item.type}:${item.id}`;
     if (this.state.watchedKey === key) return;
     this.set({ watchedKey: key });
@@ -1009,6 +1016,16 @@ export class PlayerEngine {
     if (to === null) return;
     this.set({ queue: Q.goTo(this.state.queue, to) });
     void this.load({ live: this.state.live });
+  }
+
+  /**
+   * the credits' up-next ran out: on to the next one as if this had ended,
+   * with the same autoplay and "still watching?" rules
+   */
+  finishAtCredits() {
+    if (this.state.kind !== 'video' || this.state.status === 'ended') return;
+    this.checkWatched(this.state.duration);
+    this.onEnded();
   }
 
   private onEnded() {

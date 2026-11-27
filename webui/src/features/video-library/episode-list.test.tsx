@@ -983,6 +983,7 @@ describe('managing a whole season', () => {
       'Clear failures',
       'Rename files…',
       'Renumber episodes…',
+      'Find intros now',
       'Delete files…',
     ]);
   });

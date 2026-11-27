@@ -6,6 +6,9 @@ import {
   clock,
   locate,
   nextChapterStart,
+  creditsStart,
+  markerAt,
+  type Marker,
   previousChapterStart,
   skippableAt,
 } from './timeline';
@@ -55,11 +58,17 @@ describe("skip intro, from the file's own chapter names", () => {
   ];
 
   it('offers the skip while that chapter plays, to where the next one starts', () => {
-    expect(skippableAt(chapters, 5, 1400)).toEqual({ kind: 'recap', label: 'Skip recap', to: 40 });
+    expect(skippableAt(chapters, 5, 1400)).toEqual({
+      kind: 'recap',
+      label: 'Skip recap',
+      to: 40,
+      from: 0,
+    });
     expect(skippableAt(chapters, 60, 1400)).toEqual({
       kind: 'intro',
       label: 'Skip intro',
       to: 130,
+      from: 40,
     });
     expect(skippableAt(chapters, 500, 1400)).toBeNull();
   });
@@ -69,6 +78,7 @@ describe("skip intro, from the file's own chapter names", () => {
       kind: 'credits',
       label: 'Skip credits',
       to: 1400,
+      from: 1300,
     });
   });
 
@@ -109,5 +119,55 @@ describe("skip intro, from the file's own chapter names", () => {
       )?.kind,
     ).toBe('intro');
     expect(skippableAt([], 5, 500)).toBeNull();
+  });
+});
+
+describe('skip markers from the server', () => {
+  const markers: Marker[] = [
+    { kind: 'recap', start: 0, end: 42.5, source: 'detected' },
+    { kind: 'intro', start: 61.25, end: 151, source: 'user', label: 'Skip intro' },
+    {
+      kind: 'credits',
+      start: 1300,
+      end: 1380,
+      source: 'detected',
+      post_credits: { start: 1380, end: 1400 },
+    },
+    { kind: 'commercial', start: 700, end: 760, source: 'sidecar' },
+  ];
+
+  it('the server markers win over chapter names', () => {
+    const chapters = [
+      { start: 0, title: 'Intro' },
+      { start: 90, title: 'Part One' },
+    ];
+    expect(skippableAt(chapters, 70, 1400, markers)).toEqual({
+      kind: 'intro',
+      label: 'Skip intro',
+      to: 151,
+      from: 61.25,
+      postCredits: null,
+    });
+    // a chapter "Intro" doesn't count when the server knows better
+    expect(skippableAt(chapters, 10, 1400, markers)?.kind).toBe('recap');
+    expect(skippableAt(chapters, 55, 1400, markers)).toBeNull();
+  });
+
+  it('shows half a second early, so a seek onto the edge still gets it', () => {
+    expect(skippableAt([], 60.9, 1400, markers)?.kind).toBe('intro');
+    expect(skippableAt([], 60.5, 1400, markers)).toBeNull();
+  });
+
+  it('credits skip to the scene after them, with the hint', () => {
+    const s = skippableAt([], 1310, 1400, markers);
+    expect(s?.to).toBe(1380);
+    expect(s?.postCredits).toEqual({ start: 1380, end: 1400 });
+    expect(creditsStart(markers)).toBe(1300);
+    expect(creditsStart([])).toBeNull();
+  });
+
+  it('a commercial span is no skip button, and nothing in the last two seconds', () => {
+    expect(markerAt(markers, 720)).toBeNull();
+    expect(skippableAt([], 149.5, 1400, markers)).toBeNull();
   });
 });

@@ -35,6 +35,7 @@ OPTED_IN = {
     "player_stream.transcode": A.PLAYBACK,
     "player_stream.transcode_start": A.PLAYBACK,
     "player_tracks.tracks": A.PLAYBACK,
+    "player_tracks.markers": A.PLAYBACK,
     "player_tracks.subtitle": A.PLAYBACK,
     "player_tracks.lyrics": A.PLAYBACK,
     # the info sheet (api/player_info.py): what the app shows under "Info"

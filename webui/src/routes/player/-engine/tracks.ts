@@ -6,6 +6,8 @@
  * on their own, the way a disc player does.
  */
 
+import type { Marker } from './timeline';
+
 export interface AudioTrack {
   index: number;
   language: string | null;
@@ -34,6 +36,8 @@ export interface Tracks {
   subtitles: SubtitleTrack[];
   /** the file's own chapter marks (a video with fewer than two has none) */
   chapters?: { start: number; end?: number | null; title: string }[];
+  /** intro, credits and recap spans, the best source of each (server side) */
+  markers?: Marker[];
 }
 
 /** 'off', or a language code ('en', 'eng'); null: never picked */

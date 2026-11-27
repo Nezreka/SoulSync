@@ -69,6 +69,7 @@ import {
   TitleHistoryDialog,
   UndoToast,
 } from './manage-dialogs';
+import { MarkersPanel } from './markers-editor';
 import s from './video-library.module.css';
 
 /** the page's own flows, which the tab borrows instead of re-implementing. */
@@ -981,6 +982,10 @@ function MovieView({
         </div>
         <FileCards files={data.files} actions={actions} label="File" />
       </section>
+
+      {data.files.length ? (
+        <MarkersPanel kind="movie" itemId={data.id} canManage={data.can_manage} />
+      ) : null}
 
       <Extras kind="movie" id={data.id} extras={data.extras} />
 

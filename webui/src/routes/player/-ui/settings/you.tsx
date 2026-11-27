@@ -21,7 +21,7 @@ import {
   useSmartGapless,
 } from '../../-engine/crossfade';
 import { QUALITIES, type Quality } from '../../-engine/engine';
-import { playerSettingsQuery, type PlayerAccentColor } from '../../-player.api';
+import { playerSettingsQuery, type PlayerAccentColor, type SkipMode } from '../../-player.api';
 import { ChevronIcon, HomeIcon } from '../icons';
 import { styles as k } from '../kit';
 import { QUALITY_LABELS } from '../playback/controls';
@@ -45,6 +45,32 @@ import { useTrailersSetting } from '../trailer';
 import { Card, Choices, Row, SaveError, Switch, useSaved, useSavePlayerSettings } from './kit';
 import p from './settings.module.css';
 
+const SKIP_CHOICES: { value: SkipMode; label: string }[] = [
+  { value: 'ask', label: 'Ask' },
+  { value: 'auto', label: 'Automatically' },
+  { value: 'never', label: 'Never' },
+];
+const SKIP_ROWS: {
+  key: 'skip_intro' | 'skip_credits' | 'skip_recap';
+  label: string;
+  help: string;
+}[] = [
+  {
+    key: 'skip_intro',
+    label: 'Skip intros',
+    help: 'Ask shows a Skip intro button. Automatically skips after a short countdown, with a way back; the first episode you start still plays its intro once.',
+  },
+  {
+    key: 'skip_credits',
+    label: 'Skip credits',
+    help: 'Automatically jumps past them, to a scene after the credits when there is one.',
+  },
+  {
+    key: 'skip_recap',
+    label: 'Skip recaps',
+    help: 'The "previously on" at the start of an episode.',
+  },
+];
 const ASK_AFTER = [0, 2, 3, 4, 5, 8].map((n) => ({
   value: n,
   label: n === 0 ? 'Never' : `${n} eps`,
@@ -92,6 +118,28 @@ export function PlaybackSection() {
           onChange={(v) => save.mutate({ autoplay_next: v })}
         />
       </Row>
+      <Row
+        label="Play next episode at credits"
+        help="Up next counts down when the credits start, not in the last seconds. A scene after the credits holds it."
+      >
+        <Switch
+          label="Play next episode at credits"
+          on={mine?.next_at_credits ?? true}
+          busy={busy}
+          onChange={(v) => save.mutate({ next_at_credits: v })}
+        />
+      </Row>
+      {SKIP_ROWS.map((row) => (
+        <Row key={row.key} stacked label={row.label} help={row.help}>
+          <Choices
+            label={row.label}
+            options={SKIP_CHOICES}
+            value={mine?.[row.key] ?? 'ask'}
+            disabled={busy}
+            onPick={(v) => save.mutate({ [row.key]: v })}
+          />
+        </Row>
+      ))}
       <Row
         stacked
         label="Still watching check"

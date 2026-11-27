@@ -105,7 +105,13 @@ def normalize_options(raw: Any) -> Dict[str, Any]:
       default; off = only a search you start, Radarr's monitored-but-no-
       automatic-search)
     - upgrades: its titles you already have keep being upgraded toward
-      their profile's cutoff (on by default)"""
+      their profile's cutoff (on by default)
+    - markers: the marker job finds its intros and credits (on by default)
+    - markers_recaps: it finds recaps too, which reads the previous
+      episode's whole soundtrack once (off by default)
+    - markers_write: the markers are also written next to each video as a
+      Kodi .edl file (on for a new library; a library from before v79 was
+      switched off by the migration)"""
     raw = raw if isinstance(raw, dict) else {}
     rules = raw.get("rules") if isinstance(raw.get("rules"), dict) else {}
     sources = []
@@ -121,7 +127,10 @@ def normalize_options(raw: Any) -> Dict[str, Any]:
             "usenet_category": _category(raw.get("usenet_category")),
             "indexer_ids": _indexer_ids(raw.get("indexer_ids")),
             "auto_search": _flag(raw.get("auto_search")),
-            "upgrades": _flag(raw.get("upgrades"))}
+            "upgrades": _flag(raw.get("upgrades")),
+            "markers": _flag(raw.get("markers")),
+            "markers_recaps": _on(raw.get("markers_recaps")),
+            "markers_write": _flag(raw.get("markers_write"))}
 
 
 def _flag(value: Any) -> bool:
@@ -246,7 +255,8 @@ def _check_path(db, path: Any, *, skip_id: Optional[int] = None) -> str:
 
 # a library's options, settable at the top of a create / update body too
 _OPTION_KEYS = ("rules", "quality_profile_id", "sources", "torrent_category", "usenet_category",
-                "indexer_ids", "auto_search", "upgrades")
+                "indexer_ids", "auto_search", "upgrades", "markers", "markers_recaps",
+                "markers_write")
 
 
 def _check_profile(db, profile_id: int) -> None:

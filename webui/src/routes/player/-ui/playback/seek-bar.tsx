@@ -4,14 +4,16 @@
  * pointer, drag to scrub (the position only moves when you let go), and
  * the arrow keys as a slider (5 seconds, page up/down a minute). marks
  * (moments someone noted) sit on it as pins: near one, the hint reads its
- * note; let go on one and it lands right on it.
+ * note; let go on one and it lands right on it. skip markers (intro,
+ * recap, credits) are quiet bands on the rail, named in the hint.
  */
 
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 
+import type { Marker } from '../../-engine/timeline';
 import type { Chapter } from '../../-engine/types';
 
-import { chapterAt, clock } from '../../-engine/timeline';
+import { chapterAt, clock, markerAt } from '../../-engine/timeline';
 import s from './playback.module.css';
 
 export interface SeekMark {
@@ -35,6 +37,7 @@ export function SeekBar({
   onSeek,
   size = 'small',
   marks = [],
+  spans = [],
 }: {
   position: number;
   duration: number;
@@ -43,6 +46,8 @@ export function SeekBar({
   onSeek: (seconds: number) => void;
   size?: 'small' | 'large';
   marks?: readonly SeekMark[];
+  /** skip markers, drawn as bands */
+  spans?: readonly Marker[];
 }) {
   const track = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -97,6 +102,13 @@ export function SeekBar({
   const hint = hover ?? drag;
   const hintChapter = hint !== null && chapters.length ? chapters[chapterAt(chapters, hint)] : null;
   const hintPin = pinNear(hint);
+  const hintSpan = hint !== null && spans.length ? markerAt(spans, hint) : null;
+  const SPAN_NAMES: Record<string, string> = {
+    intro: 'Intro',
+    recap: 'Recap',
+    credits: 'Credits',
+    preview: 'Preview',
+  };
 
   return (
     <div className={s.seek} data-size={size}>
@@ -122,6 +134,21 @@ export function SeekBar({
         <span className={s.seekRail}>
           <span className={s.seekBuffered} style={{ width: pct(buffered) }} />
           <span className={s.seekPlayed} style={{ width: pct(shown) }} />
+          {known
+            ? spans
+                .filter((m) => m.kind !== 'commercial')
+                .map((m) => (
+                  <span
+                    key={`${m.kind}:${m.start}`}
+                    className={s.seekSpan}
+                    data-kind={m.kind}
+                    style={{
+                      left: pct(m.start),
+                      width: `${Math.max(0.2, ((Math.min(m.end, duration) - m.start) / duration) * 100)}%`,
+                    }}
+                  />
+                ))
+            : null}
           {known
             ? chapters
                 .slice(1)
@@ -154,6 +181,8 @@ export function SeekBar({
                 <span className={s.seekHintWho}>{hintPin.who}</span>
                 {hintPin.label ? <span>{hintPin.label}</span> : null}
               </span>
+            ) : hintSpan && SPAN_NAMES[hintSpan.kind] ? (
+              <span className={s.seekHintChapter}>{SPAN_NAMES[hintSpan.kind]}</span>
             ) : hintChapter?.title ? (
               <span className={s.seekHintChapter}>{hintChapter.title}</span>
             ) : null}
