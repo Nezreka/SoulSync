@@ -192,7 +192,7 @@ def test_playable_says_how_and_never_where(client):
     took = body.pop("took_ms")
     assert isinstance(took, int) and took >= 0
     assert body == {"success": True, "mode": "stream", "mime": "audio/flac", "duration": 200.0,
-                    "url": "/api/player/stream/track/file", "via": "disk"}
+                    "url": "/api/player/stream/track/file", "via": "disk", "loudness": None}
     relayed = client.get("/api/player/playable/movie/relay?part=11").get_json()
     assert relayed["url"] == "/api/player/stream/movie/relay?part=11"
     # codecs unknown ('maybe'): it plays as it is, the converted stream kept as the fallback

@@ -20,6 +20,7 @@ import { appURL } from '@/platform/url-base';
 import type { PlayerState } from '../../-engine/engine';
 
 import { screenId } from '../../-engine/browser';
+import { levelPrefsFrom } from '../../-engine/loudness';
 import { playerSettingsQuery } from '../../-player.api';
 import { showServerOrder } from './server-orders';
 import { currentChannel } from './tuner';
@@ -130,11 +131,13 @@ export function usePlayerSync() {
 
   useEffect(() => {
     const s = settings.data?.settings;
-    if (s)
+    if (s) {
       getEngine().configure({
         autoplayNext: s.autoplay_next,
         stillWatchingAfter: s.still_watching_after,
       });
+      getEngine().configureLevelling(levelPrefsFrom(s));
+    }
   }, [settings.data]);
 
   const key = state.item ? `${state.item.type}:${state.item.id}` : null;

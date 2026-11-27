@@ -9,11 +9,12 @@ import { apiClient } from '@/app/api-client';
 import { appURL } from '@/platform/url-base';
 
 import type { EngineDeps, Playable, Quality, SavedPosition, TrackPick } from './engine';
+import type { Loudness } from './loudness';
 import type { Tracks } from './tracks';
 import type { MediaKind, PlayItem } from './types';
 
 import { progressPayload } from '../-lib/progress';
-import { getCachedTrackBlobUrl } from './crossfade';
+import { getCachedTrackBlobUrl, getCachedTrackLoudness } from './crossfade';
 
 const STORE_PREFIX = 'ss-player:';
 const PLAYABLE_TIMEOUT_MS = 90_000;
@@ -54,7 +55,10 @@ async function playable(item: PlayItem, quality: Quality, pick: TrackPick): Prom
   if (item.type === 'track') {
     const cachedBlob = getCachedTrackBlobUrl(item.id);
     if (cachedBlob) {
-      return { url: cachedBlob, duration: item.duration ?? null, via: 'cache' };
+      // its loudness came with its bytes; a song that came without asks for it
+      const loudness =
+        getCachedTrackLoudness(item.id) ?? (await trackLoudness(item.id).catch(() => null));
+      return { url: cachedBlob, duration: item.duration ?? null, via: 'cache', loudness };
     }
   }
   if (item.type === 'podcast_episode') {
@@ -89,6 +93,15 @@ async function playable(item: PlayItem, quality: Quality, pick: TrackPick): Prom
     url: tagScreen(appURL(body.url)),
     fallback_url: body.fallback_url ? tagScreen(appURL(body.fallback_url)) : undefined,
   } as Playable;
+}
+
+/** one song's loudness (for a song played from the pre-cache) */
+async function trackLoudness(id: string): Promise<Loudness | null> {
+  if (!/^\d+$/.test(id)) return null;
+  const body = await apiClient
+    .get('player/loudness', { searchParams: { ids: id }, timeout: 5_000 })
+    .json<{ tracks?: Record<string, Loudness | null> }>();
+  return body.tracks?.[id] ?? null;
 }
 
 async function progress(item: PlayItem): Promise<SavedPosition | null> {
@@ -203,40 +216,64 @@ const store = {
 };
 
 /**
- * past full volume: the element's sound through a web audio gain. made the
- * first time it's needed (a person turning it up, so the audio context may
- * start) and kept, since an element can be wired to only one.
+ * the elements' web audio. one context for the page (a browser allows only
+ * a few), and per element: source -> level (volume levelling) -> gain
+ * (volume past full) -> speakers, with an analyser on the side (what the
+ * music visuals read). made once per element, the first time something
+ * needs it: an element can be wired to only one.
  */
 interface Graph {
   ctx: AudioContext;
+  level: GainNode;
   gain: GainNode;
   analyser: AnalyserNode;
 }
 const graphs = new WeakMap<HTMLMediaElement, Graph>();
+let sharedCtx: AudioContext | null = null;
+
+/** levelling ramps: a change while playing glides over this time constant (s) */
+const LEVEL_RAMP = 0.12;
+
+function context(): AudioContext | null {
+  if (sharedCtx) return sharedCtx;
+  if (typeof AudioContext === 'undefined') return null;
+  try {
+    sharedCtx = new AudioContext();
+    return sharedCtx;
+  } catch {
+    return null;
+  }
+}
 
 /**
- * an element's web audio: source, gain (volume past full), and an analyser
- * on the side (what the music visuals read). made once per element, the
- * first time something needs it: an element can be wired to only one.
- * made from a click (turning it up, opening the music view), so the audio
- * context is allowed to start.
+ * may an element be wired now? once wired its sound goes only through the
+ * context, and a context the browser won't start plays nothing. so not
+ * before the page has had a click (autoplay rules), unless it's running.
  */
+function mayWire(ctx: AudioContext): boolean {
+  if (ctx.state === 'running') return true;
+  const ua = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } })
+    .userActivation;
+  return ua ? ua.hasBeenActive : true;
+}
+
 function graph(el: HTMLMediaElement): Graph | null {
   const have = graphs.get(el);
   if (have) {
     if (have.ctx.state === 'suspended') void have.ctx.resume();
     return have;
   }
-  if (typeof AudioContext === 'undefined') return null;
+  const ctx = context();
+  if (!ctx || !mayWire(ctx)) return null;
   try {
-    const ctx = new AudioContext();
+    const level = ctx.createGain();
     const gain = ctx.createGain();
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.6;
-    ctx.createMediaElementSource(el).connect(gain).connect(ctx.destination);
+    ctx.createMediaElementSource(el).connect(level).connect(gain).connect(ctx.destination);
     gain.connect(analyser);
-    const made = { ctx, gain, analyser };
+    const made = { ctx, level, gain, analyser };
     graphs.set(el, made);
     if (ctx.state === 'suspended') void ctx.resume();
     // a context the browser held back plays nothing: start it on the next play
@@ -253,6 +290,58 @@ function boost(el: HTMLMediaElement, gain: number) {
   if (gain <= 1 && !graphs.has(el)) return;
   const g = graph(el);
   if (g) g.gain.gain.value = gain;
+}
+
+/** set a gain: at once (nothing is playing through it yet), or a glide */
+function setGain(node: GainNode, ctx: AudioContext, value: number, instant: boolean) {
+  const p = node.gain;
+  const now = ctx.currentTime;
+  p.cancelScheduledValues(now);
+  if (instant || ctx.state !== 'running') {
+    p.setValueAtTime(value, now);
+  } else {
+    p.setValueAtTime(p.value, now);
+    p.setTargetAtTime(value, now, LEVEL_RAMP);
+  }
+}
+
+/**
+ * volume levelling on an element, through web audio. false when it can't
+ * be (no web audio yet): the engine levels with the element's own volume
+ * then, which can turn down but never up.
+ */
+function level(el: HTMLMediaElement, linear: number, instant: boolean): boolean {
+  if (linear === 1 && !graphs.has(el)) return false;
+  const g = graph(el);
+  if (!g) return false;
+  setGain(g.level, g.ctx, linear, instant);
+  return true;
+}
+
+/**
+ * a crossfade's outgoing copy, levelled like the song it continues. wired
+ * for the fade only: the returned function lets it go
+ */
+function levelDetached(el: HTMLMediaElement, linear: number): (() => void) | null {
+  if (linear <= 1) return null; // turning down: the element's own volume does it
+  const ctx = context();
+  if (!ctx || ctx.state !== 'running') return null;
+  try {
+    const source = ctx.createMediaElementSource(el);
+    const gain = ctx.createGain();
+    gain.gain.value = linear;
+    source.connect(gain).connect(ctx.destination);
+    return () => {
+      try {
+        source.disconnect();
+        gain.disconnect();
+      } catch {
+        /* already gone */
+      }
+    };
+  } catch {
+    return null;
+  }
 }
 
 function analyser(el: HTMLMediaElement): AnalyserNode | null {
@@ -291,6 +380,8 @@ export function browserDeps(): EngineDeps {
     progress,
     transcodeStart,
     boost,
+    level,
+    levelDetached,
     analyser,
     tracks,
     subtitle,

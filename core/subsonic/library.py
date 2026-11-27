@@ -327,6 +327,22 @@ def forget_snapshots() -> None:
         _snapshots.clear()
 
 
+def replay_gain(loud: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """OpenSubsonic's replayGain for a song: trackGain/albumGain in dB,
+    trackPeak/albumPeak linear, baseGain 0 (an opus file's header gain is
+    already in what the decoder plays, and our gains are measured after it).
+    gains are the file's own (the same numbers its tags carry), relative to
+    the library's ReplayGain reference, as every other server sends them."""
+    if not loud:
+        return None
+    out: Dict[str, Any] = {"baseGain": 0.0}
+    for key, name in (("track_gain", "trackGain"), ("album_gain", "albumGain"),
+                      ("track_peak", "trackPeak"), ("album_peak", "albumPeak")):
+        if loud.get(key) is not None:
+            out[name] = float(loud[key])
+    return out if len(out) > 1 else None
+
+
 # ── rows ─────────────────────────────────────────────────────────────────
 
 class Library:
@@ -376,6 +392,14 @@ class Library:
                  WHERE t.id IN (SELECT value FROM json_each(:ids)) AND {owned_track_sql('t')}{self._hidden()}""",
             {"ids": json.dumps(ids)}).fetchall()
         by = {int(r["id"]): dict(r) for r in rows}
+        # each song's ReplayGain, for clients that level (OpenSubsonic replayGain)
+        try:
+            from core import loudness
+            gains = loudness.for_files(self.conn, [r["file_id"] for r in by.values() if r.get("file_id")])
+        except Exception:  # noqa: BLE001 - a song without gains still plays
+            gains = {}
+        for r in by.values():
+            r["loudness"] = gains.get(r.get("file_id"))
         seen, out = set(), []
         for i in ids:
             if i in by and i not in seen:
@@ -424,6 +448,9 @@ class Library:
             "starred": self.starred.get((TRACK, tid)),
             "userRating": self.ratings.get((TRACK, tid)),
         }
+        gain = replay_gain(r.get("loudness"))
+        if gain:
+            out["replayGain"] = gain
         if self.bridge is not None:
             marker = self.bridge(r.get("file_source"), path)
             if marker:

@@ -1696,6 +1696,10 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
     # what each file that imported without a match most likely is
     from core.library2.unmatched_identify import ensure_unmatched_match_schema
     ensure_unmatched_match_schema(cursor)
+    # each file's loudness, measured when its tags have none (the players
+    # level with it). additive, rebuildable from the files
+    from core.loudness import ensure_schema as ensure_loudness_schema
+    ensure_loudness_schema(cursor)
     # #2229: no artist row keeps a provider's "Various Artists" id
     try:
         from core.library2.various_artists_guard import ensure_various_artists_guard

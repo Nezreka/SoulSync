@@ -127,7 +127,42 @@ def playable(item_type, item_id):
     if item_type in VIDEO_TYPES:
         _offer_transcode(out, source, item_type, item_id, part, request.args.get("q") or "original",
                          _int_arg("audio") or 0, _int_arg("burn"), _int_arg("delay") or 0)
+    # how loud it is, so the player can level it (null: not known yet)
+    if item_type == "track":
+        out["loudness"] = _track_loudness(source, bump=True)
+    elif item_type in VIDEO_TYPES:
+        out["loudness"] = _video_loudness(source)
     return jsonify({"success": True, **out})
+
+
+def _track_loudness(source, bump=False):
+    """a track file's gains and peaks (core/loudness.public), or None. a
+    song with none is measured next in the background (bump)"""
+    file_id = source.private.get("file_id")
+    if file_id is None:
+        return None
+    try:
+        from core import loudness
+        from database.music_database import get_database
+        with get_database()._get_connection() as conn:
+            loud = loudness.for_file(conn, file_id, source.path if source.mode == "file" else None)
+            if loud is None and bump:
+                from core.library2.loudness_worker import bump_track
+                bump_track(conn, source.private.get("track_id"), file_id)
+        return loud
+    except Exception:  # noqa: BLE001 - levelling is a nicety: the song plays regardless
+        logger.debug("loudness lookup failed for file %s", file_id, exc_info=True)
+        return None
+
+
+def _video_loudness(source):
+    """a video file's measured loudness (core/video/loudness), or None"""
+    try:
+        from core.video import loudness as VL
+        return VL.for_source(source)
+    except Exception:  # noqa: BLE001
+        logger.debug("video loudness lookup failed", exc_info=True)
+        return None
 
 
 def _offer_transcode(out, source, item_type, item_id, part, quality, audio=0, burn=None, delay_ms=0):
@@ -185,7 +220,13 @@ def stream(item_type, item_id):
     if source.mode == "file":
         try:
             # conditional: Range requests get 206, so the player can seek
-            return send_file(source.path, mimetype=source.mime, conditional=True, as_attachment=False)
+            resp = send_file(source.path, mimetype=source.mime, conditional=True, as_attachment=False)
+            if item_type == "track" and not request.headers.get("Range"):
+                # a whole song fetched ahead (the web player's pre-cache) carries
+                # its loudness, so it's levelled without asking again
+                from core.loudness import headers as loudness_headers
+                resp.headers.update(loudness_headers(_track_loudness(source)))
+            return resp
         except OSError:
             logger.exception("stream couldn't open %s", source.path)
             return jsonify({"success": False, "error": "no_file", "message": "That file couldn't be opened."}), 404

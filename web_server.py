@@ -23546,6 +23546,15 @@ except Exception as e:
     logger.error(f"Repair worker initialization failed: {e}")
     repair_worker = None
 
+# songs whose tags carry no ReplayGain are measured in the background, so the
+# players can level every song (core/library2/loudness_worker.py)
+try:
+    from database.music_database import MusicDatabase
+    from core.library2.loudness_worker import start_worker as _start_loudness_worker
+    _start_loudness_worker(MusicDatabase(), config_manager)
+except Exception as e:
+    logger.error(f"Loudness worker initialization failed: {e}")
+
 # Deezer sign-in events ('Deezer Sign-in Failed' / 'Restored' triggers): the
 # download client sends them itself once it knows where to.
 if automation_engine is not None and download_orchestrator is not None:

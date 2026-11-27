@@ -11,6 +11,7 @@ whether a browser can play it as it is.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Optional
 
 from core.player.playable import Refused, Source
@@ -85,7 +86,9 @@ def locate(kind: str, item_id: str, part: Any = None) -> Source:
                                           "dynamic_range": f["dynamic_range"],
                                           "runtime_seconds": f["runtime"]}}
     private = {"video_codec": f["video_codec"], "audio_codec": f["audio_codec"],
-               "height": f["height"], "dynamic_range": f["dynamic_range"]}
+               "height": f["height"], "dynamic_range": f["dynamic_range"],
+               # its loudness is kept by file name + size (core/video/loudness)
+               "file_name": re.split(r"[\\/]", str(f["path"] or ""))[-1], "size_bytes": f["size"]}
     duration = float(f["runtime"]) if f["runtime"] else None
     local = resolve_video_file_path(f["path"], video_base_dirs(db), size_bytes=f["size"])
     if local:

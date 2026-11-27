@@ -170,6 +170,27 @@ Add tracks to the queue from the Enhanced Library Manager or download results. M
 `
         },
         {
+            id: 'player-levelling',
+            title: 'Volume Levelling',
+            lede: 'Every song at the same loudness, without flattening albums.',
+            body: `
+The player at \`/player\` levels songs with the ReplayGain SoulSync already measures and writes on import. Set it in the player's **Settings, You, Music** (saved with your profile, so every screen and the Android app follow):
+
+- **Off**: songs play as they were mastered.
+- **Track**: every song at the same loudness.
+- **Album**: each album at the same loudness, its quiet and loud songs kept as the artist made them.
+- **Smart** (the default): album levelling while an album plays in order, song levelling on shuffle, playlists and mixes. An album run inside a playlist counts as an album.
+
+**Target loudness** is where levelled songs land (Standard is -18 LUFS, the ReplayGain reference; Loud matches streaming apps). **Pre-amp** adds or takes a little on top. **Prevent clipping** never turns a song up past the point its loudest moment would distort.
+
+A song whose file has no ReplayGain is measured in the background (one at a time, lowest priority; a scan or sync pauses it), and straight away the first time it's played. Until then it plays a little quieter rather than louder than the rest. Nothing is written into your files: use the ReplayGain Filler or the library page's ReplayGain buttons for that.
+
+**Level video loudness** does the same for films and videos: the video Loudness maintenance job measures each file's main audio in the background, and very quiet or very loud videos play at one level.
+
+Opus files get their gain as R128 tags (RFC 7845), which Opus players read; older REPLAYGAIN tags in Opus files are still read. Subsonic apps (Symfonium, Feishin and others) get the same gains. Stats for nerds shows the level applied to what's playing. Levelling is off while casting: the TV plays the file as it is.
+`
+        },
+        {
             id: 'player-shortcuts',
             title: 'Keyboard Shortcuts',
             lede: 'Control playback without touching the mouse.',

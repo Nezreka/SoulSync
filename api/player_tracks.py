@@ -259,3 +259,28 @@ def lyrics(track_id):
         logger.exception("player lyrics failed for track %s", track_id)
         return jsonify({"success": False, "error": "failed", "message": "Couldn't get the lyrics."}), 500
     return jsonify(out), status
+
+
+@bp.route("/api/player/loudness", methods=["GET"])
+@requires_any("music.access")
+@device_playback
+def loudness():
+    """?ids=1,2,3 (library track ids, up to 500): each one's gains and peaks
+    for the file the player would play, null when not known yet. for a
+    client levelling a queue it fetched ahead (Android, a pre-cache)."""
+    from core import loudness as L
+    from database.music_database import get_database
+    raw = (request.args.get("ids") or "").split(",")
+    ids = []
+    for part in raw:
+        part = part.strip()
+        if part.isdigit():
+            ids.append(int(part))
+    if not ids:
+        return jsonify({"success": False, "error": "bad_ids", "message": "Pass ids=1,2,3."}), 400
+    if len(ids) > 500:
+        return jsonify({"success": False, "error": "too_many", "message": "At most 500 ids at once."}), 400
+    with get_database()._get_connection() as conn:
+        found = L.for_tracks(conn, ids)
+    return jsonify({"success": True, "reference_lufs": L.reference_lufs(),
+                    "tracks": {str(k): v for k, v in found.items()}})

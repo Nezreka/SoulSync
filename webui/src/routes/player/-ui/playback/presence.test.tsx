@@ -36,6 +36,7 @@ const engineState = {
 const engine = {
   getState: () => ({ ...engineState }),
   configure: vi.fn(),
+  configureLevelling: vi.fn(),
   stop: vi.fn(() => {
     engineState.item = null;
     engineState.status = 'idle';

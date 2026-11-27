@@ -68,6 +68,19 @@ function useLive(el: HTMLVideoElement | null, position: number, offset: number):
   return live;
 }
 
+const LEVEL_BASIS: Record<NonNullable<PlayerState['level']>['basis'], string> = {
+  track: 'song gain',
+  album: 'album gain',
+  estimate: 'not measured yet',
+  video: 'video loudness',
+};
+
+function levelLabel(level: PlayerState['level']): string {
+  if (!level) return 'Off';
+  const db = `${level.db > 0 ? '+' : ''}${level.db.toFixed(1)} dB`;
+  return `${db} · ${LEVEL_BASIS[level.basis]}`;
+}
+
 export function StatsOverlay({
   state,
   video,
@@ -144,6 +157,7 @@ export function StatsOverlay({
     ['Position', `${clock(state.position)} / ${clock(state.duration)}`],
     ['Speed', `${state.rate}x`],
     ['Volume', state.muted ? 'Muted' : `${Math.round(state.volume * 100)}%`],
+    ['Volume levelling', levelLabel(state.level)],
     ['Player', `${state.status}${state.phase ? ` · ${state.phase}` : ''}`],
     [
       'Browser',

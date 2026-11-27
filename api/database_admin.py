@@ -377,8 +377,13 @@ def _background_workers():
         'deezer': _deezer_worker(), 'audiodb': _audiodb_worker(), 'discogs': _discogs_worker(), 'lastfm': _lastfm_worker(),
         'genius': _genius_worker(), 'tidal': _tidal_enrichment_worker(), 'qobuz': _qobuz_enrichment_worker(),
         'amazon': _amazon_worker(), 'repair': _repair_worker(), 'soulid': _soulid_worker(), 'jiosaavn': _jiosaavn_worker(),
-        'bandcamp': _bandcamp_worker(),
+        'bandcamp': _bandcamp_worker(), 'loudness': _loudness_worker(),
     }
+
+
+def _loudness_worker():
+    from core.library2.loudness_worker import get_worker
+    return get_worker()
 
 
 # a playlist sync takes the same hold (core/discovery/sync.py), so the two

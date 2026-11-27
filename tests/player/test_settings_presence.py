@@ -62,6 +62,11 @@ def test_settings_default_then_save_per_profile(db):
         "commercials_enabled": False,
         "commercials_era": "auto",
         "commercials_mode": "cable",
+        "loudness_mode": "smart",
+        "loudness_target": -18.0,
+        "loudness_preamp": 0.0,
+        "loudness_prevent_clipping": True,
+        "video_loudness": False,
         "sidebar_order": [],
         "sidebar_hidden": [],
     }

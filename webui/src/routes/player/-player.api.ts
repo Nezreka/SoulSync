@@ -442,6 +442,16 @@ export interface PlayerSettings {
   sidebar_order?: string[];
   /** places left out of the sidebar */
   sidebar_hidden?: string[];
+  /** volume levelling for music (smart: album gain while an album plays in order) */
+  loudness_mode?: 'off' | 'track' | 'album' | 'smart';
+  /** the loudness levelled music plays at, LUFS */
+  loudness_target?: number;
+  /** dB on top of levelling */
+  loudness_preamp?: number;
+  /** never turn a song up past where its peak distorts */
+  loudness_prevent_clipping?: boolean;
+  /** level very quiet or very loud videos */
+  video_loudness?: boolean;
 }
 
 export interface CommercialClip {
