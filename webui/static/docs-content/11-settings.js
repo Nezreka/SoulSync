@@ -209,7 +209,7 @@ The API pill has three more cards, each a switch that is off by default:
 
 - **MCP for AI clients** answers at \`/mcp\`, so Claude and other AI apps can drive SoulSync with one of these keys. See [MCP for AI clients](#api-mcp).
 - **Lidarr compatible API** answers at \`/lidarr\`, so request apps that only speak Lidarr can use SoulSync. Pick which profile's wishlist their requests land on. See [Lidarr compatible API](#api-lidarr).
-- **Seerr compatible API** answers at \`/seerr\`, so Seerr apps like Litefin can browse and request movies and shows. Pick the profile Jellyfin users with no profile of their own request as. See [Seerr compatible API](#api-seerr).
+- **Seerr compatible API** answers at \`/seerr\`, so Seerr apps like Litefin can browse and request movies and shows. Pick the profile Jellyfin users with no profile of their own request as. With Seerr in front of SoulSync instead of Radarr and Sonarr, add **Your Seerr URL** and its **Seerr API key** (with **Test**) so requests are read in full from Seerr and approvals and availability go back to it. See [Seerr compatible API](#api-seerr).
 
 ## Log level
 

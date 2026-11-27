@@ -138,6 +138,8 @@ class ConfigManager:
         'metasync.local_api_key',
         # Sign in with OIDC
         'security.oidc_client_secret',
+        # the seerr in front of soulsync (#2324)
+        'seerr_compat.seerr_api_key',
     })
 
     def _get_fernet(self) -> Fernet:
@@ -766,6 +768,11 @@ class ConfigManager:
                 "enabled": False,
                 "profile_id": 1,
                 "refuse_unknown": True,
+                # a real seerr in front of soulsync (#2324): its webhook's
+                # requests are read in full from here, and approvals and
+                # availability go back. empty = the webhook alone
+                "seerr_url": "",
+                "seerr_api_key": "",
             },
             # ai clients over /mcp, with an api key. off by default
             "mcp": {

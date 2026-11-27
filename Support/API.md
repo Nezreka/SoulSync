@@ -387,11 +387,28 @@ Each Jellyfin user requests as the SoulSync profile that picked that Jellyfin us
 - Request limits apply like they do in SoulSync.
 - Cards show **Available** when it's in your library, **Partially available** for a show with episodes missing, **Processing** when it's on a wishlist, followed, approved or downloading, and **Pending** while a request waits. It's the same status the video pages show on their posters.
 - Asking for something already on its way answers `409`, like Seerr does for a duplicate.
-- Downloads use your normal quality profiles. There are no Radarr or Sonarr servers to pick and no separate 4K request.
+- Downloads use your normal quality profiles, and a 4K request uses the profile's 4K quality profile. There are no Radarr or Sonarr servers to pick.
+
+### Seerr in front, SoulSync in place of Radarr and Sonarr
+
+Keep Seerr as the place people ask, and let SoulSync fetch instead of Radarr and Sonarr (#2324). Seerr needs no Radarr or Sonarr for this.
+
+1. In Seerr, go to **Settings > Notifications > Webhook**. Set the webhook URL to `http://<host>:8008/seerr/api/v1/webhook`, the authorization header to `Bearer <admin API key>` (a SoulSync admin key), keep the default JSON payload and tick the request events (pending, auto-approved, approved, declined).
+2. Optional, for the full integration: in SoulSync, under **Settings > System > API > Seerr compatible API**, fill in **Your Seerr URL** (for example `http://seerr:5055`) and the **Seerr API key** (Seerr's Settings > General). **Test** checks both. The key is stored encrypted and never sent back to the browser.
+
+What SoulSync does with each request:
+
+- Each Seerr request id is handled once. The same webhook sent again, and the events Seerr sends because of what SoulSync told it, change nothing.
+- With the Seerr URL set, SoulSync reads the full request from Seerr (`GET /api/v1/request/{id}`): who asked, the seasons asked for, and 4K. Without it, it uses what the webhook carries (the requester's name and the requested seasons).
+- Who asked is matched to a profile by their Plex account (Sign in with Plex and profiles imported from Plex are linked to it), then their Jellyfin user, then their Plex name, then a profile with their name. Nobody matched acts as `X-Api-User`, then the fallback profile, or is refused when unknown users are.
+- The request then follows that profile's rules, like any other: movies and TV separately, Download right away or Ask first, the rating limit, the request limit and the quality. A 4K request gets the profile's 4K quality profile, or is refused when it has none.
+- With the Seerr URL set, Seerr hears back: a request SoulSync takes right away is approved in Seerr (`POST /api/v1/request/{id}/approve`), one its rules refuse is declined (`/decline`), and one waiting on SoulSync's **Requests** page is approved or declined there when you decide. A request declined in Seerr withdraws the one still waiting in SoulSync. When the files land, Seerr's media is marked available (`POST /api/v1/media/{id}/available`), or partially available while seasons asked for, or the rest of the show, are still missing. 4K requests set Seerr's 4K status. Each of these is sent once.
+
+`POST /seerr/api/v1/request` takes the same Seerr fields when a webhook template posts there: `seerrRequestId` (or `request_id`), `notification_type` and `requestedBy` (`{plexId, plexUsername, username, jellyfinUserId}`). A body without them is a plain request, as before. Both answer `201` with the request when something was filed, `200` with `outcome` (`exists`, `refused`) or `duplicate` / `ignored` otherwise.
 
 ### Supported routes
 
-All under `/seerr/api/v1`: `status`, `auth/me`, `user`, `discover/trending`, `discover/movies` (plus `upcoming`, `studio`, `genre`), `discover/tv` (plus `upcoming`, `network`, `genre`), `discover/genreslider`, `search`, `movie` and `tv` (details, `similar`, `recommendations`), `person` (with `combined_credits`), `collection`, `request` (list, create, cancel) and `media`. Seerr's watch-later list, outside ratings and Radarr/Sonarr service lists answer empty, since SoulSync doesn't keep them.
+All under `/seerr/api/v1`: `status`, `auth/me`, `user`, `discover/trending`, `discover/movies` (plus `upcoming`, `studio`, `genre`), `discover/tv` (plus `upcoming`, `network`, `genre`), `discover/genreslider`, `search`, `movie` and `tv` (details, `similar`, `recommendations`), `person` (with `combined_credits`), `collection`, `request` (list, create, cancel), `webhook` (Seerr's webhook agent) and `media`. Seerr's watch-later list, outside ratings and Radarr/Sonarr service lists answer empty, since SoulSync doesn't keep them.
 
 ---
 

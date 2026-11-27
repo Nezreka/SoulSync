@@ -1252,7 +1252,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     anchor: heading('API keys'),
     file: 'system-tab.tsx',
     hint: 'REST keys and inbound endpoints',
-    keywords: 'api key rest token lidarr seerr overseerr mcp',
+    keywords: 'api key rest token lidarr seerr overseerr jellyseerr webhook radarr sonarr mcp',
   },
   {
     label: 'Artwork cache',

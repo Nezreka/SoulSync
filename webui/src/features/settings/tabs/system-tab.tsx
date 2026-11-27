@@ -34,6 +34,7 @@ import {
   Pre,
   Row,
   Say,
+  SecretField,
   Segmented,
   Select,
   StatusWords,
@@ -45,7 +46,7 @@ import {
 } from '../ui';
 import s from '../ui/settings.module.css';
 import { ExperimentalCard } from './connections-metadata';
-import { text } from './source-panels';
+import { secretNote, text } from './source-panels';
 import { LOG_LEVEL_WORDS } from './system/words';
 
 type Section_ = Record<string, unknown>;
@@ -594,8 +595,109 @@ export function ApiView({ store }: { store: SettingsStore }) {
               <CompatProfile store={store} section="seerr_compat" id="seerr-compat-profile" />
             </Row>
           )}
+          <SeerrServerRows store={store} off={!enabled('seerr_compat')} />
         </Card>
       </div>
+    </>
+  );
+}
+
+/** the real Seerr in front of SoulSync (#2324): its webhook's requests are
+ *  read in full from it, and approvals and availability go back to it */
+function SeerrServerRows({ store, off }: { store: SettingsStore; off: boolean }) {
+  const settings = useSettings(store);
+  const seerr = (settings['seerr_compat'] || {}) as Section_;
+  const url = text(seerr.seerr_url);
+  const key = text(seerr.seerr_api_key);
+  const [said, setSaid] = useState<{ tone: Tone; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function test() {
+    setBusy(true);
+    try {
+      if (shell()._settingsAutosaveOff !== true && store.hasPending()) await store.flush();
+      const response = await fetch('/api/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service: 'seerr_compat' }),
+      });
+      const data = (await response.json()) as {
+        success?: boolean;
+        message?: string;
+        error?: string;
+      };
+      setSaid(
+        data.success
+          ? { tone: 'ok', text: data.message || 'Connected to Seerr' }
+          : { tone: 'bad', text: data.error || data.message || 'Could not reach Seerr' },
+      );
+    } catch (error) {
+      setSaid({ tone: 'bad', text: `Could not test it: ${why(error)}` });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <Row
+        sub
+        field
+        off={off}
+        label="Your Seerr URL"
+        htmlFor="seerr-compat-seerr-url"
+        help="Optional. With Seerr in front and SoulSync in place of Radarr and Sonarr, SoulSync reads each request from Seerr and tells Seerr what happened."
+        more={
+          <>
+            In Seerr, add a webhook under Settings, Notifications, Webhook: the URL{' '}
+            <code>http://&lt;host&gt;:8008/seerr/api/v1/webhook</code>, the authorization header{' '}
+            <code>Bearer &lt;admin API key&gt;</code> and the request events. SoulSync files each
+            request as the profile linked to the person's Plex or Jellyfin account, with that
+            profile's permissions and quality, and a 4K request gets its 4K quality. With the URL
+            and key here, SoulSync approves or declines the request in Seerr and marks it available
+            when the files land. Seerr needs no Radarr or Sonarr.
+          </>
+        }
+      >
+        <TextField
+          full
+          id="seerr-compat-seerr-url"
+          placeholder="http://localhost:5055"
+          value={url}
+          onChange={(event) => store.set('seerr_compat', 'seerr_url', event.target.value)}
+        />
+      </Row>
+      <Row
+        sub
+        field
+        off={off}
+        label="Seerr API key"
+        htmlFor="seerr-compat-seerr-api-key"
+        help={secretNote(key, 'In Seerr: Settings, General, API Key.')}
+      >
+        <SecretField
+          id="seerr-compat-seerr-api-key"
+          placeholder="Your Seerr API key"
+          value={key}
+          onChange={(value) => store.set('seerr_compat', 'seerr_api_key', value)}
+        />
+      </Row>
+      <Row sub off={off} label="Check the connection" htmlFor="seerr-compat-test-btn">
+        {said ? (
+          <StatusWords id="seerr-compat-test-status" tone={said.tone} live>
+            {said.text}
+          </StatusWords>
+        ) : null}
+        <Btn
+          id="seerr-compat-test-btn"
+          small
+          busy={busy}
+          disabled={!url || !key}
+          onClick={() => void test()}
+        >
+          Test
+        </Btn>
+      </Row>
     </>
   );
 }
