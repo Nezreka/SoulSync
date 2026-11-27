@@ -5,9 +5,15 @@ most of a library already has ReplayGain (SoulSync writes it on import, and
 other taggers do too). those files are never measured: their tags are read
 back and kept. the rest (a Lidarr import, a folder dropped in by hand) are
 measured with ffmpeg ebur128, an album at a time so the album gets an album
-gain too, and kept in lib2_track_analysis. nothing is written into a file:
-the Library page's ReplayGain buttons and the ReplayGain Filler job do that
-when someone asks for it.
+gain too, and kept in lib2_track_analysis, the working copy.
+
+analysis lives with the files when there's a standard for it: with "Apply
+ReplayGain tags" on (post_processing.replaygain_enabled, the same switch the
+import uses) a new measurement is also written into the file as ReplayGain
+tags (R128 for Opus) through core.replaygain.write_replaygain_tags, and the
+file's tags are read back into the tag cache, as a rescan would. off, nothing
+is written. a hand-tagged file, or any file on an album with one, is never
+written.
 
 how it stays out of the way:
 - one file at a time, ffmpeg on one thread under nice 19 / idle io
@@ -39,6 +45,8 @@ BETWEEN_FILES_S = 0.5
 MEASURE_TIMEOUT_S = 600
 
 MeasureFn = Callable[[str], Dict[str, Any]]
+WriteFn = Callable[..., bool]
+WRITE_KEY = "post_processing.replaygain_enabled"
 
 
 def _default_measure(path: str) -> Dict[str, Any]:
@@ -102,11 +110,13 @@ def album_files(conn, album_id: int) -> List[Dict[str, Any]]:
 def measure_album(db: Any, album_id: int, *, extra_file_id: Optional[int] = None,
                   measure: Optional[MeasureFn] = None, resolve: Optional[Callable] = None,
                   reference: Optional[float] = None, should_stop: Callable[[], bool] = lambda: False,
-                  pace: Callable[[], None] = lambda: None) -> Dict[str, int]:
+                  pace: Callable[[], None] = lambda: None, write_tags: bool = False,
+                  write: Optional[WriteFn] = None) -> Dict[str, int]:
     """measure what an album lacks, then give the album its album gain.
 
     ffmpeg runs with no connection held; each result is written in its own
-    short transaction. returns counts."""
+    short transaction. ``write_tags``: what was measured here also goes into
+    the files as ReplayGain tags (see the module notes). returns counts."""
     import json
 
     from core import loudness as L
@@ -116,6 +126,8 @@ def measure_album(db: Any, album_id: int, *, extra_file_id: Optional[int] = None
     resolve = resolve or _default_resolve
     ref = L.reference_lufs() if reference is None else reference
     stats = {"measured": 0, "from_tags": 0, "failed": 0, "album": 0}
+    # what this pass measured: file_id -> (local path, stored path, track id, gain, true peak dB)
+    fresh: Dict[int, tuple] = {}
 
     with db._get_connection() as conn:
         files = album_files(conn, album_id)
@@ -200,6 +212,7 @@ def measure_album(db: Any, album_id: int, *, extra_file_id: Optional[int] = None
                  round(ref - integrated, 2), peak, ref))
             conn.commit()
         stats["measured"] += 1
+        fresh[fid] = (local, f["path"], f["track_id"], round(ref - integrated, 2), tp_db)
         lufs[fid] = integrated
         peaks[fid] = peak
         pace()
@@ -207,6 +220,7 @@ def measure_album(db: Any, album_id: int, *, extra_file_id: Optional[int] = None
     # the album's gain, once every track on it is known. a file whose tags
     # carry an album gain keeps its own (tags first, in core.loudness)
     on_album = [f for f in files if not f.get("not_on_album")]
+    album_gain = album_peak = None
     if len(on_album) > 1 and all(f["file_id"] in lufs for f in on_album):
         album_lufs = L.album_loudness([lufs[f["file_id"]] for f in on_album],
                                       [f["duration_s"] for f in on_album])
@@ -228,7 +242,60 @@ def measure_album(db: Any, album_id: int, *, extra_file_id: Optional[int] = None
                             "album_gain": album_gain, "album_peak": album_peak}, ref)
                     stats["album"] += 1
                 conn.commit()
+    if write_tags and fresh:
+        album_ids = {f["file_id"] for f in on_album}
+        stats["written"] = write_measured_tags(
+            db, fresh, album_gain=album_gain, album_peak=album_peak, album_files=album_ids,
+            write=write)
     return stats
+
+
+def _peak_db(linear: Optional[float]) -> Optional[float]:
+    import math
+    if linear is None or linear <= 0:
+        return None
+    return 20.0 * math.log10(linear)
+
+
+def write_measured_tags(db: Any, fresh: Dict[int, tuple], *, album_gain: Optional[float] = None,
+                        album_peak: Optional[float] = None, album_files=(),
+                        write: Optional[WriteFn] = None) -> int:
+    """write what was just measured into the files as ReplayGain tags, then
+    read the files' tags back into the tag cache. a hand-tagged file, or a
+    file on an album with one, is left alone. returns how many were written"""
+    from core.metadata.common import get_file_lock
+    from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+
+    if write is None:
+        from core.replaygain import write_replaygain_tags as write
+    keys = hand_tagged_path_keys(db)
+    album_peak_db = _peak_db(album_peak)
+    written = 0
+    for fid, (local, stored, track_id, gain, tp_db) in fresh.items():
+        if is_hand_tagged_path(stored, keys) or is_hand_tagged_path(local, keys):
+            continue
+        try:
+            from core.library2.validation import album_is_hand_tagged
+            with db._get_connection() as conn:
+                if album_is_hand_tagged(conn, int(track_id)):
+                    continue
+            with_album = album_gain is not None and fid in album_files
+            with get_file_lock(local):
+                ok = write(local, gain, tp_db,
+                           album_gain if with_album else None,
+                           album_peak_db if with_album else None)
+            if ok is False:
+                logger.debug("loudness: couldn't write replaygain into file %s", fid)
+                continue
+            written += 1
+            # the file's tags now carry it: read them back, as a rescan would
+            from core.library2.tag_cache import read_and_persist_tag_cache
+            with db._get_connection() as conn:
+                read_and_persist_tag_cache(conn, fid, local)
+                conn.commit()
+        except Exception as e:  # noqa: BLE001 - the db keeps the measurement either way
+            logger.debug("loudness: writing replaygain into file %s failed: %s", fid, e)
+    return written
 
 
 class LoudnessWorker:
@@ -251,7 +318,7 @@ class LoudnessWorker:
         self._priority: "collections.OrderedDict[int, Optional[int]]" = collections.OrderedDict()
         self._cursor = 0
         self.current: Optional[int] = None
-        self.stats = {"measured": 0, "from_tags": 0, "failed": 0, "albums": 0}
+        self.stats = {"measured": 0, "from_tags": 0, "failed": 0, "albums": 0, "written": 0}
 
     # ── lifecycle ──
     def start(self) -> None:
@@ -297,6 +364,13 @@ class LoudnessWorker:
             return bool(self.config_manager.get(CONFIG_KEY, True)) if self.config_manager else True
         except Exception:  # noqa: BLE001
             return True
+
+    def _write_tags(self) -> bool:
+        """the import's "Apply ReplayGain tags" switch: off unless turned on"""
+        try:
+            return bool(self.config_manager.get(WRITE_KEY, False)) if self.config_manager else False
+        except Exception:  # noqa: BLE001
+            return False
 
     def _have_ffmpeg(self) -> bool:
         if self._ffmpeg_ok is not None:
@@ -349,10 +423,11 @@ class LoudnessWorker:
                     out = measure_album(self.db, album_id, extra_file_id=file_id, measure=self._measure,
                                         resolve=self._resolve,
                                         should_stop=lambda: self._stop.is_set() or self.paused,
-                                        pace=lambda: self._stop.wait(BETWEEN_FILES_S))
+                                        pace=lambda: self._stop.wait(BETWEEN_FILES_S),
+                                        write_tags=self._write_tags())
                 self.current = None
                 self.stats["albums"] += 1
-                for k in ("measured", "from_tags", "failed"):
+                for k in ("measured", "from_tags", "failed", "written"):
                     self.stats[k] += out.get(k, 0)
                 self._stop.wait(BETWEEN_FILES_S)
             except Exception:  # noqa: BLE001 - a bad album never stops the worker
@@ -394,4 +469,4 @@ def bump_track(conn, track_id: int, file_id: Optional[int]) -> None:
 
 
 __all__ = ["LoudnessWorker", "album_files", "bump_track", "get_worker", "measure_album",
-           "next_backlog_file", "start_worker"]
+           "next_backlog_file", "start_worker", "write_measured_tags"]

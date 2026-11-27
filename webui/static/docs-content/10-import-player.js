@@ -183,7 +183,7 @@ The player at \`/player\` levels songs with the ReplayGain SoulSync already meas
 
 **Target loudness** is where levelled songs land (Standard is -18 LUFS, the ReplayGain reference; Loud matches streaming apps). **Pre-amp** adds or takes a little on top. **Prevent clipping** never turns a song up past the point its loudest moment would distort.
 
-A song whose file has no ReplayGain is measured in the background (one at a time, lowest priority; a scan or sync pauses it), and straight away the first time it's played. Until then it plays a little quieter rather than louder than the rest. Nothing is written into your files: use the ReplayGain Filler or the library page's ReplayGain buttons for that.
+A song whose file has no ReplayGain is measured in the background (one at a time, lowest priority; a scan or sync pauses it), and straight away the first time it's played. Until then it plays a little quieter rather than louder than the rest. With Apply ReplayGain tags on (Settings, Library, Processing), what it measures is also written into the file as ReplayGain tags (R128 for Opus), so other players level it too; a hand-tagged file or album is never touched. Off, nothing is written into your files: the ReplayGain Filler or the library page's ReplayGain buttons do that when you ask.
 
 **Level video loudness** does the same for films and videos: the video Loudness maintenance job measures each file's main audio in the background, and very quiet or very loud videos play at one level.
 

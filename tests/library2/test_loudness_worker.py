@@ -126,3 +126,93 @@ def test_the_worker_is_paused_by_a_scan_like_the_others(legacy_db, monkeypatch):
     worker = W.LoudnessWorker(legacy_db, None)
     monkeypatch.setattr(W, "_worker", worker)
     assert database_admin._background_workers()["loudness"] is worker
+
+
+# ── the measurement also goes into the file (analysis lives with the files) ──
+
+_LOUD = {"/m/01.flac": {"integrated_lufs": -10.0, "true_peak_db": -1.0},
+         "/m/02.flac": {"integrated_lufs": -14.0, "true_peak_db": -3.0}}
+
+
+def _writes(monkeypatch):
+    """(writes, tag cache reads): what was written into which file, and which
+    files' tags were read back afterwards"""
+    writes, reread = [], []
+    monkeypatch.setattr("core.library2.tag_cache.read_and_persist_tag_cache",
+                        lambda conn, fid, path: reread.append((fid, path)) or True)
+
+    def write(path, track_gain, track_peak_db, album_gain=None, album_peak_db=None):
+        writes.append((path, track_gain, track_peak_db, album_gain, album_peak_db))
+        return True
+    return writes, reread, write
+
+
+def test_with_replaygain_on_the_measurement_is_written_into_the_file(legacy_db, imported_conn, monkeypatch):
+    album, files = _views(imported_conn)
+    _no_tags(monkeypatch)
+    writes, reread, write = _writes(monkeypatch)
+    out = W.measure_album(legacy_db, album, measure=lambda p: _LOUD[p], resolve=lambda p: p,
+                          reference=-18.0, write_tags=True, write=write)
+    assert out["written"] == 2
+    by_path = {w[0]: w for w in writes}
+    assert by_path["/m/01.flac"][1:3] == (-8.0, -1.0) and by_path["/m/02.flac"][1:3] == (-4.0, -3.0)
+    # the album gain goes in too, the same one the db keeps, with the loudest peak in dB
+    got = L.for_files(imported_conn, [f[1] for f in files], reference=-18.0)
+    assert by_path["/m/01.flac"][3] == got[files[0][1]]["album_gain"]
+    assert abs(by_path["/m/02.flac"][4] - (-1.0)) < 1e-3
+    # and the tags are read back into the tag cache, as a rescan would
+    assert sorted(reread) == sorted((f[1], f[2]) for f in files)
+
+
+def test_with_replaygain_off_nothing_is_written(legacy_db, imported_conn, monkeypatch):
+    album, files = _views(imported_conn)
+    _no_tags(monkeypatch)
+    writes, reread, write = _writes(monkeypatch)
+    out = W.measure_album(legacy_db, album, measure=lambda p: _LOUD[p], resolve=lambda p: p,
+                          reference=-18.0, write=write)
+    assert out["measured"] == 2 and writes == [] and reread == [] and "written" not in out
+    # the db still has it
+    assert L.for_files(imported_conn, [files[0][1]], reference=-18.0)[files[0][1]]["track_gain"] == -8.0
+
+
+def test_the_worker_follows_the_import_switch(legacy_db):
+    class Cfg:
+        def __init__(self, on):
+            self.on = on
+
+        def get(self, key, default=None):
+            return self.on if key == W.WRITE_KEY else default
+    assert W.LoudnessWorker(legacy_db, Cfg(True))._write_tags() is True
+    assert W.LoudnessWorker(legacy_db, Cfg(False))._write_tags() is False
+    assert W.LoudnessWorker(legacy_db, None)._write_tags() is False
+
+
+def test_a_hand_tagged_file_is_never_written(legacy_db, imported_conn, monkeypatch):
+    from database.music_database import MusicDatabase
+    album, files = _views(imported_conn)
+    _no_tags(monkeypatch)
+    writes, reread, write = _writes(monkeypatch)
+    monkeypatch.setattr(legacy_db, "manual_path_keys",
+                        lambda: {MusicDatabase.manual_path_key("/m/01.flac")}, raising=False)
+    # only the file itself: its album is checked separately below
+    monkeypatch.setattr("core.library2.validation.album_is_hand_tagged", lambda conn, tid: False)
+    out = W.measure_album(legacy_db, album, measure=lambda p: _LOUD[p], resolve=lambda p: p,
+                          reference=-18.0, write_tags=True, write=write)
+    assert [w[0] for w in writes] == ["/m/02.flac"] and out["written"] == 1
+    # the db keeps the hand-tagged file's measurement all the same
+    assert L.for_files(imported_conn, [files[0][1]], reference=-18.0)[files[0][1]]["track_gain"] == -8.0
+
+
+def test_an_album_with_a_hand_tagged_file_is_left_alone(legacy_db, imported_conn, monkeypatch):
+    from database.music_database import MusicDatabase
+    album, files = _views(imported_conn)
+    _no_tags(monkeypatch)
+    writes, reread, write = _writes(monkeypatch)
+    imported_conn.execute("CREATE TABLE IF NOT EXISTS manual_metadata_files (path_key TEXT PRIMARY KEY)")
+    imported_conn.execute("INSERT INTO manual_metadata_files(path_key) VALUES(?)",
+                          (MusicDatabase.manual_path_key("/m/01.flac"),))
+    imported_conn.commit()
+    monkeypatch.setattr(legacy_db, "manual_path_keys", lambda: set(), raising=False)
+    out = W.measure_album(legacy_db, album, measure=lambda p: _LOUD[p], resolve=lambda p: p,
+                          reference=-18.0, write_tags=True, write=write)
+    assert writes == [] and out["written"] == 0 and out["measured"] == 2

@@ -552,7 +552,7 @@ export function MusicTags({ store }: { store: SettingsStore }) {
           <Row
             label="Apply ReplayGain tags after download"
             htmlFor="replaygain-enabled"
-            help="Measures loudness and writes ReplayGain track gain and peak tags. Needs ffmpeg; adds a few seconds per track."
+            help="Measures loudness and writes ReplayGain track gain and peak tags. Needs ffmpeg; adds a few seconds per track. Songs the background loudness check measures get their tags written too."
           >
             <Switch
               id="replaygain-enabled"
