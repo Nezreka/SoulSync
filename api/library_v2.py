@@ -5079,11 +5079,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """Remove an artist (and their releases/tracks/file links) from
         Library v2. Files on disk are untouched; watchlist + wishlist mirrors
         are removed so nothing keeps auto-downloading for it."""
+        stats = _remove_artist(artist_id)
+        if stats is None:
+            return _fail("Artist not found", 404)
+        return jsonify({"success": True, **stats})
+
+    def _remove_artist(artist_id: int) -> Optional[Dict[str, Any]]:
+        """the artist delete itself, the single route's and the bulk delete's
+        (#2333). None when there is no such artist"""
         db = get_database()
         with closing(db._get_connection()) as conn:
             row = conn.execute("SELECT id FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
             if not row:
-                return _fail("Artist not found", 404)
+                return None
             # asked before the rows go: a media-server artist comes back on the
             # server's next sync, and the answer says so (3.6.1 did)
             servers = _artist_media_servers(conn, artist_id)
@@ -5121,8 +5129,146 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # this delete's own withdrawals, not the oldest rows of a backlog
             drain_since(db, mark)
             _delete_artwork_files(db, "artist", artist_id)
-        return jsonify({"success": True, **stats, "media_servers": servers,
-                        "returns_on_rescan": bool(servers)})
+        return {**stats, "media_servers": servers, "returns_on_rescan": bool(servers)}
+
+    # --- #2333: delete the files of several artists at once ------------------
+    # the bulk bar's "Delete files": each artist goes the way the remove
+    # dialog's "delete the files" takes one, its files into the deleted-files
+    # folder through the journaled ADR-05 delete, then the artist delete.
+    # nothing here decides anything a single delete doesn't.
+
+    BULK_DELETE_LIMIT = 5000
+
+    def _bulk_artist_ids():
+        body = request.get_json(silent=True)
+        raw = body.get("ids") if isinstance(body, dict) else None
+        if (not isinstance(raw, list) or not raw
+                or any(isinstance(v, bool) or not isinstance(v, int) for v in raw)):
+            raise ValueError("ids must be a non-empty list of artist ids")
+        if len(raw) > BULK_DELETE_LIMIT:
+            raise ValueError(f"at most {BULK_DELETE_LIMIT} artists at once")
+        return list(dict.fromkeys(int(v) for v in raw))
+
+    def _keep_days() -> float:
+        try:
+            return float(config_get("library.deleted_keep_days", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _artist_file_blocker(preview: Dict[str, Any]) -> Optional[str]:
+        """why a file delete would refuse this artist, in the dialog's words"""
+        if preview.get("unsafe_count"):
+            return (f"{preview['unsafe_count']} file(s) sit outside your library folders, "
+                    "so nothing was deleted")
+        if preview.get("shared_reference_count"):
+            return "a file is shared with another artist's tracks, so nothing was deleted"
+        return None
+
+    @_route("/api/library/v2/artists/delete-files/preview", methods=["POST"])
+    def lib2_bulk_delete_files_preview():
+        """What deleting these artists' files would do: artists, albums,
+        files and their size, and whether they can be restored."""
+        from core.library2.file_delete import FileDeleteError, preview_entity_files
+        try:
+            artist_ids = _bulk_artist_ids()
+        except ValueError as exc:
+            return _fail(str(exc))
+        db = get_database()
+        with closing(db._get_connection()) as conn:
+            marks = ",".join("?" for _ in artist_ids)
+            found = {int(r[0]): r[1] for r in conn.execute(
+                f"SELECT id, name FROM lib2_artists WHERE id IN ({marks})", artist_ids)}
+            albums = conn.execute(
+                f"SELECT COUNT(*) FROM lib2_albums WHERE primary_artist_id IN ({marks})",
+                artist_ids).fetchone()[0]
+        files = size = missing = 0
+        blocked = []
+        for artist_id in artist_ids:
+            if artist_id not in found:
+                continue
+            try:
+                preview = preview_entity_files(db, entity="artists", entity_id=artist_id)
+            except FileDeleteError as exc:
+                blocked.append({"id": artist_id, "name": found[artist_id], "reason": str(exc)})
+                continue
+            files += int(preview.get("file_count") or 0)
+            size += int(preview.get("total_size") or 0)
+            missing += int(preview.get("missing_count") or 0)
+            reason = _artist_file_blocker(preview)
+            if reason:
+                blocked.append({"id": artist_id, "name": found[artist_id], "reason": reason})
+        return jsonify({"success": True, "artists": len(found), "albums": int(albums),
+                        "files": files, "total_size": size, "missing": missing,
+                        "blocked": blocked, "not_found": len(artist_ids) - len(found),
+                        "mode": "quarantine", "keep_days": _keep_days()})
+
+    def _delete_artist_and_files(db, artist_id: int) -> Dict[str, Any]:
+        """one artist: its files into the deleted-files folder, then off the
+        library. raises FileDeleteError with what stopped it"""
+        from core.imports.paths import docker_resolve_path
+        from core.library.deleted_quarantine import quarantine_mover
+        from core.library2.file_delete import (
+            FileDeleteError, delete_entity_files, preview_entity_files,
+        )
+        preview = preview_entity_files(db, entity="artists", entity_id=artist_id)
+        reason = _artist_file_blocker(preview)
+        if reason:
+            raise FileDeleteError(reason, 409)
+        deleted = failed = 0
+        track_ids: List[int] = []
+        if preview.get("file_count"):
+            transfer = docker_resolve_path(config_get("soulseek.transfer_path", "./Transfer"))
+            operation = delete_entity_files(
+                db, entity="artists", entity_id=artist_id,
+                preview_token=preview.get("preview_token"), actor="user",
+                actor_profile_id=_profile(),
+                unlink=quarantine_mover(transfer, "library_delete"), mode="quarantine")
+            items = operation.get("items") or []
+            deleted = sum(1 for i in items if i.get("status") == "deleted")
+            failed = sum(1 for i in items if i.get("status") == "failed")
+            track_ids = list(operation.get("track_ids") or [])
+            if operation.get("status") != "completed":
+                # as the dialog does: the artist stays for review, and what did
+                # go is told to the wishlist
+                _reproject_after_file_removal(track_ids)
+                raise FileDeleteError(
+                    f"deleting the files {operation.get('status')}; the artist was kept for review",
+                    409)
+        stats = _remove_artist(artist_id)
+        if stats is None:
+            _reproject_after_file_removal(track_ids)
+            raise FileDeleteError("Artist not found", 404)
+        return {"files_deleted": deleted, "files_failed": failed, **stats}
+
+    @_route("/api/library/v2/artists/delete-files", methods=["POST"])
+    def lib2_bulk_delete_files():
+        """Delete the files of each artist and take it off the library, one
+        at a time. One artist failing doesn't stop the rest: every artist
+        answers for itself."""
+        from core.library2.file_delete import FileDeleteError
+        try:
+            artist_ids = _bulk_artist_ids()
+        except ValueError as exc:
+            return _fail(str(exc))
+        db = get_database()
+        results = []
+        for artist_id in artist_ids:
+            try:
+                outcome = _delete_artist_and_files(db, artist_id)
+                results.append({"id": artist_id, "ok": True, **outcome})
+            except FileDeleteError as exc:
+                results.append({"id": artist_id, "ok": False, "error": str(exc)})
+            except Exception as exc:  # noqa: BLE001 - one artist never stops the rest
+                logger.exception("bulk file delete failed for artist %s", artist_id)
+                results.append({"id": artist_id, "ok": False, "error": str(exc) or "Delete failed"})
+        done = [r for r in results if r["ok"]]
+        return jsonify({
+            "success": True,
+            "deleted": len(done),
+            "failed": len(results) - len(done),
+            "files_deleted": sum(r.get("files_deleted", 0) for r in done),
+            "results": results,
+        })
 
     @_route("/api/library/v2/albums/<int:album_id>", methods=["DELETE"])
     def lib2_delete_album(album_id):
