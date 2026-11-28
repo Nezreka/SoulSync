@@ -309,6 +309,20 @@ class TestEnsureArtistNfoForTrack:
         root = ET.parse(os.path.join(artist, "artist.nfo")).getroot()
         assert root.findtext("musicbrainzartistid") == MBID
 
+    def test_vorbis_albumartist_key_writes_nfo(self, tmp_path, monkeypatch):
+        """FLAC/OGG/Opus surface the album artist as ``albumartist`` (Vorbis
+        ALBUMARTIST), not ``album_artist`` (ID3 TPE2 / MP4 aART) — #2343."""
+        from core.library.artist_nfo import ensure_artist_nfo_for_track
+        track, artist, tags = self._track(tmp_path, name=None)
+        tags["tags"]["albumartist"] = "Mammoth"
+        self._stub_tags(monkeypatch, tags)
+        ok, detail = ensure_artist_nfo_for_track(
+            track, Config(**{"library.write_artist_nfo": True}))
+        assert ok, detail
+        root = ET.parse(os.path.join(artist, "artist.nfo")).getroot()
+        assert root.findtext("name") == "Mammoth"
+        assert root.findtext("musicbrainzartistid") == MBID
+
     @pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="needs ffmpeg")
     def test_real_mp3_tags_end_to_end(self, tmp_path):
         """Proves the actual mutagen tag mapping: TPE2 -> album_artist and
