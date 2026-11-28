@@ -655,7 +655,67 @@ select.pf-input { appearance: auto; }
     animation: pfPop 0.16s var(--pf-ease);
 }
 
-.pf-popover { width: 272px; }
+.pf-popover {
+    display: flex;
+    flex-direction: column;
+    width: 272px;
+    max-height: calc(100vh - 32px);
+    overflow: hidden;
+}
+
+.pf-menu-switch {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1 1 auto;
+}
+
+.pf-menu-search-wrap {
+    padding: 0 6px 6px;
+    flex-shrink: 0;
+}
+
+.pf-menu-search {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--white-a12);
+    border-radius: var(--radius-control);
+    background: var(--white-a04);
+    color: var(--text-bright);
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.pf-menu-search::placeholder {
+    color: rgba(var(--text-bright-rgb), 0.42);
+}
+
+.pf-menu-search:focus {
+    border-color: var(--accent);
+    background: var(--white-a06);
+}
+
+.pf-menu-scroll {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    min-height: 0;
+    max-height: min(320px, 45vh);
+    scrollbar-width: thin;
+}
+
+.pf-menu-empty {
+    padding: 12px;
+    text-align: center;
+    font-size: 13px;
+    color: rgba(var(--text-bright-rgb), 0.45);
+}
+
+.pf-menu-footer {
+    flex-shrink: 0;
+}
 
 .pf-menu-label {
     padding: 10px 12px 6px;

@@ -69,7 +69,7 @@ describe('video header actions', () => {
     expect(screen.queryByRole('menuitem', { name: /^Block and retry/ })).toBeNull();
   });
 
-  it('offers Clear failed with the failed + cancelled count, and it never retries', () => {
+  it('offers Clear failed with the full failed count, and it never retries (#2337)', () => {
     const p = props({
       counts: { ...counts, completed: 54, failed: 45, removable: 44, total: 99 },
       retryableCount: 43,
@@ -77,8 +77,8 @@ describe('video header actions', () => {
     const { container } = render(<VdlHeader {...p} />);
     openMenu(container);
     const items = screen.getAllByRole('menuitem').map((el) => el.textContent);
-    expect(items.indexOf('Retry failed (43)')).toBeLessThan(items.indexOf('Clear failed (44)'));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear failed (44)' }));
+    expect(items.indexOf('Retry failed (43)')).toBeLessThan(items.indexOf('Clear failed (45)'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear failed (45)' }));
     expect(p.onClearFailed).toHaveBeenCalledTimes(1);
     expect(p.onRetryAll).not.toHaveBeenCalled();
     expect(p.onClearFinished).not.toHaveBeenCalled();
@@ -112,17 +112,19 @@ describe('video header actions', () => {
     expect(p.onClearFailed).not.toHaveBeenCalled();
   });
 
-  it('hides Clear everything when only import failures are left', () => {
+  it('offers Clear failed (not Clear everything) when only import failures are left (#2337)', () => {
     const p = props({ counts: { ...counts, failed: 2, removable: 0, total: 2 } });
     const { container } = render(<VdlHeader {...p} />);
-    expect(container.querySelector('.dlc-more')).toBeNull();
+    openMenu(container);
+    expect(screen.queryByRole('menuitem', { name: 'Clear failed (2)' })).not.toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /^Clear everything/ })).toBeNull();
   });
 
-  it('hides Clear failed when only import failures are left', () => {
+  it('offers Clear failed beside Clear finished when import failures exist (#2337)', () => {
     const p = props({ counts: { ...counts, completed: 2, failed: 1, removable: 0, total: 3 } });
     const { container } = render(<VdlHeader {...p} />);
     openMenu(container);
-    expect(screen.queryByRole('menuitem', { name: /^Clear failed/ })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Clear failed (1)' })).not.toBeNull();
     expect(screen.queryByRole('menuitem', { name: /^Clear finished/ })).not.toBeNull();
   });
 

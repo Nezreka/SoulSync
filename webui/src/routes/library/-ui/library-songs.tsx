@@ -15,7 +15,9 @@ import type { LibrarySearch, LibrarySong } from '../-library-v2.songs';
 import { formatQuality, qualityParts } from '../-bitrate';
 import { libraryV2UiPreferencesQueryOptions } from '../-library-v2.api';
 import {
+  bulkDeleteSongsRequest,
   deleteLibraryTrackRequest,
+  fetchMatchingSongIds,
   librarySongsQueryOptions,
   matchParts,
   readSongsResponse,
@@ -343,6 +345,10 @@ export interface LibrarySongListProps {
   context?: string;
   /** a newer list is loading: keep this one, dimmed */
   stale?: boolean;
+  /** full filter state so selection persists across pages and can select all matching (#2339) */
+  search?: LibrarySearch;
+  /** total matching songs across all pages */
+  totalCount?: number;
 }
 
 /** The rows, their selection bar, and the dialogs they share. */
@@ -353,27 +359,54 @@ export function LibrarySongList({
   query = '',
   context = 'Songs',
   stale = false,
+  search,
+  totalCount,
 }: LibrarySongListProps) {
   const nowPlaying = useNowPlaying();
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [knownById, setKnownById] = useState<ReadonlyMap<string, LibrarySong>>(() => new Map());
   const [anchor, setAnchor] = useState<number | null>(null);
   const [likes, setLikes] = useState<ReadonlyMap<string, boolean>>(() => new Map());
-  const [deleting, setDeleting] = useState<LibrarySong[] | null>(null);
+  const [deleting, setDeleting] = useState<{ ids: string[]; label?: string; single?: LibrarySong } | null>(null);
   const [comparing, setComparing] = useState<LibrarySong | null>(null);
+  const [selectingAll, setSelectingAll] = useState(false);
 
-  // a selection is of THESE rows: a new list (search, page) starts clean
-  const listKey = songs.map((s) => s.id).join('|');
-  const [selectionFor, setSelectionFor] = useState(listKey);
-  if (selectionFor !== listKey) {
-    setSelectionFor(listKey);
+  // persist selection across page changes when filter state is given (#2339);
+  // only reset when the search/filters themselves change
+  const filterKey = search
+    ? `${search.q}|${search.letter}|${search.dupes ? '1' : '0'}|${search.quality}`
+    : songs.map((s) => s.id).join('|');
+  const [selectionFor, setSelectionFor] = useState(filterKey);
+  if (selectionFor !== filterKey) {
+    setSelectionFor(filterKey);
     setSelected(new Set());
+    setKnownById(new Map());
     setAnchor(null);
   }
 
-  const picked = useMemo(() => songs.filter((s) => selected.has(String(s.id))), [songs, selected]);
+  // remember loaded songs across pages so toolbar actions work on cross-page picks
+  const pageById = useMemo(() => {
+    const m = new Map<string, LibrarySong>(knownById);
+    for (const s of songs) m.set(String(s.id), s);
+    return m;
+  }, [knownById, songs]);
+
+  const picked = useMemo(() => {
+    const out: LibrarySong[] = [];
+    selected.forEach((id) => {
+      const s = pageById.get(id);
+      if (s) out.push(s);
+    });
+    return out;
+  }, [pageById, selected]);
   const isLiked = (song: LibrarySong) => likes.get(String(song.id)) ?? Boolean(song.liked);
 
   const toggle = (index: number, shiftKey: boolean) => {
+    setKnownById((prev) => {
+      const next = new Map(prev);
+      for (const s of songs) next.set(String(s.id), s);
+      return next;
+    });
     setSelected((prev) => {
       const next = new Set(prev);
       const id = String(songs[index].id);
@@ -388,6 +421,44 @@ export function LibrarySongList({
       return next;
     });
     setAnchor(index);
+  };
+
+  const allOnPageSelected = songs.length > 0 && songs.every((s) => selected.has(String(s.id)));
+
+  const togglePage = () => {
+    setKnownById((prev) => {
+      const next = new Map(prev);
+      for (const s of songs) next.set(String(s.id), s);
+      return next;
+    });
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        for (const s of songs) next.delete(String(s.id));
+      } else {
+        for (const s of songs) next.add(String(s.id));
+      }
+      return next;
+    });
+  };
+
+  const selectAllMatching = async () => {
+    if (!search || selectingAll) return;
+    setSelectingAll(true);
+    try {
+      const res = await fetchMatchingSongIds(search);
+      setSelected(new Set(res.ids.map(String)));
+      if (res.capped) {
+        window.showToast?.(`Selected first ${res.ids.length.toLocaleString()} matching songs`, 'info');
+      }
+    } catch (error) {
+      window.showToast?.(
+        `Couldn't select all matching songs: ${error instanceof Error ? error.message : 'unknown error'}`,
+        'error',
+      );
+    } finally {
+      setSelectingAll(false);
+    }
   };
 
   const playFrom = (index: number) => {
@@ -430,10 +501,35 @@ export function LibrarySongList({
   };
 
   const remove = async (choice: string) => {
-    const targets = deleting;
+    const target = deleting;
     setDeleting(null);
-    if (!targets?.length) return;
-    await deleteSongs(targets, choice);
+    if (!target?.ids.length) return;
+    if (target.single) {
+      await deleteSongs([target.single], choice);
+    } else {
+      const ids = target.ids
+        .map((s) => Number.parseInt(s, 10))
+        .filter((n) => Number.isFinite(n));
+      const deleteFiles = choice === 'delete' || choice === 'delete-block';
+      const blacklist = choice === 'delete-block';
+      try {
+        const res = await bulkDeleteSongsRequest(ids, { deleteFiles, blacklist });
+        const n = res.deleted_count ?? ids.length;
+        const extras: string[] = [];
+        if (res.albums_removed) extras.push(`${res.albums_removed} empty album${res.albums_removed === 1 ? '' : 's'}`);
+        if (res.artists_removed) extras.push(`${res.artists_removed} artist${res.artists_removed === 1 ? '' : 's'}`);
+        const suffix = extras.length ? ` (cleaned up ${extras.join(', ')})` : '';
+        window.showToast?.(
+          `Deleted ${n} song${n === 1 ? '' : 's'}${deleteFiles ? ', files too' : ''}${suffix}`,
+          res.files_failed ? 'warning' : 'success',
+        );
+      } catch (error) {
+        window.showToast?.(
+          `Couldn't delete songs: ${error instanceof Error ? error.message : 'unknown error'}`,
+          'error',
+        );
+      }
+    }
     setSelected(new Set());
     onChanged();
   };
@@ -467,14 +563,27 @@ export function LibrarySongList({
             onToggleSelect={(e) => toggle(index, e.shiftKey)}
             onLike={() => void setLiked([song], !isLiked(song))}
             onCompare={() => setComparing(song)}
-            onDelete={() => setDeleting([song])}
+            onDelete={() => setDeleting({ ids: [String(song.id)], single: song })}
           />
         ))}
       </ul>
 
       {selected.size > 0 ? (
         <div className={styles.selectionBar} role="toolbar" aria-label="Selected songs">
-          <span className={styles.selectionCount}>{selected.size} selected</span>
+          <span className={styles.selectionCount}>{selected.size.toLocaleString()} selected</span>
+          <button type="button" className={styles.barBtn} onClick={togglePage}>
+            {allOnPageSelected ? 'Deselect page' : 'Select page'}
+          </button>
+          {search && totalCount && selected.size < totalCount ? (
+            <button
+              type="button"
+              className={styles.barBtn}
+              disabled={selectingAll}
+              onClick={() => void selectAllMatching()}
+            >
+              {selectingAll ? 'Selecting…' : `Select all ${totalCount.toLocaleString()} matching`}
+            </button>
+          ) : null}
           <button
             type="button"
             className={styles.barBtn}
@@ -496,6 +605,7 @@ export function LibrarySongList({
           <button
             type="button"
             className={styles.barBtn}
+            disabled={!picked.length}
             onClick={(e) =>
               openAddToPlaylist(
                 picked.map(songPlaylistTrack).filter((t): t is UserPlaylistTrack => t !== null),
@@ -508,15 +618,22 @@ export function LibrarySongList({
           <button
             type="button"
             className={styles.barBtn}
+            disabled={!picked.length}
             onClick={() => void setLiked(picked, !picked.every(isLiked))}
           >
-            {picked.every(isLiked) ? 'Unlike' : '♥ Like'}
+            {picked.length > 0 && picked.every(isLiked) ? 'Unlike' : '♥ Like'}
           </button>
           {isAdmin ? (
             <button
               type="button"
               className={`${styles.barBtn} ${styles.barDanger}`}
-              onClick={() => setDeleting(picked)}
+              onClick={() =>
+                setDeleting(
+                  selected.size === 1 && picked.length === 1
+                    ? { ids: [String(picked[0].id)], single: picked[0] }
+                    : { ids: Array.from(selected) },
+                )
+              }
             >
               Delete…
             </button>
@@ -530,16 +647,16 @@ export function LibrarySongList({
       {deleting ? (
         <SmartDeleteDialog
           copy={
-            deleting.length === 1
-              ? { ...TRACK_DELETE_COPY, title: `Delete ${deleting[0].title}` }
+            deleting.single
+              ? { ...TRACK_DELETE_COPY, title: `Delete ${deleting.single.title}` }
               : {
                   ...TRACK_DELETE_COPY,
-                  title: `Delete ${deleting.length} songs`,
-                  noun: `${deleting.length} songs`,
+                  title: `Delete ${deleting.ids.length.toLocaleString()} songs`,
+                  noun: `${deleting.ids.length.toLocaleString()} songs`,
                   keepDesc: 'Remove their database entries only. Files stay on disk.',
                   deleteTitle: 'Delete Files Too',
                   deleteDesc:
-                    'Remove them from the library and delete their audio files from disk.',
+                    'Delete their audio files, clean up leftover artwork/lyrics, empty folders, and empty albums or artists.',
                 }
           }
           onChoose={(choice) => void remove(choice)}

@@ -2598,38 +2598,128 @@ def register_routes(bp):
         ensure_started(get_video_db)
         return jsonify({"ok": True})
 
+    def _apply_dismiss_options(db, rows, *, delete_files: bool = False, block_release: bool = False):
+        """Optional side effects when removing failed downloads (#2337): delete
+        their downloaded files and/or add their releases to the blocklist.
+        Requests, wishlist entries, monitoring and history stay untouched."""
+        import json as _j
+        import os as _os
+        import shutil as _shutil
+
+        files_deleted = 0
+        blocked = 0
+        for dl in rows:
+            if block_release and dl.get("username") and dl.get("filename"):
+                try:
+                    ctx = _j.loads(dl.get("search_ctx") or "{}") or {}
+                except (ValueError, TypeError):
+                    ctx = {}
+                row = {
+                    "kind": dl.get("kind"),
+                    "title": dl.get("title"),
+                    "media_id": dl.get("media_id"),
+                    "media_source": dl.get("media_source"),
+                    "season_number": ctx.get("season"),
+                    "episode_number": ctx.get("episode"),
+                    "username": dl.get("username"),
+                    "filename": dl.get("filename"),
+                    "release_title": dl.get("release_title"),
+                    "reason": dl.get("error") or "Removed from failed queue",
+                }
+                if db.add_video_blocklist(row):
+                    blocked += 1
+
+            if delete_files:
+                if dl.get("source") in ("torrent", "usenet") and dl.get("client_ref"):
+                    try:
+                        from core.video.client_grab import remove as remove_client_job
+                        remove_client_job(dl.get("source"), dl.get("client_ref"), delete_files=True)
+                    except Exception:
+                        pass
+                dest = str(dl.get("dest_path") or "").strip()
+                if dest and _os.path.exists(dest):
+                    try:
+                        if _os.path.isfile(dest) or _os.path.islink(dest):
+                            _os.remove(dest)
+                            files_deleted += 1
+                        elif _os.path.isdir(dest):
+                            _shutil.rmtree(dest)
+                            files_deleted += 1
+                    except OSError:
+                        pass
+        return files_deleted, blocked
+
     @bp.route("/downloads/remove", methods=["POST"])
     def video_downloads_remove():
-        """Take one failed or cancelled row off the list without retrying it.
-        Live rows, finished rows and import_failed rows (Manual import's) are
-        refused and left alone. History is untouched."""
+        """Take one or many failed, cancelled (and optionally import_failed) rows
+        off the list without retrying them (#2337). Live and finished rows are
+        refused. Requests, wishlist, monitoring and history stay untouched."""
         from . import get_video_db
         body = request.get_json(silent=True) or {}
+        db = get_video_db()
+        delete_files = bool(body.get("delete_files"))
+        block_release = bool(body.get("block_release"))
+
+        # bulk path: {"ids": [1, 2, ...], "include_import_failed": true, ...}
+        if isinstance(body.get("ids"), list):
+            try:
+                dl_ids = [int(x) for x in body["ids"]]
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "error": "Download ids must be numbers."}), 400
+            if not dl_ids:
+                return jsonify({"ok": False, "error": "No downloads selected."}), 400
+            inc_imp = bool(body.get("include_import_failed", True))
+            targets = db.list_removable_video_downloads(dl_ids, include_import_failed=inc_imp)
+            files_deleted, blocked = _apply_dismiss_options(
+                db, targets, delete_files=delete_files, block_release=block_release)
+            removed = db.remove_video_downloads_bulk(dl_ids, include_import_failed=inc_imp)
+            return jsonify({"ok": True, "removed": removed,
+                            "files_deleted": files_deleted, "blocked": blocked})
+
+        # single path: {"id": 123, ...}
         try:
             dl_id = int(body.get("id"))
         except (TypeError, ValueError):
             return jsonify({"ok": False, "error": "Missing download id."}), 400
-        db = get_video_db()
         dl = db.get_video_download(dl_id)
         if not dl:
             return jsonify({"ok": False, "error": "Download not found."}), 404
-        if not db.remove_video_download(dl_id):
+        inc_imp = bool(body.get("include_import_failed", False))
+        allowed = (db.VIDEO_DOWNLOAD_ALL_FAILED_STATUSES if inc_imp
+                   else db.VIDEO_DOWNLOAD_REMOVABLE_STATUSES)
+        if dl.get("status") not in allowed:
             return jsonify({"ok": False,
                             "error": "Only failed or cancelled downloads can be removed."}), 409
+        files_deleted, blocked = _apply_dismiss_options(
+            db, [dl], delete_files=delete_files, block_release=block_release)
+        if not db.remove_video_download(dl_id, include_import_failed=inc_imp):
+            return jsonify({"ok": False,
+                            "error": "Only failed or cancelled downloads can be removed."}), 409
+        if delete_files or block_release or inc_imp:
+            return jsonify({"ok": True, "removed": 1,
+                            "files_deleted": files_deleted, "blocked": blocked})
         return jsonify({"ok": True})
 
     @bp.route("/downloads/clear", methods=["POST"])
     def video_downloads_clear():
-        """Clear finished (completed) rows. ``scope: "failed"`` clears only
-        failed and cancelled rows; ``scope: "everything"`` clears both.
-        import_failed rows are never cleared here -- they leave through
-        Manual import."""
+        """Clear finished (completed) rows. ``scope: "failed"`` clears failed and
+        cancelled rows (and import_failed when ``include_import_failed: true``);
+        ``scope: "everything"`` clears both."""
         from . import get_video_db
         body = request.get_json(silent=True) or {}
         db = get_video_db()
         scope = body.get("scope")
         if scope == "failed":
-            return jsonify({"cleared": db.clear_failed_video_downloads()})
+            inc_imp = bool(body.get("include_import_failed", False))
+            delete_files = bool(body.get("delete_files", False))
+            block_release = bool(body.get("block_release", False))
+            if delete_files or block_release:
+                targets = db.list_removable_video_downloads(include_import_failed=inc_imp)
+                files_deleted, blocked = _apply_dismiss_options(
+                    db, targets, delete_files=delete_files, block_release=block_release)
+                cleared = db.clear_failed_video_downloads(include_import_failed=inc_imp)
+                return jsonify({"cleared": cleared, "files_deleted": files_deleted, "blocked": blocked})
+            return jsonify({"cleared": db.clear_failed_video_downloads(include_import_failed=inc_imp)})
         if scope == "everything":
             return jsonify({"cleared": db.clear_everything_video_downloads()})
         return jsonify({"cleared": db.clear_finished_video_downloads()})

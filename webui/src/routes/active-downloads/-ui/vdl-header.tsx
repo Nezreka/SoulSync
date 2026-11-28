@@ -87,11 +87,12 @@ export function VdlHeader({
       onSelect: onBlockRetryAll,
     });
   }
-  if (counts.removable > 0 && canManage) {
+  const failedCount = Math.max(counts.failed, counts.removable);
+  if (failedCount > 0 && canManage) {
     menu.push({
       key: 'clear-failed',
-      label: `Clear failed (${counts.removable})`,
-      title: 'Remove failed and cancelled downloads from the list without retrying',
+      label: `Clear failed (${failedCount})`,
+      title: 'Remove failed downloads from the list without retrying',
       onSelect: onClearFailed,
     });
   }

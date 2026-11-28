@@ -224,7 +224,8 @@ def ensure_artist_nfo_for_track(track_path: str, cfg, *, force: bool = False,
 
         result = read_embedded_tags(track_path) or {}
         tags = result.get("tags") or {}
-        album_artist = str(tags.get("album_artist") or "").strip()
+        # id3/mp4 return "album_artist", vorbis/flac/opus return "albumartist" (#2343)
+        album_artist = str(tags.get("album_artist") or tags.get("albumartist") or "").strip()
         if not album_artist:
             return False, "no ALBUMARTIST in file tags"
 

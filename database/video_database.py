@@ -5100,14 +5100,17 @@ class VideoDatabase:
 
     # A failed or cancelled row is only a record of a grab that went nowhere;
     # removing it from the queue touches nothing else (history keeps its own
-    # copy). import_failed is NOT here: that row is the only pointer Manual
-    # import has to a file still sitting in the download area.
+    # copy). import_failed is kept out of plain clear-finished so a stray click
+    # doesn't strand files waiting on Manual import, but explicit removal and
+    # clear-all-failed can include it (#2337).
     VIDEO_DOWNLOAD_REMOVABLE_STATUSES = ("failed", "cancelled")
+    VIDEO_DOWNLOAD_ALL_FAILED_STATUSES = ("failed", "cancelled", "import_failed")
 
-    def remove_video_download(self, dl_id: int) -> bool:
-        """Delete one failed/cancelled row from the queue. False when the row is
-        missing or in any other state -- live, finished, or waiting on import."""
-        statuses = self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES
+    def remove_video_download(self, dl_id: int, include_import_failed: bool = False) -> bool:
+        """Delete one failed/cancelled (and optionally import_failed) row from the queue.
+        False when the row is missing or in any other state."""
+        statuses = (self.VIDEO_DOWNLOAD_ALL_FAILED_STATUSES if include_import_failed
+                    else self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES)
         conn = self._get_connection()
         try:
             cur = conn.execute(
@@ -5115,6 +5118,47 @@ class VideoDatabase:
                 % ",".join("?" * len(statuses)), (dl_id, *statuses))
             conn.commit()
             return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def remove_video_downloads_bulk(self, dl_ids: list, include_import_failed: bool = True) -> int:
+        """Delete multiple failed/cancelled/import_failed rows from the queue (#2337).
+        Requests, wishlist rows, monitoring and history are never touched."""
+        ids = [int(i) for i in (dl_ids or [])]
+        if not ids:
+            return 0
+        statuses = (self.VIDEO_DOWNLOAD_ALL_FAILED_STATUSES if include_import_failed
+                    else self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES)
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_downloads WHERE id IN (%s) AND status IN (%s)"
+                % (",".join("?" * len(ids)), ",".join("?" * len(statuses))),
+                (*ids, *statuses))
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def list_removable_video_downloads(self, dl_ids=None, include_import_failed: bool = False) -> list:
+        """Return failed/cancelled (and optionally import_failed) rows matching optional ids."""
+        statuses = (self.VIDEO_DOWNLOAD_ALL_FAILED_STATUSES if include_import_failed
+                    else self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES)
+        conn = self._get_connection()
+        try:
+            if dl_ids is not None:
+                ids = [int(i) for i in dl_ids]
+                if not ids:
+                    return []
+                rows = conn.execute(
+                    "SELECT * FROM video_downloads WHERE id IN (%s) AND status IN (%s) ORDER BY id"
+                    % (",".join("?" * len(ids)), ",".join("?" * len(statuses))),
+                    (*ids, *statuses)).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM video_downloads WHERE status IN (%s) ORDER BY id"
+                    % ",".join("?" * len(statuses)), statuses).fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 
@@ -5128,9 +5172,10 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def clear_failed_video_downloads(self) -> int:
-        """Delete every failed/cancelled row from the queue."""
-        statuses = self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES
+    def clear_failed_video_downloads(self, include_import_failed: bool = False) -> int:
+        """Delete every failed/cancelled (and optionally import_failed) row from the queue."""
+        statuses = (self.VIDEO_DOWNLOAD_ALL_FAILED_STATUSES if include_import_failed
+                    else self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES)
         conn = self._get_connection()
         try:
             cur = conn.execute(

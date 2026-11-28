@@ -904,6 +904,71 @@ def list_songs(conn, *, search: str = "", letter: str = "all", sort: str = "titl
         "has_next": page < total_pages or (capped and len(songs) == limit)}}
 
 
+def list_song_ids(conn, *, search: str = "", letter: str = "all", dupes: bool = False,
+                  quality: str = "", profile_id: int = 1, limit: int = 50000) -> Dict[str, Any]:
+    """All matching track IDs for the Songs tab's current filters (#2339).
+    Uses the same predicates as list_songs so 'Select all matching' matches
+    what the user sees across every page."""
+    cap = max(1, min(int(limit), 100000))
+    where = [f"EXISTS (SELECT 1 {_song_files_sql('t')})"]
+    params: Dict[str, Any] = {}
+    if letter and letter != "all":
+        from database.music_database import _library_stripped_sql
+        first = f"LOWER(SUBSTR({_library_stripped_sql('t.title')}, 1, 1))"
+        if letter == "#":
+            where.append(f"{first} NOT GLOB '[a-z]'")
+        else:
+            params["letter"] = letter.lower()[:1]
+            where.append(f"{first} = :letter")
+    if dupes:
+        where.append(f"{_song_copies_sql()} > 1")
+    if quality == "lossless":
+        exts = " OR ".join(f"LOWER(owned_f.path) LIKE '%.{ext}'" for ext in _LOSSLESS_EXTS)
+        where.append(f"EXISTS (SELECT 1 {_song_files_sql('t')} AND ({exts}))")
+    elif quality == "upgradable":
+        from .wanted_views import _cutoff_unmet_cached
+        params["unmet"] = json.dumps(sorted({
+            int(row["track_id"])
+            for row in _cutoff_unmet_cached(conn, search="", profile_id=profile_id)}))
+        where.append("t.id IN (SELECT value FROM json_each(:unmet))")
+    q = str(search or "").strip()
+    if q:
+        from core.text.normalize import normalize_for_comparison
+        conn.create_function("norm_text", 1, lambda x: normalize_for_comparison(x) if x else "",
+                             deterministic=True)
+        fq = normalize_for_comparison(q) or q.lower()
+        escaped = fq.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params["like"] = f"%{escaped}%"
+        from .song_search import matching_ids
+        hits = matching_ids(conn, fq)
+        if hits is not None:
+            params["hits"] = json.dumps(hits)
+            where.append("t.id IN (SELECT value FROM json_each(:hits))")
+        else:
+            tokens = [tok for tok in fq.split() if tok]
+            if len(tokens) > 1:
+                tok_clauses = []
+                for idx, tok in enumerate(tokens):
+                    esc_tok = tok.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    tk = f"stok_{idx}"
+                    params[tk] = f"%{esc_tok}%"
+                    tok_clauses.append(
+                        f"({_fold_sql('t.title')} LIKE :{tk} ESCAPE '\\'"
+                        f" OR {_fold_sql('t.track_artist')} LIKE :{tk} ESCAPE '\\'"
+                        f" OR {_fold_sql('ar.name')} LIKE :{tk} ESCAPE '\\')"
+                    )
+                where.append("(" + " AND ".join(tok_clauses) + ")")
+            else:
+                title = f"{_fold_sql('t.title')} LIKE :like ESCAPE '\\'"
+                where.append(f"({title} OR {_fold_sql('t.track_artist')} LIKE :like ESCAPE '\\'"
+                             f" OR {_fold_sql('ar.name')} LIKE :like ESCAPE '\\')")
+    base = f"{_SONG_FROM} WHERE {' AND '.join(where)}"
+    rows = conn.execute(f"SELECT t.id {base} ORDER BY t.id LIMIT :cap", {**params, "cap": cap + 1}).fetchall()
+    capped = len(rows) > cap
+    ids = [int(r[0]) for r in rows[:cap]]
+    return {"ids": ids, "total": len(ids), "capped": capped}
+
+
 def song_rows(conn, track_ids: List[int], *, per_file: bool = False) -> List[Dict[str, Any]]:
     """The Songs rows for ``track_ids`` in that order: upstream's LibrarySong
     shape on catalogue ids, plus ``track_id`` and the live ``file_ids`` a

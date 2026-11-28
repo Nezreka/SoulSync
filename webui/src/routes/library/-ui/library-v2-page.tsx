@@ -6001,6 +6001,8 @@ function SongIndexView() {
           query={q}
           context={q ? `Songs matching "${q}"` : 'Your songs'}
           stale={songsQuery.isPlaceholderData}
+          search={search}
+          totalCount={pagination.totalCount}
           onChanged={() => void songsQuery.refetch()}
         />
       )}
