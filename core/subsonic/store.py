@@ -71,6 +71,8 @@ def ensure_tables(cursor) -> None:
             PRIMARY KEY (profile_id, kind, item_id)
         )
     """)
+    from core.subsonic import on_the_fly as OTF
+    OTF.ensure_table(cursor)
 
 
 def new_app_password() -> str:

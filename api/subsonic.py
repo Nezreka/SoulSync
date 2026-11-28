@@ -51,7 +51,8 @@ _auth_limiter = AttemptLimiter(max_attempts=10, window_seconds=60)
 
 
 def configure(*, get_database, config_manager, serve_file=None, resolve_path=None, proxy_url=None,
-              media_engine=None, flush_scrobbles=None, version: str = ""):
+              media_engine=None, flush_scrobbles=None, otf_downloader=None, otf_search=None,
+              version: str = ""):
     """``serve_file(path)`` answers with Range support, ``resolve_path(path)``
     finds a stored path on this machine (folder overrides and all),
     ``proxy_url(url)`` streams a url through with Range, ``media_engine()``
@@ -59,7 +60,8 @@ def configure(*, get_database, config_manager, serve_file=None, resolve_path=Non
     globals()["get_database"] = get_database
     globals()["config_manager"] = config_manager
     _hooks.update(serve_file=serve_file, resolve_path=resolve_path, proxy_url=proxy_url,
-                  media_engine=media_engine, flush_scrobbles=flush_scrobbles)
+                  media_engine=media_engine, flush_scrobbles=flush_scrobbles,
+                  otf_downloader=otf_downloader, otf_search=otf_search)
     R.set_server_version(version)
 
 
@@ -398,7 +400,13 @@ def get_album(ctx):
 
 @method("getSong")
 def get_song(ctx):
-    _, tid = L.parse_id(_required("id"), L.TRACK)
+    from core.subsonic import on_the_fly as OTF
+    kind, tid = L.parse_id(_required("id"), L.TRACK, L.OTF)
+    if kind == L.OTF:
+        row = OTF.get_track(ctx.db, tid)
+        if not row:
+            raise R.not_found("Song")
+        return {"song": OTF.to_subsonic_song(row)}
     return {"song": ctx.lib.song(tid)}
 
 
@@ -494,11 +502,29 @@ def _search(ctx):
                           song_count=_int("songCount", 20, 0, MAX_LIST), song_offset=_int("songOffset", 0))
 
 
+def _search_songs(ctx, songs: List[int]) -> List[Dict[str, Any]]:
+    from core.subsonic import on_the_fly as OTF
+    owned = ctx.lib.songs(songs)
+    if not OTF.enabled(_cfg):
+        return owned
+    q = (_one("query", "") or "").strip()
+    song_count = _int("songCount", 20, 0, MAX_LIST)
+    song_offset = _int("songOffset", 0)
+    if not q or song_offset > 0 or len(owned) >= song_count:
+        return owned
+    owned_pairs = {(str(s.get("artist") or "").lower(), str(s.get("title") or "").lower()) for s in owned}
+    extra = OTF.search_unowned(
+        ctx.conn, ctx.db, q, limit=song_count - len(owned),
+        owned_pairs=owned_pairs, external_search=_hooks.get("otf_search"),
+    )
+    return owned + extra
+
+
 @method("search3")
 def search3(ctx):
     artists, albums, songs = _search(ctx)
     return {"searchResult3": {"artist": [ctx.lib.artist_id3(a) for a in artists],
-                              "album": ctx.lib.albums(albums), "song": ctx.lib.songs(songs)}}
+                              "album": ctx.lib.albums(albums), "song": _search_songs(ctx, songs)}}
 
 
 @method("search2")
@@ -507,7 +533,7 @@ def search2(ctx):
     return {"searchResult2": {
         "artist": [{"id": L.sid(L.ARTIST, a), "name": ctx.lib.artist_id3(a)["name"],
                     "starred": ctx.lib.starred.get((L.ARTIST, a))} for a in artists],
-        "album": ctx.lib.albums(albums, as_dir=True), "song": ctx.lib.songs(songs)}}
+        "album": ctx.lib.albums(albums, as_dir=True), "song": _search_songs(ctx, songs)}}
 
 
 # ── stars and ratings ────────────────────────────────────────────────────
@@ -635,14 +661,64 @@ def _want(ctx, row: Dict[str, Any]) -> str:
     return "none"
 
 
+def _promote_otf(ctx, row: Dict[str, Any], reason: str) -> str:
+    """promote an appreciated on-the-fly track to the wishlist so the main
+    source grabs a permanent high-quality copy."""
+    from core.subsonic import on_the_fly as OTF
+    OTF.mark_promoted(ctx.db, int(row["id"]))
+    if not OTF.promote_wishlist(_cfg):
+        return "none"
+    from core.permission_store import music_rights
+    profile = ctx.db.get_profile(ctx.profile_id) or {}
+    mode = (music_rights(ctx.db, profile) or {}).get("mode") or "none"
+    if mode == "none":
+        return "none"
+    artist = row.get("artist") or ""
+    track_data = {
+        "id": row.get("spotify_id") or f"otf:{row['id']}",
+        "name": row.get("title") or "",
+        "artists": [{"name": artist}],
+        "duration_ms": int(row.get("duration_ms") or 0),
+        "track_number": row.get("track_number"),
+        "disc_number": row.get("disc_number"),
+        "album": {
+            "id": f"otf-album:{row['id']}",
+            "name": row.get("album") or "",
+            "artists": [{"name": artist}],
+            "images": [],
+            "release_date": str(row.get("release_year") or ""),
+        },
+    }
+    res = ctx.db.add_to_wishlist_detailed(
+        spotify_track_data=track_data, failure_reason=reason,
+        source_type="music_app", source_info={"device": ctx.device.get("name"), "on_the_fly": True},
+        profile_id=ctx.profile_id, user_initiated=True, request_approved=False,
+    )
+    status = (res or {}).get("status")
+    if status in ("created", "updated", "satisfied"):
+        return "wishlist" if mode == "download" else "request"
+    return "none"
+
+
 def _star(ctx, on: bool):
     from core.connect.may_play import may_play_track
     from core.playlists import user_playlists as up
+    from core.subsonic import on_the_fly as OTF
     from core.subsonic import store as S
     did = False
     for raw in _ids("id"):
-        kind, n = L.parse_id(raw, L.TRACK, L.ALBUM, L.ARTIST)
-        if kind == L.TRACK:
+        kind, n = L.parse_id(raw, L.TRACK, L.ALBUM, L.ARTIST, L.OTF)
+        if kind == L.OTF:
+            otf_row = OTF.get_track(ctx.db, n)
+            if not otf_row:
+                raise R.not_found("Song")
+            if on:
+                _promote_otf(ctx, otf_row, "Starred on-the-fly track in music app")
+                up.like(ctx.db, ctx.profile_id, [{
+                    "name": otf_row.get("title") or "", "artist": otf_row.get("artist") or "",
+                    "album": otf_row.get("album") or "", "duration_ms": int(otf_row.get("duration_ms") or 0),
+                }])
+        elif kind == L.TRACK:
             row = _track_any(ctx, n)
             if not row:
                 raise R.not_found("Song")
@@ -737,8 +813,18 @@ def scrobble(ctx):
         raise R.missing("id")
     times = _ids("time")
     submission = _bool("submission", True)
+    from core.subsonic import on_the_fly as OTF
     for i, raw in enumerate(ids):
-        _, tid = L.parse_id(raw, L.TRACK)
+        kind, tid = L.parse_id(raw, L.TRACK, L.OTF)
+        if kind == L.OTF:
+            otf_row = OTF.get_track(ctx.db, tid)
+            if not otf_row:
+                raise R.not_found("Song")
+            if submission:
+                updated = OTF.record_play(ctx.db, tid) or otf_row
+                if int(updated.get("play_count") or 0) >= 2:
+                    _promote_otf(ctx, updated, "Replayed on-the-fly track in music app")
+            continue
         if not may_play_track(ctx.conn, tid, scope=ctx.scope, hide_explicit=ctx.hide_explicit):
             raise R.not_found("Song")
         row = _track_any(ctx, tid) or {}
@@ -847,7 +933,7 @@ def _playlist_entry(ctx, p, songs: List[Dict[str, Any]]) -> Dict[str, Any]:
             "songCount": len(songs), "duration": sum(s.get("duration") or 0 for s in songs),
             "created": L._iso(p.get("mirrored_at")) or L._iso(time.time()),
             "changed": L._iso(p.get("updated_at") or p.get("mirrored_at")) or L._iso(time.time()),
-            "coverArt": songs[0]["coverArt"] if songs else None,
+            "coverArt": songs[0].get("coverArt") if songs else None,
             "readonly": not is_user_playlist(p) or is_liked_playlist(p)}
 
 
@@ -856,11 +942,36 @@ def _mix_entry(ctx, n, mix, songs) -> Dict[str, Any]:
             "comment": mix.get("subtitle") or None, "owner": ctx.profile_name, "public": False,
             "songCount": len(songs), "duration": sum(s.get("duration") or 0 for s in songs),
             "created": L._iso(time.time()), "changed": L._iso(time.time()),
-            "coverArt": songs[0]["coverArt"] if songs else None, "readonly": True}
+            "coverArt": songs[0].get("coverArt") if songs else None, "readonly": True}
 
 
 def _playlist_songs(ctx, p) -> List[Dict[str, Any]]:
-    return ctx.lib.songs([tid for tid, _ in _playlist_track_ids(ctx, p) if tid is not None])
+    from core.subsonic import on_the_fly as OTF
+    pairs = _playlist_track_ids(ctx, p)
+    if not OTF.enabled(_cfg):
+        return ctx.lib.songs([tid for tid, _ in pairs if tid is not None])
+    owned_ids = [tid for tid, _ in pairs if tid is not None]
+    owned_by_id = {s["id"]: s for s in ctx.lib.songs(owned_ids)}
+    out: List[Dict[str, Any]] = []
+    for tid, r in pairs:
+        if tid is not None:
+            song = owned_by_id.get(L.sid(L.TRACK, tid))
+            if song:
+                out.append(song)
+            continue
+        title = (r.get("track_name") or "").strip()
+        if not title:
+            continue
+        otf = OTF.register_track(
+            ctx.db,
+            title=title,
+            artist=r.get("artist_name") or "",
+            album=r.get("album_name") or "",
+            duration_ms=int(r.get("duration_ms") or 0),
+            spotify_id=r.get("source_track_id") or r.get("spotify_track_id"),
+        )
+        out.append(OTF.to_subsonic_song(otf))
+    return out
 
 
 @method("getPlaylists")
@@ -909,14 +1020,28 @@ def get_playlist(ctx):
 
 
 def _raw_tracks(ctx, raw_ids: List[str]) -> List[Dict[str, Any]]:
-    rows = ctx.lib.song_rows([L.parse_id(r, L.TRACK)[1] for r in raw_ids])
+    from core.subsonic import on_the_fly as OTF
+    parsed = [L.parse_id(r, L.TRACK, L.OTF) for r in raw_ids]
+    track_ids = [n for kind, n in parsed if kind == L.TRACK]
+    rows = ctx.lib.song_rows(track_ids) if track_ids else []
     by = {int(r["id"]): r for r in rows}
     out = []
-    for raw in raw_ids:
-        tid = L.parse_id(raw, L.TRACK)[1]
-        if tid not in by:
+    for kind, n in parsed:
+        if kind == L.OTF:
+            otf_row = OTF.get_track(ctx.db, n)
+            if not otf_row:
+                raise R.not_found("Song")
+            _promote_otf(ctx, otf_row, "Added on-the-fly track to playlist in music app")
+            out.append({
+                "name": otf_row.get("title") or "",
+                "artist": otf_row.get("artist") or "",
+                "album": otf_row.get("album") or "",
+                "duration_ms": int(otf_row.get("duration_ms") or 0),
+            })
+            continue
+        if n not in by:
             raise R.not_found("Song")
-        out.append(_raw_track(by[tid]))
+        out.append(_raw_track(by[n]))
     return out
 
 
@@ -1286,13 +1411,36 @@ def _cant_read(ctx, row) -> Response:
     raise R.SubsonicError(R.NOT_FOUND, "SoulSync can't read this file." + tip)
 
 
+def _stream_otf(ctx, otf_id: int) -> tuple[Dict[str, Any], str]:
+    from core.subsonic import on_the_fly as OTF
+    OTF.maybe_prune(ctx.db, _cfg)
+    otf_row = OTF.get_track(ctx.db, otf_id)
+    if not otf_row:
+        raise R.not_found("Song")
+    local = OTF.fetch_audio(ctx.db, otf_row, downloader=_hooks.get("otf_downloader"))
+    if not local:
+        raise R.SubsonicError(R.NOT_FOUND, "Could not fetch this song on the fly right now.")
+    updated = OTF.record_play(ctx.db, otf_id) or otf_row
+    if int(updated.get("play_count") or 0) >= 2:
+        _promote_otf(ctx, updated, "Replayed on-the-fly track in music app")
+    fake_row = {
+        "duration": int(updated.get("duration_ms") or 0),
+        "bitrate": int(updated.get("bitrate") or 192),
+    }
+    return fake_row, local
+
+
 @method("stream")
 def stream(ctx):
     from core.subsonic import transcode as X
-    row = _stream_row(ctx)
-    local = _local_file(ctx, row)
-    if not local:
-        return _cant_read(ctx, row)
+    kind, tid = L.parse_id(_required("id"), L.TRACK, L.OTF)
+    if kind == L.OTF:
+        row, local = _stream_otf(ctx, tid)
+    else:
+        row = _stream_row(ctx)
+        local = _local_file(ctx, row)
+        if not local:
+            return _cant_read(ctx, row)
     suffix = os.path.splitext(local)[1].lstrip(".").lower()
     plan = X.decide(suffix=suffix, source_kbps=L._kbps(row.get("bitrate")), fmt=_one("format", "") or "",
                     max_kbps=_int("maxBitRate", 0), default_fmt=str(_cfg("music_apps.transcode_format", "mp3")),
@@ -1321,10 +1469,14 @@ def stream(ctx):
 
 @method("download")
 def download(ctx):
-    row = _stream_row(ctx)
-    local = _local_file(ctx, row)
-    if not local:
-        return _cant_read(ctx, row)
+    kind, tid = L.parse_id(_required("id"), L.TRACK, L.OTF)
+    if kind == L.OTF:
+        _, local = _stream_otf(ctx, tid)
+    else:
+        row = _stream_row(ctx)
+        local = _local_file(ctx, row)
+        if not local:
+            return _cant_read(ctx, row)
     resp = _hooks["serve_file"](local)
     if isinstance(resp, Response):
         resp.headers["Content-Disposition"] = 'attachment; filename="%s"' % os.path.basename(local).replace('"', "")

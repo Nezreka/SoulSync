@@ -233,6 +233,9 @@ export interface MusicApps {
   slots_range: [number, number];
   formats: string[];
   ffmpeg: boolean;
+  on_the_fly_enabled?: boolean;
+  on_the_fly_ttl_days?: number;
+  on_the_fly_promote_wishlist?: boolean;
 }
 
 export interface NewMusicApp {
@@ -256,4 +259,7 @@ export const saveMusicAppSettings = (body: {
   bridge?: Partial<Record<BridgeServer['id'], boolean>>;
   transcode_format?: string;
   transcode_slots?: number;
+  on_the_fly_enabled?: boolean;
+  on_the_fly_ttl_days?: number;
+  on_the_fly_promote_wishlist?: boolean;
 }) => call<MusicApps>('/api/devices/music-apps/settings', json('PUT', body));

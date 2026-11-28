@@ -580,6 +580,7 @@ def music_apps_view():
     server's addresses, the media server switches and the transcoder."""
     from core.connect.pick import pick_list
     from core.subsonic import bridge as B
+    from core.subsonic import on_the_fly as OTF
     from core.subsonic import transcode as X
     db = get_database()
     profiles = [{"id": p["id"], "name": p["name"]} for p in pick_list(db, "music", login_mode=False)]
@@ -596,7 +597,10 @@ def music_apps_view():
                     "transcode_slots": X.clamp_jobs(config_manager.get("music_apps.transcode_slots",
                                                                        X.MAX_JOBS)),
                     "slots_range": [X.MIN_JOBS, X.MOST_JOBS],
-                    "formats": sorted(X.FORMATS), "ffmpeg": bool(X.ffmpeg())})
+                    "formats": sorted(X.FORMATS), "ffmpeg": bool(X.ffmpeg()),
+                    "on_the_fly_enabled": OTF.enabled(config_manager.get),
+                    "on_the_fly_ttl_days": OTF.ttl_days(config_manager.get),
+                    "on_the_fly_promote_wishlist": OTF.promote_wishlist(config_manager.get)})
 
 
 @bp.route("/api/devices/music-apps", methods=["POST"])
@@ -644,6 +648,7 @@ def set_up_music_app():
 def save_music_app_settings():
     """{bridge: {plex|jellyfin|navidrome: bool}, transcode_format?, transcode_slots?}"""
     from core.subsonic import bridge as B
+    from core.subsonic import on_the_fly as OTF
     from core.subsonic import transcode as X
     body = request.get_json(silent=True) or {}
     bridge = body.get("bridge") or {}
@@ -664,6 +669,17 @@ def save_music_app_settings():
             return jsonify({"success": False,
                             "error": f"Songs converted at once: pick {X.MIN_JOBS} to {X.MOST_JOBS}"}), 400
         config_manager.set("music_apps.transcode_slots", slots)
-    _audit("music_apps_settings", detail=json.dumps({"bridge": bridge, "format": fmt, "slots": slots},
+    if "on_the_fly_enabled" in body:
+        config_manager.set("music_apps.on_the_fly_enabled", bool(body["on_the_fly_enabled"]))
+    if "on_the_fly_ttl_days" in body:
+        ttl = body["on_the_fly_ttl_days"]
+        if isinstance(ttl, bool) or not isinstance(ttl, int) or not OTF.MIN_TTL_DAYS <= ttl <= OTF.MAX_TTL_DAYS:
+            return jsonify({"success": False,
+                            "error": f"Keep temporary files for: pick {OTF.MIN_TTL_DAYS} to {OTF.MAX_TTL_DAYS} days"}), 400
+        config_manager.set("music_apps.on_the_fly_ttl_days", ttl)
+    if "on_the_fly_promote_wishlist" in body:
+        config_manager.set("music_apps.on_the_fly_promote_wishlist", bool(body["on_the_fly_promote_wishlist"]))
+    _audit("music_apps_settings", detail=json.dumps({"bridge": bridge, "format": fmt, "slots": slots,
+                                                     "otf": body.get("on_the_fly_enabled")},
                                                     sort_keys=True)[:200])
     return music_apps_view()

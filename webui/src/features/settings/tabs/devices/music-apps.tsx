@@ -247,6 +247,50 @@ function Serving({ info, onSaved }: { info: MusicApps; onSaved: () => void }) {
           />
         </Row>
       ))}
+      <Row
+        label="Show unowned songs and stream on the fly"
+        htmlFor="music-app-otf-enabled"
+        help="Show songs from mirrored or discover playlists and search results even when not in your library yet, downloading a temporary copy when played."
+      >
+        <Switch
+          id="music-app-otf-enabled"
+          checked={Boolean(info.on_the_fly_enabled)}
+          onChange={(e) => void save({ on_the_fly_enabled: e.target.checked })}
+        />
+      </Row>
+      {info.on_the_fly_enabled ? (
+        <>
+          <Row
+            label="Keep temporary files for"
+            htmlFor="music-app-otf-ttl"
+            help="Temporary on-the-fly files are cleaned up after this many days unless replayed, starred, or added to a playlist."
+          >
+            <Select
+              id="music-app-otf-ttl"
+              value={String(info.on_the_fly_ttl_days ?? 7)}
+              onChange={(e) => void save({ on_the_fly_ttl_days: Number(e.target.value) })}
+              options={[
+                { value: '1', label: '1 day' },
+                { value: '3', label: '3 days' },
+                { value: '7', label: '7 days' },
+                { value: '14', label: '14 days' },
+                { value: '30', label: '30 days' },
+              ]}
+            />
+          </Row>
+          <Row
+            label="Promote appreciated songs to wishlist"
+            htmlFor="music-app-otf-promote"
+            help="When you replay, star, or add an on-the-fly song to a playlist, add it to the wishlist so your main download source grabs a permanent high-quality copy."
+          >
+            <Switch
+              id="music-app-otf-promote"
+              checked={info.on_the_fly_promote_wishlist !== false}
+              onChange={(e) => void save({ on_the_fly_promote_wishlist: e.target.checked })}
+            />
+          </Row>
+        </>
+      ) : null}
     </div>
   );
 }
