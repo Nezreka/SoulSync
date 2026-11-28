@@ -33,7 +33,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from core.subsonic import response as R
 
-ARTIST, ALBUM, TRACK, PLAYLIST, MIX = "ar", "al", "tr", "pl", "mx"
+ARTIST, ALBUM, TRACK, PLAYLIST, MIX, OTF = "ar", "al", "tr", "pl", "mx", "otf"
 IGNORED_ARTICLES = ("The", "El", "La", "Los", "Las", "Le", "Les", "A", "An")
 SNAPSHOT_TTL = 15 * 60
 _SNAPSHOT_KEEP = 6
