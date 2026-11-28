@@ -247,14 +247,14 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _get_status(source: str, ref: str):
-    """Poll the SHARED torrent/usenet client for a job's status (or None)."""
+def _get_status(source: str, ref: str, client_id: Optional[str] = None):
+    """Poll the torrent/usenet client that owns this job (defaulting to global active)."""
     try:
         if source == "torrent":
-            from core.torrent_clients import get_active_adapter
+            from core.torrent_clients import get_adapter_for_client
         else:
-            from core.usenet_clients import get_active_adapter
-        adapter = get_active_adapter()
+            from core.usenet_clients import get_adapter_for_client
+        adapter = get_adapter_for_client(client_id)
         if adapter is None:
             return None
         return _run(adapter.get_status(ref))
@@ -263,8 +263,14 @@ def _get_status(source: str, ref: str):
         return None
 
 
-def _resolve_path(reported):
+def _resolve_path(reported, *, source: str = "torrent", client_id: Optional[str] = None,
+                  library_key: Optional[str] = None):
     try:
+        if client_id or library_key:
+            from core.downloads.routing import resolve_completed_path_for_client
+            return resolve_completed_path_for_client(
+                reported, source=source, client_id=client_id, library_key=library_key
+            )
         from core.download_plugins.album_bundle import resolve_reported_save_path
         return resolve_reported_save_path(reported)
     except Exception:   # noqa: BLE001 - fall back to the raw path if the resolver isn't usable

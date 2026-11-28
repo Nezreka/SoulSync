@@ -25089,6 +25089,8 @@ from api.player_tracks import create_blueprint as _bp_player_tracks
 app.register_blueprint(_bp_player_tracks())
 from api.live import create_live_blueprint as _bp_live_tv
 app.register_blueprint(_bp_live_tv())
+from api.download_clients import bp as _bp_download_clients
+app.register_blueprint(_bp_download_clients)
 # ...and its home videos (core/video/home_videos.py)
 from api.player_home import create_blueprint as _bp_player_home
 app.register_blueprint(_bp_player_home())
