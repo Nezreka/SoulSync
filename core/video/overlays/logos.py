@@ -117,6 +117,33 @@ _NORMALIZERS = {
 # Which fields can be shown as a logo badge (i.e. have a pack).
 LOGO_FIELDS = tuple(_NORMALIZERS.keys())
 
+RATING_LOGO_PROVIDERS = (
+    "imdb", "rt", "rt_critic", "rt_audience",
+    "tmdb", "metacritic", "trakt", "tvmaze", "anilist",
+)
+
+
+def rating_logo_ref(provider: str, value) -> Optional[Tuple[str, str]]:
+    """Resolve a rating provider + score to ('rating', logo_name) (#2327).
+    Rotten Tomatoes picks Fresh (>=60%) vs Rotten (<60%) for both critic and
+    audience ratings. Returns None when value is missing."""
+    if value is None or value == "":
+        return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    if score <= 0:
+        return None
+    p = str(provider or "").strip().lower()
+    if p in ("rt", "rt_critic"):
+        return ("rating", "rt_fresh" if score >= 60 else "rt_rotten")
+    if p == "rt_audience":
+        return ("rating", "rt_aud_fresh" if score >= 60 else "rt_aud_rotten")
+    if p in ("imdb", "tmdb", "metacritic", "trakt", "tvmaze", "anilist"):
+        return ("rating", p)
+    return None
+
 
 def logo_ref(field: str, value) -> Optional[Tuple[str, str]]:
     """(pack, name) for a field's value, or None when it can't map to a logo

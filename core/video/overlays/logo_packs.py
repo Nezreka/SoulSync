@@ -78,6 +78,18 @@ CURATED = {
         "16_9": _img("aspect/logos/1.78.png"),
         "2_40_1": _img("aspect/logos/2.35.png"),
     },
+    "rating": {   # official rating provider logos from Kometa (#2327)
+        "imdb": _main("rating/IMDb.png"),
+        "tmdb": _main("rating/TMDb.png"),
+        "metacritic": _main("rating/Metacritic.png"),
+        "trakt": _main("rating/Trakt.png"),
+        "tvmaze": _main("rating/TVMaze.png"),
+        "anilist": _main("rating/AniList.png"),
+        "rt_fresh": _main("rating/RT-Crit-Fresh.png"),
+        "rt_rotten": _main("rating/RT-Crit-Rotten.png"),
+        "rt_aud_fresh": _main("rating/RT-Aud-Fresh.png"),
+        "rt_aud_rotten": _main("rating/RT-Aud-Rotten.png"),
+    },
 }
 
 # field -> (repo, folder). Whole folder pulled + re-slugged to our convention.

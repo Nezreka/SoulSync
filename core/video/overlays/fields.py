@@ -116,6 +116,7 @@ _FORMATTERS = {
     "aspect": _aspect,
     "imdb": lambda v: None if _num(v) is None else "IMDb " + str(_round1(v)),
     "rt": lambda v: None if _num(v) is None else "RT " + str(v) + "%",
+    "rt_audience": lambda v: None if _num(v) is None else "RT Aud " + str(v) + "%",
     "metacritic": lambda v: None if _num(v) is None else "MC " + str(v),
     "tmdb": lambda v: None if _num(v) is None else "TMDB " + str(_round1(v)),
     "trakt": lambda v: None if _num(v) is None else "Trakt " + str(_round1(v)),
@@ -157,3 +158,58 @@ def format_field(field: str, value) -> str | None:
         return fn(value)
     except (TypeError, ValueError):
         return None
+
+
+# Rating logo badges (#2327): provider scale (10 vs 100) and default display format.
+_RATING_SCALE = {
+    "imdb": 10.0,
+    "tmdb": 10.0,
+    "trakt": 10.0,
+    "tvmaze": 10.0,
+    "rt": 100.0,
+    "rt_critic": 100.0,
+    "rt_audience": 100.0,
+    "metacritic": 100.0,
+    "anilist": 100.0,
+}
+
+_RATING_DEFAULT_FMT = {
+    "imdb": "decimal",
+    "tmdb": "decimal",
+    "trakt": "decimal",
+    "tvmaze": "decimal",
+    "rt": "percentage",
+    "rt_critic": "percentage",
+    "rt_audience": "percentage",
+    "metacritic": "numeric",
+    "anilist": "percentage",
+}
+
+
+def format_rating_score(provider: str, value, fmt: str = "auto") -> str | None:
+    """Score text for a native rating logo badge (#2327).
+    Supports 'auto' (provider natural), 'percentage', 'decimal', and 'numeric'.
+    Returns None when value is missing or non-numeric so the badge auto-hides."""
+    if _num(value) is None:
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if num <= 0:
+        return None
+    key = str(provider or "imdb").lower()
+    scale = _RATING_SCALE.get(key, 10.0)
+    mode = str(fmt or "auto").lower()
+    if mode == "auto":
+        mode = _RATING_DEFAULT_FMT.get(key, "decimal")
+    if mode == "percentage":
+        pct = num * 10.0 if scale <= 10.0 else num
+        return f"{int(round(pct))}%"
+    if mode == "decimal":
+        dec = num / 10.0 if scale > 10.0 else num
+        return f"{round(dec, 1):.1f}"
+    # numeric
+    if scale > 10.0 or float(num).is_integer():
+        return str(int(round(num)))
+    return str(_round1(num))

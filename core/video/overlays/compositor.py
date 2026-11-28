@@ -18,8 +18,8 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from utils.logging_config import get_logger
 
-from .fields import format_field
-from .logos import logo_ref
+from .fields import format_field, format_rating_score
+from .logos import logo_ref, rating_logo_ref
 
 logger = get_logger("video.overlays.compositor")
 
@@ -358,8 +358,8 @@ def _star_points(cx, cy, r_out, r_in, n=5):
 
 
 # rating field → its max (so value/max fills the stars correctly)
-_RATING_MAX = {"rt": 100.0, "metacritic": 100.0, "imdb": 10.0, "tmdb": 10.0, "trakt": 10.0,
-               "tvmaze": 10.0, "anilist": 100.0}
+_RATING_MAX = {"rt": 100.0, "rt_critic": 100.0, "rt_audience": 100.0, "metacritic": 100.0,
+               "imdb": 10.0, "tmdb": 10.0, "trakt": 10.0, "tvmaze": 10.0, "anilist": 100.0}
 
 
 _BG_ALIGN = {"left": 0.0, "center": 0.5, "right": 1.0, "top": 0.0, "middle": 0.5, "bottom": 1.0}
@@ -573,6 +573,8 @@ def _tile_for(layer, W, H, values, image_loader, logo_loader=None):
         return _row_tile(layer, W, H, values)
     if kind == "rating":
         return _rating_tile(layer, W, H, values)
+    if kind == "rating_badge":
+        return _rating_badge_tile(layer, W, H, values, logo_loader)
     if kind == "ribbon":
         return _ribbon_tile(layer, W, H)
     if kind == "image":
@@ -633,10 +635,132 @@ def _logobadge_tile(layer, W, H, values, logo_loader):
     return _text_tile({**layer, "text": text}, W, H, values)
 
 
+# Built-in crisp fallback emblems for rating providers when the Kometa PNG pack
+# isn't installed yet (#2327). Installing the pack replaces these with the
+# official PNGs automatically via logo_loader("rating", name).
+_RATING_FALLBACK_STYLE = {
+    "imdb": ("IMDb", (245, 197, 24, 255), (16, 16, 16, 255), 1.9),
+    "tmdb": ("TMDB", (1, 180, 228, 255), (13, 37, 63, 255), 1.95),
+    "metacritic": ("MC", (102, 204, 51, 255), (16, 16, 16, 255), 1.3),
+    "trakt": ("Trakt", (237, 28, 36, 255), (255, 255, 255, 255), 1.85),
+    "tvmaze": ("TVm", (60, 148, 139, 255), (255, 255, 255, 255), 1.75),
+    "anilist": ("AL", (2, 169, 255, 255), (11, 22, 34, 255), 1.3),
+    "rt_fresh": ("RT", (250, 50, 10, 255), (255, 255, 255, 255), 1.15),
+    "rt_rotten": ("RT", (90, 180, 45, 255), (255, 255, 255, 255), 1.15),
+    "rt_aud_fresh": ("POP", (245, 197, 24, 255), (20, 20, 20, 255), 1.15),
+    "rt_aud_rotten": ("POP", (110, 170, 55, 255), (20, 20, 20, 255), 1.15),
+}
+
+
+def _builtin_rating_logo(logo_name: str, logo_h: int) -> Image.Image:
+    """Clean vector-drawn provider badge at `logo_h` pixels tall."""
+    h = max(12, int(logo_h))
+    label, bg_rgba, fg_rgba, aspect = _RATING_FALLBACK_STYLE.get(
+        logo_name, ("★", (245, 197, 24, 255), (16, 16, 16, 255), 1.2)
+    )
+    w = max(h, int(round(h * aspect)))
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    if logo_name in ("rt_fresh", "rt_rotten"):
+        # tomato / splat circle + green leaf
+        pad = max(1, h // 10)
+        d.ellipse([pad, pad + h // 8, w - pad, h - pad], fill=bg_rgba)
+        d.polygon([(w // 2, pad), (w // 2 - h // 5, pad + h // 4), (w // 2 + h // 5, pad + h // 4)],
+                  fill=(65, 175, 55, 255))
+        return img
+    if logo_name in ("rt_aud_fresh", "rt_aud_rotten"):
+        # popcorn bucket (red/white stripes + yellow top; tilted green tint when rotten)
+        pad = max(1, h // 10)
+        d.rounded_rectangle([pad + w // 8, h // 3, w - pad - w // 8, h - pad],
+                            radius=max(2, h // 10), fill=(220, 42, 34, 255))
+        d.ellipse([pad, pad, w - pad, h // 2 + h // 8], fill=bg_rgba)
+        return img
+    rad = max(2, int(round(h * 0.22)))
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=rad, fill=bg_rgba)
+    fpx = max(8, int(round(h * 0.54)))
+    font = _font("Inter", 900, fpx)
+    bbox = d.textbbox((0, 0), label, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    d.text(((w - tw) / 2 - bbox[0], (h - th) / 2 - bbox[1]), label, font=font, fill=fg_rgba)
+    return img
+
+
+def _rating_badge_tile(layer, W, H, values, logo_loader):
+    """Native rating provider logo + dynamic score badge (#2327).
+    Supports horizontal and vertical layouts, percentage/decimal/numeric score
+    formatting, official Kometa logo packs with built-in fallback marks, and
+    auto-hides cleanly when rating data is unavailable."""
+    provider = str(layer.get("provider") or layer.get("field") or "imdb").strip().lower()
+    vals = values or {}
+    raw = vals.get(provider)
+    if raw is None and provider == "rt_critic":
+        raw = vals.get("rt")
+    elif raw is None and provider == "rt":
+        raw = vals.get("rt_critic")
+    score_text = format_rating_score(provider, raw, layer.get("format") or "auto")
+    if not score_text:
+        return None
+    ref = rating_logo_ref(provider, raw)
+    if not ref:
+        return None
+
+    px = max(8, int(round(_as_float(layer.get("size"), 0.036) * H)))
+    logo_scale = max(0.5, min(3.0, _as_float(layer.get("logoScale"), 1.15)))
+    logo_h = max(12, int(round(px * logo_scale)))
+    gap = max(0, int(round(_as_float(layer.get("gap"), 0.010) * H)))
+    layout = str(layer.get("layout") or "horizontal").strip().lower()
+
+    # Load official PNG from Kometa pack if installed, else built-in crisp mark
+    logo_img = None
+    if logo_loader:
+        try:
+            data = logo_loader(ref[0], ref[1])
+        except Exception:
+            data = None
+        if data:
+            try:
+                loaded = Image.open(io.BytesIO(data)).convert("RGBA")
+                if loaded.height > 0:
+                    lw = max(1, int(round(loaded.width * logo_h / loaded.height)))
+                    logo_img = loaded.resize((lw, logo_h), Image.LANCZOS)
+            except Exception:
+                logger.warning("rating logo image failed (%s/%s)", ref[0], ref[1], exc_info=True)
+    if logo_img is None:
+        logo_img = _builtin_rating_logo(ref[1], logo_h)
+
+    font = _font(layer.get("font") or "Inter", layer.get("weight", 800), px)
+    color = _hex_rgba(layer.get("color", "#ffffff"), 1.0)
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    tb = probe.textbbox((0, 0), score_text, font=font)
+    tw, th = max(1, tb[2] - tb[0]), max(1, tb[3] - tb[1])
+    text_tile = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+    ImageDraw.Draw(text_tile).text((-tb[0], -tb[1]), score_text, font=font, fill=color)
+
+    if layout == "vertical":
+        cw = max(logo_img.width, text_tile.width)
+        ch = logo_img.height + gap + text_tile.height
+        content = Image.new("RGBA", (max(1, cw), max(1, ch)), (0, 0, 0, 0))
+        content.alpha_composite(logo_img, ((cw - logo_img.width) // 2, 0))
+        content.alpha_composite(text_tile, ((cw - text_tile.width) // 2, logo_img.height + gap))
+    else:
+        cw = logo_img.width + gap + text_tile.width
+        ch = max(logo_img.height, text_tile.height)
+        content = Image.new("RGBA", (max(1, cw), max(1, ch)), (0, 0, 0, 0))
+        content.alpha_composite(logo_img, (0, (ch - logo_img.height) // 2))
+        content.alpha_composite(text_tile, (logo_img.width + gap, (ch - text_tile.height) // 2))
+
+    # Default to a clean dark pill background if bg wasn't explicitly set
+    if "bg" not in layer:
+        layer = {**layer, "bg": {"enabled": True, "color": "#11141a", "opacity": 0.84,
+                                 "radius": 0.014, "padX": 0.016, "padY": 0.010}}
+    return _bg_wrap(content, layer, W, H)
+
+
 # Representative values so a gallery thumbnail's dynamic badges render something.
 _THUMB_SAMPLE = {
     "resolution": "2160p", "hdr": "HDR", "video_codec": "hevc", "audio_codec": "atmos",
-    "source": "bluray", "imdb": 8.4, "rt": 92, "metacritic": 81, "tmdb": 8.1,
+    "source": "bluray", "imdb": 8.4, "rt": 92, "rt_audience": 89, "metacritic": 81, "tmdb": 8.1,
+    "trakt": 8.2, "tvmaze": 8.0, "anilist": 86,
     "content_rating": "PG-13", "status": "Returning", "year": 2021, "runtime": 148,
     "season_count": 4, "episode_count": 62, "title": "Example", "network": "HBO", "studio": "A24",
     "genre": "Sci-Fi",
