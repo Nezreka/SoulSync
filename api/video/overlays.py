@@ -396,8 +396,13 @@ def register_routes(bp):
         the real mark. 404 when no pack/match — the editor falls back to text."""
         from flask import Response, abort
         from core.video.overlays.assets import AssetStore
-        from core.video.overlays.logos import logo_ref
-        ref = logo_ref(field, value)
+        from core.video.overlays.logos import RATING_LOGO_PROVIDERS, logo_ref, rating_logo_ref
+        if field == "rating":
+            ref = ("rating", str(value).strip().lower())
+        elif str(field or "").lower() in RATING_LOGO_PROVIDERS:
+            ref = rating_logo_ref(field, value)
+        else:
+            ref = logo_ref(field, value)
         if not ref:
             abort(404)
         data = AssetStore.default().read_logo(ref[0], ref[1])

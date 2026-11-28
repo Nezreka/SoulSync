@@ -65,6 +65,7 @@
         aspect: { label: 'Aspect ratio', cat: 'Quality', opts: ['4:3', '16:9', '2:1', '2.40:1'], fmt: function (v) { return v ? String(v) : null; } },
         imdb: { label: 'IMDb rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'IMDb ' + (Math.round(v * 10) / 10); } },
         rt: { label: 'Rotten Tomatoes', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'RT ' + v + '%'; } },
+        rt_audience: { label: 'RT Audience', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'RT Aud ' + v + '%'; } },
         metacritic: { label: 'Metacritic', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'MC ' + v; } },
         tmdb: { label: 'TMDB rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'TMDB ' + (Math.round(v * 10) / 10); } },
         trakt: { label: 'Trakt rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'Trakt ' + (Math.round(v * 10) / 10); } },
@@ -104,7 +105,7 @@
         'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Kids', 'Music', 'Mystery', 'News', 'Reality',
         'Romance', 'Science Fiction', 'Sci-Fi & Fantasy', 'Soap', 'Talk', 'TV Movie', 'Thriller', 'War',
         'War & Politics', 'Western'];
-    var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'imdb', 'rt', 'metacritic', 'tmdb', 'trakt', 'tvmaze', 'anilist',
+    var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'imdb', 'rt', 'rt_audience', 'metacritic', 'tmdb', 'trakt', 'tvmaze', 'anilist',
         'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'subtitles', 'versions', 'mediastinger', 'title', 'tagline', 'collection', 'awards', 'streaming', 'network', 'studio',
         'season_number', 'episode_number', 'episode_code'];
     var FIELD_CATS = ['Quality', 'Ratings', 'Details', 'Episode'];
@@ -114,7 +115,72 @@
 
     // Which logo-badge fields the Kometa installer can actually source art for
     // (mirrors logo_packs.SOURCEABLE_FIELDS); used to word the install popup.
-    var LOGO_SOURCEABLE = ['resolution', 'audio_codec', 'hdr', 'source', 'aspect', 'streaming', 'network', 'studio'];
+    var LOGO_SOURCEABLE = ['resolution', 'audio_codec', 'hdr', 'source', 'aspect', 'rating', 'streaming', 'network', 'studio'];
+
+    // Native rating logo badges (#2327): provider list, score formatter and crisp
+    // inline SVG fallback marks (upgraded automatically to official Kometa PNGs
+    // when the rating logo pack is installed).
+    var RATING_BADGE_PROVIDERS = [
+        { id: 'imdb', label: 'IMDb', scale: 10, defFmt: 'decimal' },
+        { id: 'rt', label: 'Rotten Tomatoes (Critics)', scale: 100, defFmt: 'percentage' },
+        { id: 'rt_audience', label: 'Rotten Tomatoes (Audience)', scale: 100, defFmt: 'percentage' },
+        { id: 'tmdb', label: 'TMDB', scale: 10, defFmt: 'decimal' },
+        { id: 'metacritic', label: 'Metacritic', scale: 100, defFmt: 'numeric' },
+        { id: 'trakt', label: 'Trakt', scale: 10, defFmt: 'decimal' },
+        { id: 'tvmaze', label: 'TVmaze', scale: 10, defFmt: 'decimal' },
+        { id: 'anilist', label: 'AniList', scale: 100, defFmt: 'percentage' },
+    ];
+    function ratingProviderInfo(id) {
+        var key = String(id || 'imdb').toLowerCase();
+        if (key === 'rt_critic') key = 'rt';
+        for (var i = 0; i < RATING_BADGE_PROVIDERS.length; i++) {
+            if (RATING_BADGE_PROVIDERS[i].id === key) return RATING_BADGE_PROVIDERS[i];
+        }
+        return RATING_BADGE_PROVIDERS[0];
+    }
+    function formatRatingBadgeScore(provider, val, fmt) {
+        if (val == null || val === '') return null;
+        var num = Number(val);
+        if (!isFinite(num) || num <= 0) return null;
+        var info = ratingProviderInfo(provider);
+        var mode = (!fmt || fmt === 'auto') ? info.defFmt : fmt;
+        if (mode === 'percentage') {
+            var pctVal = info.scale <= 10 ? num * 10 : num;
+            return Math.round(pctVal) + '%';
+        }
+        if (mode === 'decimal') {
+            var decVal = info.scale > 10 ? num / 10 : num;
+            return (Math.round(decVal * 10) / 10).toFixed(1);
+        }
+        return info.scale > 10 || Math.floor(num) === num ? String(Math.round(num)) : String(Math.round(num * 10) / 10);
+    }
+    function ratingBadgeSvg(provider, val, h) {
+        var p = ratingProviderInfo(provider).id;
+        var score = Number(val) || 0;
+        var fresh = score >= 60;
+        if (p === 'rt') {
+            var fill = fresh ? '#fa320a' : '#5ab42d';
+            return '<svg width="' + Math.round(h * 1.1) + '" height="' + h + '" viewBox="0 0 24 24" style="display:block;flex-shrink:0">' +
+                '<circle cx="12" cy="13.5" r="8.5" fill="' + fill + '"/>' +
+                '<path d="M12 2.5 L8.5 7.5 L15.5 7.5 Z" fill="#41af37"/></svg>';
+        }
+        if (p === 'rt_audience') {
+            var topFill = fresh ? '#f5c518' : '#6eaa37';
+            return '<svg width="' + Math.round(h * 1.1) + '" height="' + h + '" viewBox="0 0 24 24" style="display:block;flex-shrink:0">' +
+                '<rect x="5" y="9" width="14" height="12" rx="2.5" fill="#dc2a22"/>' +
+                '<ellipse cx="12" cy="8.5" rx="7.5" ry="4.5" fill="' + topFill + '"/></svg>';
+        }
+        var styles = {
+            imdb: ['#f5c518', '#101010', 'IMDb', 1.9],
+            tmdb: ['#01b4e4', '#0d253f', 'TMDB', 1.95],
+            metacritic: ['#66cc33', '#101010', 'MC', 1.3],
+            trakt: ['#ed1c24', '#ffffff', 'Trakt', 1.85],
+            tvmaze: ['#3c948b', '#ffffff', 'TVm', 1.75],
+            anilist: ['#02a9ff', '#0b1622', 'AL', 1.3],
+        }[p] || ['#f5c518', '#101010', '★', 1.2];
+        var w = Math.round(h * styles[3]);
+        return '<span style="display:inline-flex;align-items:center;justify-content:center;height:' + h + 'px;min-width:' + w + 'px;padding:0 ' + Math.round(h * 0.22) + 'px;border-radius:' + Math.max(2, Math.round(h * 0.22)) + 'px;background:' + styles[0] + ';color:' + styles[1] + ';font-weight:900;font-size:' + Math.max(8, Math.round(h * 0.54)) + 'px;line-height:1;letter-spacing:-0.02em;flex-shrink:0">' + styles[2] + '</span>';
+    }
 
     // Overlay templates come in three types, split by BOTH art shape and which
     // fields make sense: Poster (movies+shows, 2:3), Season (2:3, season art),
@@ -1076,6 +1142,27 @@
             l.bg.lineColor = l.bg.lineColor || '#ffffff';
             if (typeof l.bg.lineW !== 'number') l.bg.lineW = 0.004;
         }
+        if (l.type === 'rating_badge') {
+            l.provider = l.provider || l.field || 'imdb';
+            l.layout = l.layout === 'vertical' ? 'vertical' : 'horizontal';
+            l.format = l.format || 'auto';
+            if (typeof l.size !== 'number') l.size = 0.036;
+            if (typeof l.logoScale !== 'number') l.logoScale = 1.15;
+            if (typeof l.gap !== 'number') l.gap = 0.010;
+            l.color = l.color || '#ffffff';
+            l.font = l.font || 'Inter';
+            if (typeof l.weight !== 'number') l.weight = 800;
+            l.bg = l.bg || {};
+            if (typeof l.bg.enabled !== 'boolean') l.bg.enabled = true;
+            l.bg.color = l.bg.color || '#11141a';
+            if (typeof l.bg.opacity !== 'number') l.bg.opacity = 0.84;
+            if (typeof l.bg.radius !== 'number') l.bg.radius = 0.014;
+            if (typeof l.bg.padX !== 'number') l.bg.padX = 0.016;
+            if (typeof l.bg.padY !== 'number') l.bg.padY = 0.010;
+            l.bg.line = !!l.bg.line;
+            l.bg.lineColor = l.bg.lineColor || '#ffffff';
+            if (typeof l.bg.lineW !== 'number') l.bg.lineW = 0.004;
+        }
         if (l.type === 'logobadge') {
             l.field = (l.field && LOGO_BADGE_FIELDS.indexOf(l.field) > -1) ? l.field : 'audio_codec';
             if (typeof l.w !== 'number') l.w = 0.14;
@@ -1336,6 +1423,7 @@
         // chips that wrap and show exactly what lands on the poster.
         var html = palTools('Basics',
             palItem('text', 'Text', I.text) + palItem('row', 'Badge row', I.row) +
+            palItem('rating_badge', 'Rating badge', I.star) +
             palItem('rating', 'Rating stars', I.star));
         var avail = fieldsForType(templateKind());
         FIELD_CATS.forEach(function (cat) {
@@ -1408,6 +1496,14 @@
             return { id: uid(), type: 'ribbon', name: 'Ribbon', corner: 'top-right', size: 0.2,
                 color: '#d11e2a', textColor: '#ffffff', text: 'NEW', font: 'Inter', weight: 800, upper: true,
                 textScale: 0.42, bandOpacity: 1, opacity: 1, hidden: false, x: 0.5, y: 0.5, anchor: 'center', rotation: 0 };
+        }
+        if (kind === 'rating_badge') {
+            return { id: uid(), type: 'rating_badge', name: 'Rating badge', anchor: 'bottom-left',
+                x: 0.06, y: 0.90, hidden: false, opacity: 1, rotation: 0,
+                provider: 'imdb', layout: 'horizontal', format: 'auto',
+                size: 0.036, logoScale: 1.15, gap: 0.010,
+                color: '#ffffff', font: 'Inter', weight: 800,
+                bg: { enabled: true, color: '#11141a', opacity: 0.84, radius: 0.014, padX: 0.016, padY: 0.010, w: 0, h: 0, align: 'center', line: false, lineColor: '#ffffff', lineW: 0.004 } };
         }
         if (kind === 'rating') {
             return { id: uid(), type: 'rating', name: 'Rating stars', anchor: 'bottom-left',
@@ -1725,6 +1821,36 @@
             } else {
                 el.innerHTML = imgPlaceholder(l);
             }
+            return;
+        }
+        if (l.type === 'rating_badge') {
+            var rbProv = l.provider || 'imdb';
+            var rbRaw = (ed.sample || {})[rbProv];
+            if (rbRaw == null && rbProv === 'rt_critic') rbRaw = (ed.sample || {}).rt;
+            var rbScore = formatRatingBadgeScore(rbProv, rbRaw, l.format || 'auto');
+            el.style.transformOrigin = 'center';
+            applyBadgeBg(el, l.bg);
+            if (!rbScore) { el.innerHTML = ''; el.style.width = 'auto'; return; }
+            var rbPx = Math.max(8, (l.size || 0.036) * ed.H);
+            var rbLogoH = Math.max(12, Math.round(rbPx * (l.logoScale || 1.15)));
+            var rbGap = Math.max(0, Math.round((l.gap != null ? l.gap : 0.010) * ed.H));
+            var rbVert = l.layout === 'vertical';
+            var rbSrc = '/api/video/overlays/logo/' + encodeURIComponent(rbProv) + '/' + encodeURIComponent(String(rbRaw));
+            el.innerHTML = '<div style="display:inline-flex;flex-direction:' + (rbVert ? 'column' : 'row') +
+                ';align-items:center;justify-content:center;gap:' + rbGap + 'px">' +
+                '<span class="voe-rb-logo" style="display:inline-flex;align-items:center;justify-content:center">' +
+                '<img src="' + esc(rbSrc) + '" style="height:' + rbLogoH + 'px;width:auto;display:block" draggable="false">' +
+                '</span>' +
+                '<span style="color:' + esc(l.color || '#ffffff') + ';font-family:' + fontStack(l.font) +
+                ';font-weight:' + (l.weight || 800) + ';font-size:' + rbPx + 'px;line-height:1;white-space:nowrap">' +
+                esc(rbScore) + '</span></div>';
+            var rbIm = el.querySelector('img');
+            var rbLogoWrap = el.querySelector('.voe-rb-logo');
+            rbIm.onload = function () { layoutLayer(el, l); };
+            rbIm.onerror = function () {
+                if (rbLogoWrap) rbLogoWrap.innerHTML = ratingBadgeSvg(rbProv, rbRaw, rbLogoH);
+                layoutLayer(el, l);
+            };
             return;
         }
         if (l.type === 'logobadge') {
@@ -2164,7 +2290,7 @@
     // ── layers panel (scene list) ───────────────────────────────────────────────
     function layerIcon(l) {
         if (l.type === 'row') return I.row;
-        if (l.type === 'rating') return I.star;
+        if (l.type === 'rating' || l.type === 'rating_badge') return I.star;
         if (l.type === 'logobadge') return I.logo;
         if (l.type === 'ribbon') return I.ribbon;
         if (l.binding) return catIcon((FIELDS[l.binding.field] || {}).cat);
@@ -2175,6 +2301,7 @@
     function layerName(l) {
         if (l.name) return l.name;
         if (l.type === 'row') return 'Badge row';
+        if (l.type === 'rating_badge') return ratingProviderInfo(l.provider).label + ' badge';
         if (l.type === 'rating') return 'Rating stars';
         if (l.type === 'logobadge') return (FIELDS[l.field] || {}).label ? (FIELDS[l.field].label + ' logo') : 'Logo badge';
         if (l.binding) return (FIELDS[l.binding.field] || {}).label;
@@ -2559,6 +2686,34 @@
                           : '')
                     : ''));
         }
+        if (l.type === 'rating_badge') {
+            if (!l.bg) l.bg = { enabled: true, color: '#11141a', opacity: 0.84, radius: 0.014, padX: 0.016, padY: 0.010, w: 0, h: 0, align: 'center', line: false, lineColor: '#ffffff', lineW: 0.004 };
+            var rbPsel = '<select class="voe-input" data-inspsel="provider">' + RATING_BADGE_PROVIDERS.map(function (p) {
+                return '<option value="' + p.id + '"' + (p.id === (l.provider || 'imdb') ? ' selected' : '') + '>' + esc(p.label) + '</option>';
+            }).join('') + '</select>';
+            var rbLsel = '<select class="voe-input" data-inspsel="layout">' +
+                '<option value="horizontal"' + (l.layout !== 'vertical' ? ' selected' : '') + '>Horizontal (logo beside score)</option>' +
+                '<option value="vertical"' + (l.layout === 'vertical' ? ' selected' : '') + '>Vertical (logo above score)</option></select>';
+            var rbFsel = '<select class="voe-input" data-inspsel="format">' +
+                '<option value="auto"' + ((l.format || 'auto') === 'auto' ? ' selected' : '') + '>Auto (provider default)</option>' +
+                '<option value="decimal"' + (l.format === 'decimal' ? ' selected' : '') + '>Decimal (8.4)</option>' +
+                '<option value="percentage"' + (l.format === 'percentage' ? ' selected' : '') + '>Percentage (84%)</option>' +
+                '<option value="numeric"' + (l.format === 'numeric' ? ' selected' : '') + '>Numeric (84)</option></select>';
+            var rbSample = formatRatingBadgeScore(l.provider || 'imdb', (ed.sample || {})[l.provider || 'imdb'], l.format || 'auto');
+            html += inspSection('Rating badge',
+                field('Provider', rbPsel) +
+                field('Layout', rbLsel) +
+                field('Format', rbFsel) +
+                field('Shows', '<span class="voe-data-preview">' + esc(rbSample || 'Hidden (no rating)') + '</span>') +
+                row2(field('Logo size', numInput('logoScale', Math.round((l.logoScale || 1.15) * 100), '%')),
+                     field('Spacing', numInput('gap', pct(l.gap != null ? l.gap : 0.010), '%'))));
+            html += inspSection('Score typography',
+                field('Font', fontSelect(l.font)) +
+                field('Weight', weightSelect(l.weight)) +
+                row2(field('Size', numInput('size', pct(l.size || 0.036), '%')),
+                     field('Color', colorField('color', l.color || '#ffffff'))));
+            html += bgInspSection(l);
+        }
         if (l.type === 'logobadge') {
             if (!l.bg) l.bg = { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012, line: false, lineColor: '#ffffff', lineW: 0.004 };
             var lbsel = '<select class="voe-input" data-inspsel="field">' + LOGO_BADGE_FIELDS.map(function (k) {
@@ -2758,6 +2913,7 @@
         else if (key === 'rowShadowDy') l.style.shadowDy = num / 100;
         else if (key === 'rowShadowOpacity') l.style.shadowOpacity = clamp01(num / 100);
         else if (key === 'gap') l.gap = Math.max(0, num / 100);
+        else if (key === 'logoScale') l.logoScale = Math.max(0.5, Math.min(3.0, num / 100));
         else if (key === 'rowSize') l.style.size = Math.max(0.008, num / 100);
         else if (key === 'rowBgOpacity') l.style.bg.opacity = clamp01(num / 100);
         else if (key === 'rowRadius') l.style.bg.radius = Math.max(0, num / 100);
@@ -2864,7 +3020,7 @@
                 else if (key === 'condVal') (l.when = l.when || {}).value = sel.value;
                 else l[key] = sel.value;
                 refreshLayer(l.id);
-                if (key === 'ratingField' || key === 'field' || key === 'condField' || key === 'condOp') renderInspector();   // swap op list / value control / logo field
+                if (key === 'ratingField' || key === 'provider' || key === 'layout' || key === 'format' || key === 'field' || key === 'condField' || key === 'condOp') renderInspector();   // swap op list / value control / logo field
                 markDirty();
             });
         });
@@ -3055,9 +3211,9 @@
         // bound badges, the title logo, badge rows (data-bound pills), AND logo badges
         // (their image + text fallback come from the field's sample value).
         ed.layers.forEach(function (l) {
-            if (l.binding || l.type === 'row' || l.type === 'rating' || l.type === 'logobadge' || (l.type === 'image' && l.logo) || (l.when && l.when.field)) refreshLayer(l.id);
+            if (l.binding || l.type === 'row' || l.type === 'rating' || l.type === 'rating_badge' || l.type === 'logobadge' || (l.type === 'image' && l.logo) || (l.when && l.when.field)) refreshLayer(l.id);
         });
-        if (ed.selected) { var s = layerById(ed.selected); if (s && (s.binding || s.type === 'row' || s.type === 'rating' || s.type === 'logobadge')) renderInspector(); }
+        if (ed.selected) { var s = layerById(ed.selected); if (s && (s.binding || s.type === 'row' || s.type === 'rating' || s.type === 'rating_badge' || s.type === 'logobadge')) renderInspector(); }
     }
 
     var openPop = null;
