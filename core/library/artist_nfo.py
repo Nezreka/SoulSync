@@ -18,6 +18,7 @@ artist folder (``Compilations/<Album>/track.mp3``) gets no nfo.
 """
 
 import os
+import re
 import threading
 import xml.etree.ElementTree as ET
 from typing import Tuple
@@ -27,6 +28,8 @@ from utils.logging_config import get_logger
 logger = get_logger("library.artist_nfo")
 
 ARTIST_NFO_FILENAME = "artist.nfo"
+_UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 # Opt-in setting (default off) gating the automatic import-time write.
 # The explicit backfill repair job bypasses it via force=True.
@@ -247,11 +250,15 @@ def ensure_artist_nfo_for_track(track_path: str, cfg, *, force: bool = False,
         # and the fallback only applies when the DB artist name matches the
         # file's ALBUMARTIST (never pair a re-identified MBID with a stale
         # name).
-        file_mbid = str(
+        # Multi-artist releases carry several IDs joined by ", " (see
+        # read_embedded_tags); keep the first one, and only if it is a UUID.
+        raw_mbid = str(
             tags.get("musicbrainz_albumartistid")
             or tags.get("musicbrainz_album_artist_id")
             or ""
-        ).strip()
+        )
+        first_mbid = re.split(r"[,;/]", raw_mbid, maxsplit=1)[0].strip()
+        file_mbid = first_mbid if _UUID_RE.fullmatch(first_mbid) else ""
         mbid = file_mbid
         if not mbid and fallback_mbid and fallback_name:
             if album_artist.casefold() == str(fallback_name).strip().casefold():
