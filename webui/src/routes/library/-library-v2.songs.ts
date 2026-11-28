@@ -137,6 +137,61 @@ export async function fetchSongCopies(trackId: string | number): Promise<Library
   return payload.copies ?? [];
 }
 
+/** All matching song IDs across every page for the current filters (#2339). */
+export async function fetchMatchingSongIds(
+  search: LibrarySearch,
+): Promise<{ ids: number[]; total: number; capped: boolean }> {
+  const params: Record<string, string | number> = {};
+  if (search.q.trim()) params.search = search.q.trim();
+  if (search.letter && search.letter !== 'all') params.letter = search.letter;
+  if (search.dupes) params.dupes = 1;
+  if (search.quality) params.quality = search.quality;
+  const payload = await readJson<{
+    success?: boolean;
+    error?: string;
+    ids?: number[];
+    total?: number;
+    capped?: boolean;
+  }>(apiClient.get('library/v2/songs/ids', { searchParams: params }));
+  if (payload.success === false) throw new Error(payload.error || "Couldn't load matching songs");
+  return {
+    ids: payload.ids ?? [],
+    total: payload.total ?? 0,
+    capped: payload.capped === true,
+  };
+}
+
+export interface BulkSongDeleteResult {
+  success?: boolean;
+  error?: string;
+  deleted_count?: number;
+  files_deleted?: number;
+  files_failed?: number;
+  albums_removed?: number;
+  artists_removed?: number;
+  folders_removed?: number;
+  blacklisted?: number;
+}
+
+/** Bulk-delete selected song IDs with optional file deletion, blacklisting and cleanup (#2339). */
+export async function bulkDeleteSongsRequest(
+  ids: number[],
+  opts: { deleteFiles: boolean; blacklist: boolean },
+): Promise<BulkSongDeleteResult> {
+  const payload = await readJson<BulkSongDeleteResult>(
+    apiClient.post('library/v2/songs/bulk-delete', {
+      json: {
+        ids,
+        delete_files: opts.deleteFiles,
+        blacklist: opts.blacklist,
+        cleanup_empty: true,
+      },
+    }),
+  );
+  if (payload.success === false) throw new Error(payload.error || "Couldn't delete selected songs");
+  return payload;
+}
+
 /** Unwrap /api/library/v2/songs. */
 export function readSongsResponse(payload: LibrarySongsResponse | undefined): {
   songs: LibrarySong[];

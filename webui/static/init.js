@@ -1311,15 +1311,20 @@ function pfCloseMenus(restoreFocus = true) {
 
 // arrow keys between items, escape and tab and outside clicks close
 function _pfWireMenu(menu, anchor, close) {
-    const items = () => Array.from(menu.querySelectorAll('[role="menuitem"]'));
+    const items = () => Array.from(menu.querySelectorAll('[role="menuitem"]')).filter(el => !el.hidden);
     const onKey = (e) => {
+        const inInput = document.activeElement && document.activeElement.tagName === 'INPUT' && menu.contains(document.activeElement);
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
+        if (inInput) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); items()[0]?.focus(); }
+            return;
+        }
         const list = items();
         const index = list.indexOf(document.activeElement);
         if (e.key === 'ArrowDown') { e.preventDefault(); list[(index + 1) % list.length]?.focus(); }
         else if (e.key === 'ArrowUp') { e.preventDefault(); list[(index - 1 + list.length) % list.length]?.focus(); }
         else if (e.key === 'Home') { e.preventDefault(); list[0]?.focus(); }
         else if (e.key === 'End') { e.preventDefault(); list[list.length - 1]?.focus(); }
-        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
         else if (e.key === 'Tab') { close(); }
     };
     const onDown = (e) => {
@@ -1342,7 +1347,8 @@ function _pfWireMenu(menu, anchor, close) {
         anchor.setAttribute('aria-expanded', 'false');
         if (restoreFocus && document.contains(anchor)) anchor.focus();
     };
-    setTimeout(() => items()[0]?.focus(), 0);
+    const search = menu.querySelector('.pf-menu-search');
+    setTimeout(() => (search || items()[0])?.focus(), 0);
 }
 
 // ── Picker ─────────────────────────────────────────────────────────────
@@ -1817,32 +1823,66 @@ function openProfileQuickSwitch(button, profiles) {
     const label = (text, icon) => [pfEl('span', { html: icon, style: 'display:contents' }), pfEl('span', { class: 'pf-menu-item-text', text })];
 
     if (others.length) {
-        menu.append(pfEl('div', { class: 'pf-menu-label', text: 'SWITCH TO', 'aria-hidden': 'true' }));
-        others.forEach(p => {
+        // keep the user list inside its own scroll area so a big server's
+        // imported users never push edit/manage/sign out off the screen (#2338)
+        const switchWrap = pfEl('div', { class: 'pf-menu-switch' });
+        switchWrap.append(pfEl('div', { class: 'pf-menu-label', text: 'SWITCH TO', 'aria-hidden': 'true' }));
+        const scroll = pfEl('div', { class: 'pf-menu-scroll' });
+        const rows = others.map(p => {
             const meta = profileLoginMode ? 'Password' : (p.has_pin ? 'PIN' : '');
-            menu.append(item([
+            const btn = item([
                 pfAvatar(p, 'pf-avatar--sm'),
                 pfEl('span', { class: 'pf-menu-item-text' }, [
                     pfEl('span', { class: 'pf-menu-item-name', text: p.name }),
                     meta ? pfEl('span', { class: 'pf-menu-item-meta', text: meta }) : null,
                 ]),
-            ], () => handleProfileClick(p, profiles.length)));
+            ], () => handleProfileClick(p, profiles.length));
+            scroll.append(btn);
+            return { btn, name: String(p.name || '').toLowerCase() };
         });
-        menu.append(pfEl('div', { class: 'pf-menu-sep', role: 'separator' }));
+        if (others.length > 5) {
+            const empty = pfEl('div', { class: 'pf-menu-empty', text: 'No matching profiles' });
+            empty.hidden = true;
+            const search = pfEl('input', {
+                type: 'search',
+                class: 'pf-menu-search',
+                placeholder: `Search ${others.length} profiles…`,
+                'aria-label': 'Filter profiles',
+                autocomplete: 'off',
+            });
+            search.addEventListener('input', () => {
+                const q = search.value.trim().toLowerCase();
+                let visible = 0;
+                rows.forEach(({ btn, name }) => {
+                    const hit = !q || name.includes(q);
+                    btn.hidden = !hit;
+                    if (hit) visible += 1;
+                });
+                empty.hidden = visible > 0;
+            });
+            switchWrap.append(pfEl('div', { class: 'pf-menu-search-wrap' }, search));
+            scroll.append(empty);
+        }
+        switchWrap.append(scroll);
+        menu.append(switchWrap);
     }
-    menu.append(item(label('Edit my profile', PF_ICONS.edit), () => openProfileEditor({ mode: 'self' })));
+
+    const footer = pfEl('div', { class: 'pf-menu-footer' });
+    if (others.length) footer.append(pfEl('div', { class: 'pf-menu-sep', role: 'separator' }));
+    footer.append(item(label('Edit my profile', PF_ICONS.edit), () => openProfileEditor({ mode: 'self' })));
     // my account is the member's own media server login + music services;
     // the admin runs on the app's accounts, so it's theirs only
     if (!me.is_admin && typeof window.openMyAccountsModal === 'function') {
-        menu.append(item(label('Profile & account', PF_ICONS.user), () => window.openMyAccountsModal()));
+        footer.append(item(label('Profile & account', PF_ICONS.user), () => window.openMyAccountsModal()));
     }
     if (me.is_admin) {
-        menu.append(item(label('Manage profiles', PF_ICONS.people), () => openProfileManager()));
+        footer.append(item(label('Manage profiles', PF_ICONS.people), () => openProfileManager()));
     }
     if (profileLoginMode) {
-        menu.append(pfEl('div', { class: 'pf-menu-sep', role: 'separator' }));
-        menu.append(item(label('Sign out', PF_ICONS.signout), () => soulsyncLogout()));
+        footer.append(pfEl('div', { class: 'pf-menu-sep', role: 'separator' }));
+        footer.append(item(label('Sign out', PF_ICONS.signout), () => soulsyncLogout()));
     }
+    menu.append(footer);
 
     document.body.append(menu);
     const rect = button.getBoundingClientRect();

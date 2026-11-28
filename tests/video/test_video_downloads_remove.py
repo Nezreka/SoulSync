@@ -165,3 +165,56 @@ def test_clear_finished_leaves_import_failed_for_manual_import(client):
     assert _statuses(db) == ["failed", "import_failed"]
     items = c.get("/api/video/import/failed").get_json()["items"]
     assert [item["id"] for item in items] == [kept]
+
+
+def test_remove_import_failed_with_flag_deletes_file_and_blocks_2337(client, tmp_path):
+    """#2337: an admin can dismiss an import_failed row, optionally deleting
+    its downloaded file and blocking the release, without touching history."""
+    c, db, retries = client
+    dl_file = tmp_path / "The.Office.S01E01.mkv"
+    dl_file.write_bytes(b"fake-video")
+    dl_id = _row(db, "import_failed", title="The Office (2005)")
+    db.update_video_download(dl_id, dest_path=str(dl_file))
+    db.record_download_history(db.get_video_download(dl_id))
+    hist_before = _history_count(db)
+
+    r = c.post("/api/video/downloads/remove", json={
+        "id": dl_id,
+        "include_import_failed": True,
+        "delete_files": True,
+        "block_release": True,
+    })
+
+    assert r.status_code == 200
+    assert r.get_json() == {"ok": True, "removed": 1, "files_deleted": 1, "blocked": 1}
+    assert db.get_video_download(dl_id) is None
+    assert not dl_file.exists()
+    assert len(db.list_video_blocklist()) == 1
+    assert _history_count(db) == hist_before == 1
+    assert retries == []
+
+
+def test_bulk_remove_and_clear_all_failed_include_import_failed_2337(client):
+    """#2337: bulk ids and clear-all-failed with include_import_failed remove
+    failed/cancelled/import_failed rows while leaving active and completed alone."""
+    c, db, retries = client
+    a = _row(db, "import_failed", title="The Office S01E01")
+    b = _row(db, "failed", title="The Office S01E02")
+    live = _row(db, "downloading", title="Running")
+    done = _row(db, "completed", title="Done")
+
+    r = c.post("/api/video/downloads/remove", json={"ids": [a, b, live, done]})
+    assert r.status_code == 200
+    assert r.get_json()["removed"] == 2
+    assert _statuses(db) == ["completed", "downloading"]
+    assert retries == []
+
+    _row(db, "import_failed", title="The Office S01E03")
+    _row(db, "failed", title="The Office S01E04")
+    r2 = c.post("/api/video/downloads/clear", json={
+        "scope": "failed",
+        "include_import_failed": True,
+    })
+    assert r2.status_code == 200
+    assert r2.get_json()["cleared"] == 2
+    assert _statuses(db) == ["completed", "downloading"]

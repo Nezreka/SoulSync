@@ -177,9 +177,18 @@ export function clearVideoDownloads(): Promise<VdlResult | null> {
   return post('video/downloads/clear', {});
 }
 
-/** Clear only failed and cancelled downloads -- completed rows stay. */
-export function clearFailedVideoDownloads(): Promise<VdlResult | null> {
-  return post('video/downloads/clear', { scope: 'failed' });
+export interface VdlRemoveOptions {
+  include_import_failed?: boolean;
+  delete_files?: boolean;
+  block_release?: boolean;
+}
+
+/** Clear only failed and cancelled downloads (and import_failed when requested). */
+export function clearFailedVideoDownloads(
+  opts?: VdlRemoveOptions,
+): Promise<(VdlResult & { files_deleted?: number; blocked?: number }) | null> {
+  if (!opts) return post('video/downloads/clear', { scope: 'failed' });
+  return post('video/downloads/clear', { scope: 'failed', ...opts });
 }
 
 /** Clear completed, failed and cancelled rows; import failures stay for Manual import. */
@@ -187,9 +196,21 @@ export function clearEverythingVideoDownloads(): Promise<VdlResult | null> {
   return post('video/downloads/clear', { scope: 'everything' });
 }
 
-/** Take one failed or cancelled download off the list, no retry. */
-export function removeVideoDownload(id: number): Promise<VdlResult | null> {
-  return post('video/downloads/remove', { id });
+/** Take one failed, cancelled (or import_failed) download off the list, no retry. */
+export function removeVideoDownload(
+  id: number,
+  opts?: VdlRemoveOptions,
+): Promise<(VdlResult & { removed?: number; files_deleted?: number; blocked?: number }) | null> {
+  if (!opts) return post('video/downloads/remove', { id });
+  return post('video/downloads/remove', { id, ...opts });
+}
+
+/** Bulk remove failed, cancelled and import_failed downloads (#2337). */
+export function removeVideoDownloadsBulk(
+  ids: number[],
+  opts?: VdlRemoveOptions,
+): Promise<(VdlResult & { removed?: number; files_deleted?: number; blocked?: number }) | null> {
+  return post('video/downloads/remove', { ids, include_import_failed: true, ...opts });
 }
 
 /** Block one exact release (slskd rows only — YouTube has no release identity). */

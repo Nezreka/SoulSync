@@ -80,6 +80,8 @@ export interface VdlCardActions {
   onBlock: (d: VdlDownload) => void;
   onRemove: (id: number) => void;
   onToggle: (id: number) => void;
+  /** optional failed-row selection toggle (#2337) */
+  onSelectFailed?: (id: number) => void;
 }
 
 /** where "open" goes for this row: the title page, the channel, or youtube. */
@@ -170,6 +172,7 @@ function VdlCard({
   canImport,
   actions,
   inGroup,
+  selected,
 }: {
   d: VdlDownload;
   open: boolean;
@@ -179,6 +182,8 @@ function VdlCard({
   actions: VdlCardActions;
   /** an episode inside a season group: numbered, no show name repeated. */
   inGroup?: boolean;
+  /** whether this failed row is ticked for bulk removal (#2337) */
+  selected?: boolean;
 }) {
   const info = vdlStatusOf(d.status);
   const cls = info.cls;
@@ -226,7 +231,7 @@ function VdlCard({
           },
         ]
       : []),
-    ...(vdlIsRemovable(d.status) && canImport
+    ...((vdlIsRemovable(d.status) || d.status === 'import_failed') && canImport
       ? [{ key: 'remove', label: 'Remove from list', onSelect: () => actions.onRemove(d.id) }]
       : []),
     ...(canBlock
@@ -243,8 +248,8 @@ function VdlCard({
 
   const onRowClick = (e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
-    // clicks on controls or inside the open sheet don't toggle
-    if (t.closest('[data-vdl-drawer]') || t.closest('button, a')) return;
+      // clicks on controls, checkboxes or inside the open sheet don't toggle
+      if (t.closest('[data-vdl-drawer]') || t.closest('button, a, input, label')) return;
     actions.onToggle(d.id);
   };
 
@@ -266,6 +271,16 @@ function VdlCard({
           }
         }}
       >
+        {failed && canImport && actions.onSelectFailed ? (
+          <input
+            type="checkbox"
+            className="dlc-row-check"
+            checked={Boolean(selected)}
+            aria-label={`Select failed download ${title}`}
+            onChange={() => actions.onSelectFailed?.(d.id)}
+            style={{ marginRight: 8, cursor: 'pointer', accentColor: 'var(--accent)', flexShrink: 0 }}
+          />
+        ) : null}
         <DlLead
           art={inGroup ? null : d.poster_url}
           poster={vt !== 'youtube'}
@@ -855,6 +870,7 @@ export interface VdlListProps {
   onToggleGroup: (key: string) => void;
   cardActions: VdlCardActions;
   onCancelGroup: (ids: number[]) => void;
+  selectedFailed?: Set<number>;
 }
 
 /** Skeleton shimmer rows for the first paint — no flash of "no downloads". */
@@ -885,6 +901,7 @@ export function VdlList({
   onToggleGroup,
   cardActions,
   onCancelGroup,
+  selectedFailed,
 }: VdlListProps) {
   const canImport = useVdlCanImport();
 
@@ -905,6 +922,7 @@ export function VdlList({
       canImport={canImport}
       actions={cardActions}
       inGroup={inGroup}
+      selected={selectedFailed?.has(d.id)}
     />
   );
 

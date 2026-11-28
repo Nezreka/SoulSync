@@ -1793,6 +1793,220 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         _song_payload(result["songs"])
         return jsonify({"success": True, **result})
 
+    @_route("/api/library/v2/songs/ids")
+    @device_playback
+    def lib2_list_song_ids():
+        """Every matching song id for the Songs tab's current filters (#2339),
+        so 'Select all matching' works across pages without loading every row."""
+        from core.library2 import queries as Q
+        quality = request.args.get("quality", "")
+        with closing(_conn()) as conn:
+            result = Q.list_song_ids(
+                conn,
+                search=request.args.get("search", ""),
+                letter=request.args.get("letter", "all"),
+                dupes=request.args.get("dupes") == "1",
+                quality=quality if quality in ("lossless", "upgradable") else "",
+                profile_id=_intent_profile(),
+            )
+        return jsonify({"success": True, **result})
+
+    @_route("/api/library/v2/songs/bulk-delete", methods=["POST"])
+    def lib2_bulk_delete_songs():
+        """Delete many selected songs at once (#2339). When delete_files is true,
+        deletes audio files (via the journaled quarantine path), cleans up
+        leftover sidecars (artwork, lyrics, nfo) in folders with no audio left,
+        removes now-empty album/artist folders safely, and drops empty albums
+        and artists from the database."""
+        from core.imports.paths import docker_resolve_path
+        from core.library.deleted_quarantine import quarantine_mover
+        from core.library2.file_delete import (
+            FileDeleteError, delete_entity_files, preview_entity_files,
+            remove_entity_file_records,
+        )
+        body = request.get_json(silent=True) or {}
+        raw_ids = body.get("ids")
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return _fail("ids must be a non-empty list of track ids")
+        try:
+            track_ids = list(dict.fromkeys(int(x) for x in raw_ids))
+        except (TypeError, ValueError):
+            return _fail("ids must be integers")
+        delete_files = bool(body.get("delete_files"))
+        add_blacklist = bool(body.get("blacklist"))
+        cleanup_empty = bool(body.get("cleanup_empty", True))
+
+        db = get_database()
+        by_album: Dict[int, List[int]] = {}
+        file_ids_by_album: Dict[int, List[int]] = {}
+        touched_artists: set = set()
+        touched_dirs: set = set()
+        blacklist_entries: List[tuple] = []
+
+        with closing(db._get_connection()) as conn:
+            # batch-resolve tracks -> album, artist, live files, and paths
+            for chunk_start in range(0, len(track_ids), 500):
+                chunk = track_ids[chunk_start:chunk_start + 500]
+                ph = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT t.id, t.album_id, t.title, al.primary_artist_id, COALESCE(ar.name,'') "
+                    f"FROM lib2_tracks t "
+                    f"JOIN lib2_albums al ON al.id = t.album_id "
+                    f"LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
+                    f"WHERE t.id IN ({ph})", chunk).fetchall()
+                for r in rows:
+                    tid, aid, title, artist_id, artist_name = int(r[0]), int(r[1]), r[2] or "", r[3], r[4] or ""
+                    by_album.setdefault(aid, []).append(tid)
+                    if artist_id is not None:
+                        touched_artists.add(int(artist_id))
+                    frows = conn.execute(
+                        "SELECT id, path FROM lib2_track_files WHERE track_id=? "
+                        "AND COALESCE(file_state,'active')<>'deleted' ORDER BY is_primary DESC",
+                        (tid,)).fetchall()
+                    for fr in frows:
+                        file_ids_by_album.setdefault(aid, []).append(int(fr[0]))
+                        if fr[1]:
+                            touched_dirs.add(os.path.dirname(str(fr[1])))
+                    if add_blacklist and frows and frows[0][1]:
+                        blacklist_entries.append((
+                            title, artist_name,
+                            os.path.basename(str(frows[0][1]).replace("\\", "/")),
+                        ))
+
+        if not file_ids_by_album:
+            return jsonify({
+                "success": True, "deleted_count": 0, "files_deleted": 0,
+                "files_failed": 0, "albums_removed": 0, "artists_removed": 0,
+                "folders_removed": 0, "blacklisted": 0,
+            })
+
+        transfer = docker_resolve_path(config_get("soulseek.transfer_path", "./Transfer"))
+        deleted_count = 0
+        files_deleted = 0
+        files_failed = 0
+        for aid, fids in file_ids_by_album.items():
+            try:
+                if not delete_files:
+                    op = remove_entity_file_records(
+                        db, entity="albums", entity_id=aid, file_ids=fids,
+                        actor="user", actor_profile_id=_profile())
+                    _reproject_after_file_removal(op.get("track_ids") or [])
+                    deleted_count += len(op.get("track_ids") or [])
+                else:
+                    preview = preview_entity_files(db, entity="albums", entity_id=aid, file_ids=fids)
+                    op = delete_entity_files(
+                        db, entity="albums", entity_id=aid,
+                        preview_token=preview.get("preview_token"),
+                        file_ids=fids, actor="user", actor_profile_id=_profile(),
+                        unlink=quarantine_mover(transfer, "library_delete"), mode="quarantine")
+                    _reproject_after_file_removal(op.get("track_ids") or [])
+                    deleted_count += len(op.get("track_ids") or [])
+                    items = op.get("items") or []
+                    files_deleted += sum(1 for i in items if i.get("status") == "deleted")
+                    files_failed += sum(1 for i in items if i.get("status") == "failed")
+            except FileDeleteError as exc:
+                logger.debug("bulk song delete failed for album %s: %s", aid, exc)
+                files_failed += len(fids)
+
+        blacklisted = sum(1 for entry in blacklist_entries if _blacklist(db, entry))
+
+        albums_removed = 0
+        artists_removed = 0
+        folders_removed = 0
+        if delete_files and cleanup_empty:
+            _AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".aiff", ".alac", ".wma", ".wv", ".ape"}
+            _SIDECAR_EXTS = {".lrc", ".txt", ".nfo", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".cue", ".log", ".m3u", ".m3u8"}
+            roots = {os.path.normcase(os.path.abspath(transfer))}
+            try:
+                from core.library2.library_roots import configured_roots
+                for rt in configured_roots(db).keys():
+                    if rt:
+                        roots.add(os.path.normcase(os.path.abspath(rt)))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("could not read configured_roots for cleanup: %s", exc)
+
+            # remove sidecars in folders that no longer hold any audio files, then prune empty folders up to library roots
+            for folder in sorted(touched_dirs, key=len, reverse=True):
+                if not folder or not os.path.isdir(folder):
+                    continue
+                norm = os.path.normcase(os.path.abspath(folder))
+                if norm in roots:
+                    continue
+                try:
+                    entries = os.listdir(folder)
+                except OSError:
+                    continue
+                has_audio = any(
+                    os.path.splitext(name)[1].lower() in _AUDIO_EXTS
+                    or os.path.isdir(os.path.join(folder, name))
+                    for name in entries
+                )
+                if not has_audio:
+                    for name in entries:
+                        if os.path.splitext(name)[1].lower() in _SIDECAR_EXTS:
+                            try:
+                                os.remove(os.path.join(folder, name))
+                            except OSError:
+                                pass
+                cur_dir = folder
+                while cur_dir and os.path.isdir(cur_dir):
+                    if os.path.normcase(os.path.abspath(cur_dir)) in roots:
+                        break
+                    try:
+                        if os.listdir(cur_dir):
+                            break
+                        os.rmdir(cur_dir)
+                        folders_removed += 1
+                    except OSError:
+                        break
+                    parent = os.path.dirname(cur_dir)
+                    if parent == cur_dir:
+                        break
+                    cur_dir = parent
+
+            # remove empty albums and empty artists from the DB
+            with closing(db._get_connection()) as conn:
+                for aid in list(by_album.keys()):
+                    rem = conn.execute(
+                        "SELECT COUNT(*) FROM lib2_track_files f "
+                        "JOIN lib2_tracks t ON t.id = f.track_id "
+                        "WHERE t.album_id=? AND COALESCE(f.file_state,'active')<>'deleted'",
+                        (aid,)).fetchone()[0]
+                    if rem == 0:
+                        conn.execute("DELETE FROM lib2_tracks WHERE album_id=?", (aid,))
+                        conn.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (aid,))
+                        cur = conn.execute("DELETE FROM lib2_albums WHERE id=?", (aid,))
+                        if cur.rowcount:
+                            albums_removed += 1
+                conn.commit()
+                empty_artists = []
+                for artist_id in sorted(touched_artists):
+                    rem_tracks = conn.execute(
+                        "SELECT COUNT(*) FROM lib2_track_files f "
+                        "JOIN lib2_tracks t ON t.id = f.track_id "
+                        "JOIN lib2_albums al ON al.id = t.album_id "
+                        "WHERE al.primary_artist_id=? AND COALESCE(f.file_state,'active')<>'deleted'",
+                        (artist_id,)).fetchone()[0]
+                    rem_albums = conn.execute(
+                        "SELECT COUNT(*) FROM lib2_albums WHERE primary_artist_id=?",
+                        (artist_id,)).fetchone()[0]
+                    if rem_tracks == 0 and rem_albums == 0:
+                        empty_artists.append(artist_id)
+            for artist_id in empty_artists:
+                if _remove_artist(artist_id) is not None:
+                    artists_removed += 1
+
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "files_deleted": files_deleted,
+            "files_failed": files_failed,
+            "albums_removed": albums_removed,
+            "artists_removed": artists_removed,
+            "folders_removed": folders_removed,
+            "blacklisted": blacklisted,
+        })
+
     @_route("/api/library/v2/songs/<int:track_id>/copies")
     def lib2_song_copies(track_id):
         """Every copy of one song, best file first (the "N copies" comparison)."""

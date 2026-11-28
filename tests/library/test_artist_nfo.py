@@ -469,3 +469,66 @@ class TestArtistNfoBackfillJob:
         assert job.writes_library_files is True
         assert job.auto_fix is True
         assert job.default_enabled is False
+
+
+def test_vorbis_albumartist_key_writes_nfo_and_runs_artwork_2343(tmp_path, monkeypatch):
+    """#2343: FLAC/OGG/Opus return lowercase 'albumartist' from read_embedded_tags,
+    not 'album_artist'. Both artist.nfo and the artwork callback must run."""
+    from core.library.artist_nfo import ensure_artist_nfo_for_track
+    import core.library.file_tags as file_tags
+
+    artist = tmp_path / "Metal Scar Radio"
+    album = artist / "Metal Scar Radio - Yi"
+    album.mkdir(parents=True)
+    track = album / "01 - Yi.flac"
+    track.write_bytes(b"fake-flac")
+
+    monkeypatch.setattr(
+        file_tags, "read_embedded_tags",
+        lambda p: {"available": True, "tags": {
+            "albumartist": "Metal Scar Radio",
+            "musicbrainz_albumartistid": MBID,
+        }})
+
+    art_calls = []
+    ok, msg = ensure_artist_nfo_for_track(
+        str(track), None, force=True,
+        artwork=lambda folder, name, mbid: art_calls.append((folder, name, mbid)),
+    )
+    assert ok is True, msg
+    nfo = artist / "artist.nfo"
+    assert nfo.is_file()
+    root = ET.parse(str(nfo)).getroot()
+    assert root.findtext("name") == "Metal Scar Radio"
+    assert root.findtext("musicbrainzartistid") == MBID
+    assert art_calls == [(str(artist), "Metal Scar Radio", MBID)]
+
+
+def test_real_flac_container_writes_artist_nfo_2343(tmp_path):
+    """End-to-end with a real minimal FLAC file tagged with ALBUMARTIST."""
+    import struct
+    from mutagen.flac import FLAC
+    from core.library.artist_nfo import ensure_artist_nfo_for_track
+
+    artist = tmp_path / "STARSET"
+    album = artist / "STARSET - Vessels"
+    album.mkdir(parents=True)
+    track = album / "01 - Track.flac"
+
+    # minimal valid 1-block STREAMINFO-only FLAC header (fLaC + last-metadata-block 0x80 + 34 bytes)
+    streaminfo = struct.pack(">HH3s3s8s16s", 4096, 4096, b"\x00\x00\x00", b"\x00\x00\x00",
+                             b"\x0a\xc4\x42\xf0\x00\x00\x00\x00", b"\x00" * 16)
+    track.write_bytes(b"fLaC" + b"\x80\x00\x00\x22" + streaminfo)
+
+    audio = FLAC(str(track))
+    audio["albumartist"] = "STARSET"
+    audio["musicbrainz_albumartistid"] = MBID
+    audio.save()
+
+    ok, msg = ensure_artist_nfo_for_track(str(track), None, force=True)
+    assert ok is True, msg
+    nfo = artist / "artist.nfo"
+    assert nfo.is_file()
+    root = ET.parse(str(nfo)).getroot()
+    assert root.findtext("name") == "STARSET"
+    assert root.findtext("musicbrainzartistid") == MBID

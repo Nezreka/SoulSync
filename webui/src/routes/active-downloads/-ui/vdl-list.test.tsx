@@ -178,8 +178,18 @@ describe('the row', () => {
     expect(screen.getByRole('menuitem', { name: 'Remove from list' })).not.toBeNull();
   });
 
-  it('keeps Remove from list off rows Manual import or the queue still needs', () => {
-    for (const status of ['import_failed', 'completed', 'downloading', 'queued']) {
+  it('offers Remove from list on an import_failed row (#2337)', () => {
+    const { container, cardActions } = list([
+      dl({ id: 12, status: 'import_failed', error: 'Year mismatch', dest_path: '/d/x.mkv' }),
+    ]);
+    fireEvent.click(container.querySelector('.dlc-more') as HTMLElement);
+    const remove = screen.getByRole('menuitem', { name: 'Remove from list' });
+    fireEvent.click(remove);
+    expect(cardActions.onRemove).toHaveBeenCalledWith(12);
+  });
+
+  it('keeps Remove from list off active and completed rows', () => {
+    for (const status of ['completed', 'downloading', 'queued']) {
       const { container } = list([dl({ status, error: 'x', dest_path: '/d/x.mkv' })]);
       const more = container.querySelector('.dlc-more') as HTMLElement | null;
       if (more) fireEvent.click(more);

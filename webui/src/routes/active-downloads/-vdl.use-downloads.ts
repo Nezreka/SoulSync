@@ -24,8 +24,10 @@ import {
   fetchVideoMeta,
   fetchVideoYtMeta,
   removeVideoDownload,
+  removeVideoDownloadsBulk,
   retryVideoDownload,
   stopVideoWishlistSearches,
+  type VdlRemoveOptions,
 } from './-vdl.api';
 import {
   vdlIsActive,
@@ -99,14 +101,15 @@ export interface VdlDownloadsController {
   cancelOne: (id: number) => Promise<void>;
   retryOne: (id: number) => Promise<void>;
   blockOne: (d: VdlDownload) => Promise<void>;
-  removeOne: (id: number) => Promise<void>;
+  removeOne: (id: number, opts?: VdlRemoveOptions) => Promise<void>;
+  removeBulk: (ids: number[], opts?: VdlRemoveOptions) => Promise<void>;
   cancelAll: () => Promise<void>;
   retryAllFailed: () => Promise<void>;
   /** failed rows (not YouTube) whose release can be blocked and replaced */
   blockableFailedCount: number;
   blockAndRetryAllFailed: () => Promise<void>;
   clearFinished: () => Promise<void>;
-  clearFailed: () => Promise<void>;
+  clearFailed: (opts?: VdlRemoveOptions) => Promise<void>;
   clearEverything: () => Promise<void>;
   retryAllPending: boolean;
 }
@@ -330,12 +333,43 @@ export function useVideoDownloads(): VdlDownloadsController {
     [refresh],
   );
 
-  /** Take one failed/cancelled row off the list -- no retry, history kept. */
+  /** Take one failed/cancelled/import_failed row off the list -- no retry, history kept. */
   const removeOne = useCallback(
-    async (id: number) => {
-      const res = await removeVideoDownload(id);
-      if (okOf(res)) toast('Removed from the list', 'success');
-      else toast(res?.error || 'Could not remove that download', 'error');
+    async (id: number, opts?: VdlRemoveOptions) => {
+      const res = await removeVideoDownload(id, opts);
+      if (okOf(res)) {
+        const extra: string[] = [];
+        if (res?.files_deleted) extra.push('file deleted');
+        if (res?.blocked) extra.push('release blocked');
+        toast(
+          extra.length ? `Removed from the list (${extra.join(', ')})` : 'Removed from the list',
+          'success',
+        );
+      } else {
+        toast(res?.error || 'Could not remove that download', 'error');
+      }
+      await refresh();
+    },
+    [refresh],
+  );
+
+  /** Bulk remove failed/cancelled/import_failed rows (#2337). */
+  const removeBulk = useCallback(
+    async (ids: number[], opts?: VdlRemoveOptions) => {
+      if (!ids.length) return;
+      const res = await removeVideoDownloadsBulk(ids, opts);
+      if (okOf(res)) {
+        const n = Number(res?.removed) || 0;
+        const extra: string[] = [];
+        if (res?.files_deleted) extra.push(`${res.files_deleted} file${res.files_deleted === 1 ? '' : 's'} deleted`);
+        if (res?.blocked) extra.push(`${res.blocked} blocked`);
+        toast(
+          `Removed ${n} failed download${n === 1 ? '' : 's'}${extra.length ? ` (${extra.join(', ')})` : ''}`,
+          'success',
+        );
+      } else {
+        toast(res?.error || 'Could not remove selected downloads', 'error');
+      }
       await refresh();
     },
     [refresh],
@@ -405,13 +439,25 @@ export function useVideoDownloads(): VdlDownloadsController {
     await refresh();
   }, [refresh]);
 
-  const clearFailed = useCallback(async () => {
-    const res = await clearFailedVideoDownloads();
-    const n = Number(res?.cleared) || 0;
-    if (res) toast(`Cleared ${n} failed download${n === 1 ? '' : 's'}`, 'success');
-    else toast('Could not clear failed downloads', 'error');
-    await refresh();
-  }, [refresh]);
+  const clearFailed = useCallback(
+    async (opts?: VdlRemoveOptions) => {
+      const res = await clearFailedVideoDownloads(opts);
+      const n = Number(res?.cleared) || 0;
+      if (res) {
+        const extra: string[] = [];
+        if (res.files_deleted) extra.push(`${res.files_deleted} file${res.files_deleted === 1 ? '' : 's'} deleted`);
+        if (res.blocked) extra.push(`${res.blocked} blocked`);
+        toast(
+          `Cleared ${n} failed download${n === 1 ? '' : 's'}${extra.length ? ` (${extra.join(', ')})` : ''}`,
+          'success',
+        );
+      } else {
+        toast('Could not clear failed downloads', 'error');
+      }
+      await refresh();
+    },
+    [refresh],
+  );
 
   const clearEverything = useCallback(async () => {
     const res = await clearEverythingVideoDownloads();
@@ -463,6 +509,7 @@ export function useVideoDownloads(): VdlDownloadsController {
     retryOne,
     blockOne,
     removeOne,
+    removeBulk,
     cancelAll,
     retryAllFailed,
     blockableFailedCount,
