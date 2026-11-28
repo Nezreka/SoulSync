@@ -3395,10 +3395,17 @@
       "sides": ["music", "video"],
       "scenario": "music",
       "from": "",
-      "to": null,
-      "saves": null,
-      "disabled": true,
-      "noSave": "NOT REVIEWED"
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "library": {
+            "secondary_path": "guard-probe"
+          }
+        }
+      },
+      "before": ["Unlock"],
+      "asked": "guard-probe",
+      "shows": ["library.secondary_path"]
     },
     "#secondary-name": {
       "sel": "#secondary-name",
@@ -7597,13 +7604,16 @@
       "to": "0.65",
       "saves": {
         "settings": {
+          "library": {
+            "music_paths": ["guard-probe"]
+          },
           "discover": {
             "adventurousness": 0.65
           }
         }
       },
       "asked": "0.65",
-      "shows": ["discover.adventurousness"]
+      "shows": ["discover.adventurousness", "library.music_paths"]
     },
     "#listening-stats-enabled": {
       "sel": "#listening-stats-enabled",
