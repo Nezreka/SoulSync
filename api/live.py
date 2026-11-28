@@ -31,8 +31,8 @@ def create_live_blueprint():
 
 
 def _db():
-    from api.player import get_player_db
-    return get_player_db()
+    from api.player import player_db
+    return player_db()
 
 
 def _viewer_id() -> str:

@@ -156,8 +156,15 @@ def test_download_clients_api_crud_and_grab_routing(monkeypatch):
         },
     )
     app = Flask(__name__)
+    app.secret_key = "test-dc"
     app.register_blueprint(download_clients_bp)
     c = app.test_client()
+
+    # non-admin / unauthenticated requests are rejected
+    monkeypatch.setattr("core.profile_context.is_admin_request", lambda: False)
+    assert c.get("/api/download-clients/instances").status_code == 403
+
+    monkeypatch.setattr("core.profile_context.is_admin_request", lambda: True)
 
     # upsert a named client via REST API
     res = c.post(

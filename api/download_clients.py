@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 from flask import Blueprint, jsonify, request
 
 from core.downloads import routing as R
+from core.profile_context import admin_only
 from core.torrent_clients import (
     delete_client as delete_torrent_client,
     get_adapter_for_client as get_torrent_adapter,
@@ -61,6 +62,7 @@ def _video_libraries() -> List[Dict[str, Any]]:
 
 
 @bp.route("/api/download-clients/instances", methods=["GET"])
+@admin_only
 def list_instances():
     return jsonify({
         "success": True,
@@ -70,6 +72,7 @@ def list_instances():
 
 
 @bp.route("/api/download-clients/instances", methods=["POST"])
+@admin_only
 def upsert_instance():
     body = request.get_json(silent=True) or {}
     kind = str(body.get("kind") or "").strip().lower()
@@ -88,6 +91,7 @@ def upsert_instance():
 
 
 @bp.route("/api/download-clients/instances/<kind>/<client_id>", methods=["DELETE"])
+@admin_only
 def remove_instance(kind: str, client_id: str):
     k = str(kind or "").strip().lower()
     if k not in ("torrent", "usenet"):
@@ -103,6 +107,7 @@ def remove_instance(kind: str, client_id: str):
 
 
 @bp.route("/api/download-clients/instances/<kind>/<client_id>/test", methods=["POST"])
+@admin_only
 def test_instance(kind: str, client_id: str):
     k = str(kind or "").strip().lower()
     if k not in ("torrent", "usenet"):
@@ -118,6 +123,7 @@ def test_instance(kind: str, client_id: str):
 
 
 @bp.route("/api/download-clients/routing", methods=["GET"])
+@admin_only
 def get_routing():
     return jsonify({
         "success": True,
@@ -128,6 +134,7 @@ def get_routing():
 
 
 @bp.route("/api/download-clients/routing/<library_key>", methods=["PUT"])
+@admin_only
 def save_routing(library_key: str):
     body = request.get_json(silent=True) or {}
     try:
@@ -143,6 +150,7 @@ def save_routing(library_key: str):
 
 
 @bp.route("/api/download-clients/routing/<library_key>", methods=["DELETE"])
+@admin_only
 def reset_routing(library_key: str):
     R.delete_library_overrides(library_key)
     return jsonify({

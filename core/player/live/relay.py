@@ -49,8 +49,8 @@ class LiveSession:
 
 def _default_ffmpeg_cmd(channel: Dict[str, Any], out_dir: str) -> List[str]:
     """Build a resilient sliding-window HLS ffmpeg command for a live channel."""
-    from core.player.transcode import ffmpeg_binary
-    ff = ffmpeg_binary() or "ffmpeg"
+    from core.player.transcode import ffmpeg_path
+    ff = ffmpeg_path() or "ffmpeg"
     url = str(channel["stream_url"])
     headers = channel.get("headers") or {}
     cmd = [ff, "-hide_banner", "-loglevel", "warning", "-nostdin"]
