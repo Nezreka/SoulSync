@@ -22,6 +22,7 @@ import {
   type SectionInfo,
 } from './-ui/settings/catalog';
 import { ConvertingSection } from './-ui/settings/converting';
+import { LiveTvSection } from './-ui/settings/live-tv';
 import { SavedContext } from './-ui/settings/kit';
 import { NotificationsSection } from './-ui/settings/notifications';
 import {
@@ -72,6 +73,8 @@ function SectionBody({ id, isAdmin }: { id: SectionId; isAdmin: boolean }) {
       return <DownloadsSection />;
     case 'converting':
       return <ConvertingSection />;
+    case 'live-tv':
+      return <LiveTvSection />;
     case 'guide':
       return <LiveGuideSection isAdmin={isAdmin} />;
     case 'issues':

@@ -34,6 +34,7 @@ export type ChannelKind =
   | 'playlist'
   | 'rule'
   | 'server'
+  | 'live'
   | 'music'
   | 'vibe';
 
@@ -47,6 +48,8 @@ export interface Channel {
   ordered?: boolean;
   /** songs: the grid shows blocks, not three-minute slivers */
   music?: boolean;
+  /** live TV channel id from /api/live/channels (tuned via /api/live/tune) */
+  liveChannelId?: string;
   /** the classic guide channel number, given once the list is sorted */
   number?: number;
   /** how it's programmed for this profile (what it has seen, day parts): the guide and the tuner alike */

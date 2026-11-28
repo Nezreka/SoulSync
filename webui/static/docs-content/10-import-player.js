@@ -361,6 +361,21 @@ On a GPU the file is decoded, scaled and encoded on the card. HDR tone mapping a
 **Docker**: Intel and AMD need the card passed in: \`devices: - /dev/dri:/dev/dri\` in docker-compose.yml. The image has the drivers and joins the card's group itself. NVIDIA needs the NVIDIA Container Toolkit on the host and \`runtime: nvidia\` (or the \`deploy\` GPU block); both are in the compose file, commented. On a Raspberry Pi 5 there is no hardware encoder: copies and sound-only conversions are cheap, full conversions are slow.
 `
         },
+        {
+            id: 'player-live-tv',
+            needs: 'admin',
+            title: 'Live TV',
+            lede: 'Watch antenna channels from an HDHomeRun tuner or an M3U playlist with XMLTV guide data.',
+            body: `
+Open **Player → Settings → Live TV** to add a tuner or playlist:
+
+- **HDHomeRun**: click **Discover HDHomeRun on network** to find tuners on your LAN automatically, or paste the tuner's IP address. Encrypted DRM channels are hidden automatically, and HDHomeRun's free guide feed is loaded when available.
+- **M3U playlists**: paste a URL or local file path. Channel numbers, logos, groups, and \`tvg-id\` tags are imported and kept in sync when you refresh.
+- **XMLTV guides**: add any \`.xml\` or \`.xml.gz\` guide feed (URL or local file). Channels match automatically by \`tvg-id\`, or you can map them manually.
+
+**Shared tuners**: when several people watch the same channel, SoulSync relays one shared HLS stream instead of taking a second tuner. When the last viewer leaves, the tuner is released automatically.
+`
+        },
     ]
 });
 

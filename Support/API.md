@@ -3441,3 +3441,21 @@ Each profile's player settings (`GET/PUT /api/player/settings`) carry `skip_intr
 SoulSync finds the markers itself in the background: intros by matching the audio of a season's episodes (one new episode is matched against the season before), credits by the shared end song and the picture, recaps when a library asks for them. It waits while a scan runs or anyone is watching. Each library has three switches (`markers`, `markers_recaps`, `markers_write` in its options): find them, find recaps too, and save them beside each video as an `.edl` (on for a new library, off for one from before). A user's own `.edl` is read and never overwritten.
 
 Admin routes: `GET /api/video/markers/<movie|episode>/<id>` (every file's markers, each source's answer, what was removed, the analysis state), `PUT` the same path `{kind, start, end, file_id?, scope?: "file"|"season"}` to set one, `DELETE ?kind=&file_id=` to remove one for good, `POST .../reset {kind, file_id?}` to go back to automatic, `POST /api/video/markers/find {show_id, season?} | {movie_id} | {episode_id}` to look now, `GET /api/video/markers/status` and `POST /api/video/markers/settings {enabled?, when?: "idle"|"night"|"always"}`.
+
+### Live TV (`api/live.py`)
+
+Admin source/channel management and shared-tuner HLS playback for HDHomeRun tuners, M3U playlists, and XMLTV guides:
+
+- `GET /api/live/sources` — list configured HDHomeRun, M3U, and XMLTV sources.
+- `POST /api/live/sources` (admin) — add a source `{kind, name, url, tuner_count?, device_id?, device_auth?}`.
+- `DELETE /api/live/sources/<source_id>` (admin) — remove a source and its channels.
+- `POST /api/live/sources/<source_id>/refresh` (admin) — refresh a source's channels or EPG programs.
+- `POST /api/live/hdhomerun/discover` (admin) — discover HDHomeRun tuners on the LAN via UDP 65001 (or probe an explicit `{host}`).
+- `GET /api/live/channels` — list enabled live channels (`?all=1` includes hidden channels).
+- `PATCH /api/live/channels/<channel_id>` (admin) — update `enabled`, `custom_name`, `guide_number`, or `epg_id`.
+- `GET /api/live/programs` — list EPG programs in a time window (`?start=&end=&channel_ids=`), filling gaps with 1-hour placeholders.
+- `POST /api/live/tune/<channel_id>` — start or join the shared HLS relay for a channel (`{viewer_id?}`), enforcing per-source tuner limits.
+- `POST /api/live/heartbeat/<channel_id>` — keep a viewer's lease active (`{viewer_id}`).
+- `POST /api/live/leave/<channel_id>` — release a viewer's lease (`{viewer_id}`), tearing down the ffmpeg relay when the last viewer leaves.
+- `GET /api/live/stream/<channel_id>/<filename>` — serve the live HLS manifest and `.ts` segments.
+- `GET /api/live/sessions` — list active live relay sessions and viewer counts.
