@@ -144,5 +144,97 @@ export async function tuneLiveChannel(id: string): Promise<LiveTuneResult> {
 }
 
 export async function leaveLiveChannel(id: string): Promise<void> {
-  await apiClient.post(`live/leave/${encodeURIComponent(id)}`, { json: {} });
+  await apiClient.post(`live/leave/${encodeURIComponent(id)}`, { json: {} }).catch(() => {});
+}
+
+export async function heartbeatLiveChannel(
+  channelId: string,
+): Promise<{
+  success: boolean;
+  session?: { timeshift_seconds?: number; timeshift_max_seconds?: number; viewers?: number };
+}> {
+  return readJson(apiClient.post(`live/heartbeat/${encodeURIComponent(channelId)}`, { json: {} }));
+}
+
+export interface LiveDvrRule {
+  id: string;
+  name: string;
+  channel_id?: string | null;
+  title_match: string;
+  new_only: number;
+  pad_before_min: number;
+  pad_after_min: number;
+  keep_limit: number;
+  library_type: 'tv' | 'movie';
+  target_dir: string;
+  enabled: number;
+}
+
+export interface LiveDvrRecording {
+  id: string;
+  rule_id?: string | null;
+  channel_id: string;
+  source_id: string;
+  title: string;
+  subtitle?: string | null;
+  episode_num?: string | null;
+  start_ts: number;
+  end_ts: number;
+  status: 'scheduled' | 'recording' | 'completed' | 'failed' | 'conflict' | 'cancelled';
+  file_path?: string | null;
+  nfo_path?: string | null;
+  edl_path?: string | null;
+  error?: string | null;
+}
+
+export async function fetchDvrRules(): Promise<LiveDvrRule[]> {
+  const res = await readJson<{ success?: boolean; rules?: LiveDvrRule[] }>(
+    apiClient.get('live/dvr/rules'),
+  );
+  return res.rules ?? [];
+}
+
+export async function addDvrRule(body: {
+  name: string;
+  title_match: string;
+  channel_id?: string;
+  new_only?: boolean;
+  library_type?: 'tv' | 'movie';
+  target_dir?: string;
+}): Promise<{ success: boolean; rule?: LiveDvrRule; error?: string }> {
+  return readJson(apiClient.post('live/dvr/rules', { json: body }));
+}
+
+export async function deleteDvrRule(ruleId: string): Promise<{ success: boolean }> {
+  return readJson(apiClient.delete(`live/dvr/rules/${encodeURIComponent(ruleId)}`));
+}
+
+export async function fetchDvrRecordings(): Promise<LiveDvrRecording[]> {
+  const res = await readJson<{ success?: boolean; recordings?: LiveDvrRecording[] }>(
+    apiClient.get('live/dvr/recordings'),
+  );
+  return res.recordings ?? [];
+}
+
+export async function scheduleDvrRecording(body: {
+  channel_id: string;
+  title: string;
+  start_ts: number;
+  end_ts: number;
+  subtitle?: string;
+  episode_num?: string;
+  description?: string;
+}): Promise<{ success: boolean; recording?: LiveDvrRecording; error?: string }> {
+  return readJson(apiClient.post('live/dvr/recordings', { json: body }));
+}
+
+export async function deleteDvrRecording(
+  recId: string,
+  deleteFiles = false,
+): Promise<{ success: boolean }> {
+  return readJson(
+    apiClient.delete(`live/dvr/recordings/${encodeURIComponent(recId)}`, {
+      searchParams: deleteFiles ? { delete_files: '1' } : {},
+    }),
+  );
 }

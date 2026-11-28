@@ -23,6 +23,9 @@ logger = get_logger("player.live.relay")
 IDLE_STOP_SECONDS = 45.0
 HLS_TIME = 3
 HLS_LIST_SIZE = 8
+# Rolling time-shift buffer (30 min = 600 x 3s segments) so viewers can pause/rewind live TV.
+TIMESHIFT_MINUTES = 30
+TIMESHIFT_LIST_SIZE = (TIMESHIFT_MINUTES * 60) // HLS_TIME
 
 
 class TunerBusyError(RuntimeError):
@@ -79,8 +82,8 @@ def _default_ffmpeg_cmd(channel: Dict[str, Any], out_dir: str) -> List[str]:
     cmd += [
         "-f", "hls",
         "-hls_time", str(HLS_TIME),
-        "-hls_list_size", str(HLS_LIST_SIZE),
-        "-hls_flags", "delete_segments+temp_file+independent_segments",
+        "-hls_list_size", str(TIMESHIFT_LIST_SIZE),
+        "-hls_flags", "delete_segments+temp_file+independent_segments+append_list",
         "-hls_segment_filename", seg_pattern,
         playlist,
     ]
@@ -233,6 +236,8 @@ class LiveRelaySupervisor:
 
     @staticmethod
     def _public(sess: LiveSession) -> Dict[str, Any]:
+        now = time.time()
+        buffered = max(0.0, min(float(TIMESHIFT_MINUTES * 60), now - sess.started_at))
         return {
             "channel_id": sess.channel_id,
             "source_id": sess.source_id,
@@ -240,7 +245,16 @@ class LiveRelaySupervisor:
             "viewers": len(sess.viewers),
             "playlist_url": f"/api/live/stream/{sess.channel_id}/stream.m3u8",
             "started_at": sess.started_at,
+            "timeshift_seconds": int(buffered),
+            "timeshift_max_seconds": TIMESHIFT_MINUTES * 60,
         }
+
+    def timeshift_status(self, channel_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            sess = self._sessions.get(channel_id)
+            if not sess:
+                return None
+            return self._public(sess)
 
 
 _SUPERVISOR: Optional[LiveRelaySupervisor] = None
