@@ -3459,3 +3459,15 @@ Admin source/channel management and shared-tuner HLS playback for HDHomeRun tune
 - `POST /api/live/leave/<channel_id>` — release a viewer's lease (`{viewer_id}`), tearing down the ffmpeg relay when the last viewer leaves.
 - `GET /api/live/stream/<channel_id>/<filename>` — serve the live HLS manifest and `.ts` segments.
 - `GET /api/live/sessions` — list active live relay sessions and viewer counts.
+
+### Multi-Client & Per-Library Download Routing (`api/download_clients.py`)
+
+Manage multiple simultaneous torrent/usenet client instances and per-library routing overrides across Movies, TV Shows, Music, Audiobooks, and custom video libraries (#2336):
+
+- `GET /api/download-clients/instances` — list configured torrent and usenet client instances (global default + named instances, secrets masked).
+- `POST /api/download-clients/instances` — create or update a named torrent or usenet client instance (`{kind, id, name, type, url, username?, password?, api_key?, category?, save_path?, completed_path?, start_torrents?}`).
+- `DELETE /api/download-clients/instances/<kind>/<client_id>` — remove a named client instance.
+- `POST /api/download-clients/instances/<kind>/<client_id>/test` — test connectivity for a specific client instance.
+- `GET /api/download-clients/routing` — list per-library download routing overrides and effective resolved values.
+- `PUT /api/download-clients/routing/<library_key>` — save per-library overrides (`torrent_client_id`, `usenet_client_id`, `torrent_category`, `usenet_category`, `torrent_save_path`, `completed_path`, `prowlarr_indexer_ids`, `download_source_priority`).
+- `DELETE /api/download-clients/routing/<library_key>` — reset a library back to global defaults.

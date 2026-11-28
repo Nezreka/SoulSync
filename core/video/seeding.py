@@ -113,23 +113,11 @@ def sweep() -> Dict[str, Any]:
             _running = False
 
 
-def _status(ref: str):
-    """The client's word on one torrent, as ``(status, answered)``.
-
-    ``answered`` is False when the CLIENT never answered: no client configured,
-    a refused connection, a timeout, bad credentials. That is emphatically NOT
-    "the torrent is gone", and the difference decides whether a row is marked
-    ``seed_released`` — which is terminal, the awaiting query filters released
-    rows out for good.
-
-    Going through ``client_download._get_status`` collapsed both cases into
-    None, so a qBittorrent that was merely down would silently abandon seed
-    management for every row this sweep touched, forever. The music sweep has
-    guarded exactly this since it shipped; this side had not.
-    """
-    from core.torrent_clients import get_active_adapter
+def _status(ref: str, client_id: Optional[str] = None):
+    """The client's word on one torrent, as ``(status, answered)``."""
+    from core.torrent_clients import get_adapter_for_client
     from utils.async_helpers import run_async
-    adapter = get_active_adapter()
+    adapter = get_adapter_for_client(client_id)
     if adapter is None:
         return None, False
     try:
@@ -175,9 +163,13 @@ def _sweep_inner() -> Dict[str, Any]:
     for dl in rows:
         ref = str(dl["client_ref"])
 
+        row_client_id = dl.get("client_id")
         row_ratio, row_hours = goal_for(dl, cfg)
-        if client_mode and push_seed_goal(adapter, ref, row_ratio, row_hours):
-            logger.info("seeding: refreshed client seed limits for '%s' (client mode)", dl.get("title"))
+        if client_mode:
+            from core.torrent_clients import get_adapter_for_client
+            row_adapter = get_adapter_for_client(row_client_id) if row_client_id else adapter
+            if row_adapter and push_seed_goal(row_adapter, ref, row_ratio, row_hours):
+                logger.info("seeding: refreshed client seed limits for '%s' (client mode)", dl.get("title"))
         # SoulSync polls + removes in both modes. In client mode qBittorrent may
         # also enforce its own limits, but we do not mark the row released until
         # the configured removal/delete policy has actually run.
@@ -193,7 +185,7 @@ def _sweep_inner() -> Dict[str, Any]:
             continue
         polled += 1
 
-        status, answered = _status(ref)
+        status, answered = _status(ref, client_id=row_client_id) if row_client_id else _status(ref)
         if not answered:
             # the client did not answer. leave the row exactly as it is and
             # try again next sweep — never read silence as "it's gone".
@@ -209,7 +201,12 @@ def _sweep_inner() -> Dict[str, Any]:
         if not reason:
             seeding += 1
             continue
-        if _remove(ref, bool(cfg.get("seed_remove_data", True))):
+        removed = (
+            _remove(ref, bool(cfg.get("seed_remove_data", True)), client_id=row_client_id)
+            if row_client_id
+            else _remove(ref, bool(cfg.get("seed_remove_data", True)))
+        )
+        if removed:
             db.update_video_download(dl["id"], seed_released=1)
             released += 1
             logger.info("seeding: released '%s' — %s", dl.get("title"), reason)
@@ -228,13 +225,12 @@ def _sweep_inner() -> Dict[str, Any]:
     return out
 
 
-def _remove(ref: str, delete_files: bool) -> bool:
-    """Remove one torrent from the shared client. The delete only ever touches
-    the CLIENT'S download copy — the imported library file is a separate copy."""
+def _remove(ref: str, delete_files: bool, client_id: Optional[str] = None) -> bool:
+    """Remove one torrent from the client instance that owns it."""
     try:
-        from core.torrent_clients import get_active_adapter
+        from core.torrent_clients import get_adapter_for_client
         from core.video.client_download import _run
-        adapter = get_active_adapter()
+        adapter = get_adapter_for_client(client_id)
         if adapter is None:
             return False
         return bool(_run(adapter.remove(ref, delete_files=delete_files)))
