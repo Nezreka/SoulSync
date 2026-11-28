@@ -68,6 +68,7 @@ function setup(opts: {
   tracks?: Tracks;
   listened?: EngineDeps['listened'];
   counted?: EngineDeps['counted'];
+  level?: EngineDeps['level'];
 }) {
   const media: Partial<Record<MediaKind, FakeMedia>> = {};
   const saves: { id: string; position: number; finished: boolean }[] = [];
@@ -87,6 +88,7 @@ function setup(opts: {
     save: (item, position, _d, finished) => saves.push({ id: item.id, position, finished }),
     listened: opts.listened,
     counted: opts.counted,
+    level: opts.level,
     store: { get: (k) => store.get(k) ?? null, set: (k, v) => void store.set(k, v) },
     now: () => now,
     mediaSession: null,
@@ -632,6 +634,39 @@ describe('subtitle sync and new subtitles', () => {
     expect(t.engine.getState().subtitleDelay).toBe(400);
   });
 
+  it('uses the delay saved on the server for that subtitle file, and saves nudges once', async () => {
+    const saved: Array<[string, number]> = [];
+    const t = setup({
+      tracks: {
+        audio: [],
+        subtitles: [
+          { ...tracks.subtitles[0], id: 's0', delay_ms: -1500 },
+          { ...tracks.subtitles[0], id: 'x0', external: true, ai: true, delay_ms: 0 },
+        ],
+      },
+    });
+    const deps = (t.engine as unknown as { deps: EngineDeps }).deps;
+    deps.saveSubtitleDelay = async (_item, id, ms) => {
+      saved.push([id, ms]);
+    };
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    t.engine.setSubtitle('s0');
+    expect(t.engine.getState().subtitleDelay).toBe(-1500);
+    t.engine.setSubtitle('x0');
+    expect(t.engine.getState().subtitleDelay).toBe(0);
+    t.engine.setSubtitleDelay(100);
+    t.engine.setSubtitleDelay(200);
+    t.engine.setSubtitleDelay(99_000);
+    expect(t.engine.getState().subtitleDelay).toBe(30_000);
+    await new Promise((r) => setTimeout(r, 700));
+    // a run of nudges is one save, clamped, for the subtitle on screen
+    expect(saved).toEqual([['x0', 30_000]]);
+    // back on the first one: its own saved delay, not the other file's
+    t.engine.setSubtitle('s0');
+    expect(t.engine.getState().subtitleDelay).toBe(-1500);
+  });
+
   it('switches to a subtitle file just downloaded beside the video', async () => {
     const t = setup({ tracks });
     t.engine.playItems([movie('1')]);
@@ -866,5 +901,94 @@ describe('a song played here is a play', () => {
     await t.flush();
     t.media.audio!.tick(90);
     expect(counted).toEqual([]);
+  });
+});
+
+describe('volume levelling', () => {
+  const loud = {
+    track_gain: -4,
+    track_peak: 0.5,
+    album_gain: -8,
+    album_peak: 0.7,
+    reference_lufs: -18,
+  };
+  const albumSong = (id: string, n: number): PlayItem => ({
+    type: 'track',
+    id,
+    title: id,
+    parentId: 'al',
+    trackNumber: n,
+  });
+  const levelled = () => {
+    const calls: { linear: number; instant: boolean }[] = [];
+    const t = setup({
+      playable: (item) => ({ url: `/s/${item.type}/${item.id}`, duration: 100, loudness: loud }),
+      level: (_el, linear, instant) => {
+        calls.push({ linear, instant });
+        return true;
+      },
+    });
+    return { t, calls };
+  };
+
+  it('an album in order plays at its album gain, set before a sound plays', async () => {
+    const { t, calls } = levelled();
+    t.engine.playItems([albumSong('1', 1), albumSong('2', 2)]);
+    await t.flush();
+    expect(t.engine.getState().level).toEqual({ db: -8, basis: 'album' });
+    expect(calls.at(-1)?.instant).toBe(true);
+    expect(calls.at(-1)?.linear).toBeCloseTo(Math.pow(10, -8 / 20), 6);
+    // levelling rides on its own gain: the element keeps the person's volume
+    expect(t.media.audio!.volume).toBe(1);
+  });
+
+  it('a lone song plays at its track gain; on shuffle too', async () => {
+    const { t } = levelled();
+    t.engine.playItems([track('9')]);
+    await t.flush();
+    expect(t.engine.getState().level).toEqual({ db: -4, basis: 'track' });
+  });
+
+  it('a settings change glides, never jumps', async () => {
+    const { t, calls } = levelled();
+    t.engine.playItems([track('9')]);
+    await t.flush();
+    t.engine.configureLevelling({ preamp: 2 });
+    expect(t.engine.getState().level?.db).toBe(-2);
+    expect(calls.at(-1)?.instant).toBe(false);
+    t.engine.configureLevelling({ mode: 'off' });
+    expect(t.engine.getState().level).toBeNull();
+    expect(calls.at(-1)?.linear).toBe(1);
+  });
+
+  it('without web audio it turns the element down instead (never up)', async () => {
+    const t = setup({
+      playable: (item) => ({ url: `/s/${item.type}/${item.id}`, duration: 100, loudness: loud }),
+      level: () => false,
+    });
+    t.engine.playItems([track('9')]);
+    await t.flush();
+    expect(t.media.audio!.volume).toBeCloseTo(Math.pow(10, -4 / 20), 6);
+    t.engine.setVolume(0.5);
+    expect(t.media.audio!.volume).toBeCloseTo(0.5 * Math.pow(10, -4 / 20), 6);
+  });
+
+  it('a video is levelled only when asked, and audiobooks never', async () => {
+    const t = setup({
+      playable: (item) => ({
+        url: `/s/${item.type}/${item.id}`,
+        duration: 100,
+        loudness: { integrated_lufs: -29, true_peak_db: -10, audio_stream: 0 },
+      }),
+      level: () => true,
+    });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    expect(t.engine.getState().level).toBeNull();
+    t.engine.configureLevelling({ video: true });
+    expect(t.engine.getState().level).toEqual({ db: 6, basis: 'video' });
+    t.engine.playItems([{ type: 'audiobook', id: 'b', title: 'b' }]);
+    await t.flush();
+    expect(t.engine.getState().level).toBeNull();
   });
 });

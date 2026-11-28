@@ -619,6 +619,10 @@ class PlaylistSyncService:
         try:
             if fn(playlist_name, tracks, **id_kw):
                 return True
+            if isinstance(getattr(client, 'last_playlist_write_refusal', None), str):
+                # the client kept the playlist on purpose: a replace would
+                # only run into the same thing, or empty it (#2334)
+                return False
             logger.warning(
                 "Reconcile sync failed for '%s' — falling back to replace "
                 "(playlist will be recreated this once)", playlist_name)
@@ -897,6 +901,8 @@ class PlaylistSyncService:
                 # fills this from its in-thread readback.
                 _write_skipped_ids: list = []
                 _navidrome_id_kw: dict = {}
+                # why the server playlist was kept as it was, when it was (#2334)
+                _kept_reason: list = []
                 if not media_client:
                     logger.error("No active media client available for playlist sync")
                     sync_success = False
@@ -999,6 +1005,10 @@ class PlaylistSyncService:
                             else:
                                 ok = media_client.update_playlist(
                                     playlist.name, plex_tracks, **_navidrome_id_kw)
+                            if not ok:
+                                # read under the lock, a later write resets it
+                                _kept_reason[:] = [getattr(
+                                    media_client, 'last_playlist_write_refusal', None)]
                             skipped = getattr(
                                 media_client, '_last_validated_write_skipped', None)
                             return bool(ok), (
@@ -1023,7 +1033,10 @@ class PlaylistSyncService:
                     # read "0% in library" against 2652 owned) and skipped the
                     # wishlist for every missing track. Keep the counts, record
                     # the failure, and still wishlist what is missing.
+                    _why = _kept_reason[0] if _kept_reason else None
                     write_error = (
+                        f"{server_type.title()} playlist was not changed: {_why}"
+                        if isinstance(_why, str) and _why else
                         f"{server_type.title()} playlist write failed or could not be verified; "
                         "sync is incomplete. Check the server connection and run a library scan."
                     )
@@ -1795,6 +1808,8 @@ class PlaylistSyncService:
                     # the first that clears the threshold, or a marginal raw
                     # match could mask a stronger (correct) canonical one.
                     db_track, confidence = None, 0.0
+                    from core.discovery.album_pref import album_name as _album_name
+                    _sync_album = _album_name(getattr(spotify_track, 'album', None))
                     for _try_title, _try_artist in _attempts:
                         artist_candidates = self._get_or_fetch_artist_candidates(
                             candidate_pool, db, _try_artist, active_server,
@@ -1807,6 +1822,8 @@ class PlaylistSyncService:
                             # (multi-artist albums filed under another artist) —
                             # the cleanup path already passes it; sync didn't.
                             album=getattr(spotify_track, 'album', None) or None,
+                            # #2331: the copy on the playlist's album wins
+                            prefer_album=_sync_album or None,
                         )
                         if _cand_conf > confidence:
                             db_track, confidence = _cand_track, _cand_conf
@@ -1824,6 +1841,7 @@ class PlaylistSyncService:
                                 _try_title, _try_artist,
                                 confidence_threshold=0.7, server_source=active_server,
                                 album=getattr(spotify_track, 'album', None) or None,
+                                prefer_album=_sync_album or None,
                             )
                             if _cand_conf > confidence:
                                 db_track, confidence = _cand_track, _cand_conf

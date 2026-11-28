@@ -170,6 +170,27 @@ Add tracks to the queue from the Enhanced Library Manager or download results. M
 `
         },
         {
+            id: 'player-levelling',
+            title: 'Volume Levelling',
+            lede: 'Every song at the same loudness, without flattening albums.',
+            body: `
+The player at \`/player\` levels songs with the ReplayGain SoulSync already measures and writes on import. Set it in the player's **Settings, You, Music** (saved with your profile, so every screen and the Android app follow):
+
+- **Off**: songs play as they were mastered.
+- **Track**: every song at the same loudness.
+- **Album**: each album at the same loudness, its quiet and loud songs kept as the artist made them.
+- **Smart** (the default): album levelling while an album plays in order, song levelling on shuffle, playlists and mixes. An album run inside a playlist counts as an album.
+
+**Target loudness** is where levelled songs land (Standard is -18 LUFS, the ReplayGain reference; Loud matches streaming apps). **Pre-amp** adds or takes a little on top. **Prevent clipping** never turns a song up past the point its loudest moment would distort.
+
+A song whose file has no ReplayGain is measured in the background (one at a time, lowest priority; a scan or sync pauses it), and straight away the first time it's played. Until then it plays a little quieter rather than louder than the rest. With Apply ReplayGain tags on (Settings, Library, Processing), what it measures is also written into the file as ReplayGain tags (R128 for Opus), so other players level it too; a hand-tagged file or album is never touched. Off, nothing is written into your files: the ReplayGain Filler or the library page's ReplayGain buttons do that when you ask.
+
+**Level video loudness** does the same for films and videos: the video Loudness maintenance job measures each file's main audio in the background, and very quiet or very loud videos play at one level.
+
+Opus files get their gain as R128 tags (RFC 7845), which Opus players read; older REPLAYGAIN tags in Opus files are still read. Subsonic apps (Symfonium, Feishin and others) get the same gains. Stats for nerds shows the level applied to what's playing. Levelling is off while casting: the TV plays the file as it is.
+`
+        },
+        {
             id: 'player-shortcuts',
             title: 'Keyboard Shortcuts',
             lede: 'Control playback without touching the mouse.',
@@ -318,6 +339,26 @@ In the player's **Settings**, under **Downloads**:
 - **Room for smaller copies**: how much disk the copies may use. When it's full, the copies used longest ago go first. A copy is made once per file and quality and shared by everyone who asks for it.
 
 Whether a profile may download at all is set per person on the player's **Users & Downloads** page.
+`
+        },
+        {
+            id: 'pconv-admin',
+            title: 'Converting and the GPU (Admin)',
+            needs: 'admin',
+            lede: 'Video a screen can\'t play is converted as it streams, on the GPU when there is one. Free, no subscription.',
+            body: `
+In the player's **Settings**, under **Converting**:
+
+- **Converting with** says what the server uses right now: a GPU (NVIDIA, Intel Quick Sync, VA-API for Intel and AMD on Linux, Apple, AMD AMF, or a Raspberry Pi's encoder) or the CPU.
+- **GPU**: **Auto** uses the first GPU that passes a real test encode. Pick one to use only that one, or **Off** for the CPU.
+- **Conversions at once**: players and casts together. Past it, a screen is told the server is busy.
+- **Test GPU** finds the GPU again and runs a real 1080p clip through it: decoded, scaled and encoded on the card. Anything marked off gets another go.
+
+Only what has to change is converted. A picture a screen plays is copied, so an H.264 file with AC3 sound only has its sound converted. The picture is converted when the codec doesn't play, for 10-bit H.264 (anime encodes), when a smaller quality is picked, and when a copied picture is over the quality's bitrate (1080p 8 Mbps, 720p 4 Mbps, 480p 1.5 Mbps).
+
+On a GPU the file is decoded, scaled and encoded on the card. HDR tone mapping and drawn-in subtitles still run on the CPU, with the GPU decoding and encoding. If the GPU fails before a stream starts, that stream runs again on the CPU at once and you only see a slower start. The server tests the GPU again; one that fails is off until you press **Test GPU**, with the reason under **Fell back to the CPU** and on the stream in **Server Activity**. A file the GPU can't decode (10-bit H.264 on NVIDIA) decodes on the CPU from then on, still encoding on the GPU.
+
+**Docker**: Intel and AMD need the card passed in: \`devices: - /dev/dri:/dev/dri\` in docker-compose.yml. The image has the drivers and joins the card's group itself. NVIDIA needs the NVIDIA Container Toolkit on the host and \`runtime: nvidia\` (or the \`deploy\` GPU block); both are in the compose file, commented. On a Raspberry Pi 5 there is no hardware encoder: copies and sound-only conversions are cheap, full conversions are slow.
 `
         },
     ]

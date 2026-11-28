@@ -2362,6 +2362,14 @@ class MusicDatabase:
                 self._record_migration(cursor, 'acquisition_phase4_schema')
             except Exception as grabs_err:
                 logger.error(f"Acquisition schema init failed: {grabs_err}")
+            # #2335: what has been given back to acoustid and musicbrainz, so
+            # nothing is ever sent twice. additive, idempotent
+            try:
+                from core.giveback.store import ensure_schema as ensure_giveback_schema
+                ensure_giveback_schema(cursor)
+                self._record_migration(cursor, 'giveback_submissions')
+            except Exception as giveback_err:
+                logger.error(f"Give back schema init failed: {giveback_err}")
             # Hand-tagged files ("tag it yourself"): the remembered file is the
             # lock on this branch, lib2 rows carry no metadata_locked column.
             self._ensure_manual_metadata_schema(cursor)
@@ -2383,6 +2391,7 @@ class MusicDatabase:
             self._wishlist_lib2_album_dates(cursor)
             self._purge_beatport_positional_matches(cursor)
             self._purge_fake_provider_ids(cursor)
+            self._add_holiday_overrides_table(cursor)
             # _recheck_wishlist_release_groups runs from the deferred passes
             # (core/library2/bootstrap.py): a boot runs no match-status update
             # Unify scattered migration state into the ledger + stamp the schema
@@ -2502,6 +2511,7 @@ class MusicDatabase:
         'fake_provider_ids_purged': ('table', '_fake_provider_ids_purged'),
         'wishlist_release_groups_rechecked': ('table', '_wishlist_release_groups_rechecked'),
         'server_plays_v1':          ('table', 'server_plays'),
+        'holiday_overrides_v1':     ('table', 'holiday_overrides'),
     }
 
     def _record_migration(self, cursor, name):
@@ -3407,6 +3417,27 @@ class MusicDatabase:
             """)
         except Exception as e:
             logger.error(f"Error adding rotating column to mirrored_playlists: {e}")
+
+    def _add_holiday_overrides_table(self, cursor):
+        """#2332: holiday music on/off set by hand on an artist, album or
+        track. keyed by names, not row ids, so a rescan, a reimport or a
+        retag never undoes it (core/holiday_music.py)."""
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS holiday_overrides (
+                    scope TEXT NOT NULL,
+                    match_key TEXT NOT NULL,
+                    holiday INTEGER NOT NULL,
+                    artist TEXT,
+                    album TEXT,
+                    title TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (scope, match_key)
+                )
+            """)
+            self._record_migration(cursor, 'holiday_overrides_v1')
+        except Exception as e:
+            logger.error(f"Error creating holiday_overrides table: {e}")
 
     def _add_mirrored_playlist_request_list_columns(self, cursor):
         """Add request list and upstream tracking columns to mirrored_playlists."""
@@ -13680,6 +13711,10 @@ class MusicDatabase:
                               across every album of a series, and without a preference the
                               first row won, which sent a caller that compares albums
                               (watchlist, allow-duplicates) to a copy on the wrong album.
+                              A copy on that album also wins over one scoring at most
+                              _PREFER_ALBUM_MARGIN higher (#2331: a classical piece on many
+                              compilations, its title spelled a little differently on each),
+                              as long as it clears the threshold itself.
 
         Returns (track, confidence) tuple where confidence is 0.0-1.0
         """
@@ -13689,10 +13724,22 @@ class MusicDatabase:
             _want_album = self._normalize_for_comparison(prefer_album) if prefer_album else ''
 
             def _better(conf, trk):
-                if conf > best_confidence:
-                    return True
-                return bool(_want_album) and conf == best_confidence and best_match is not None \
-                    and self._on_album(trk, _want_album) and not self._on_album(best_match, _want_album)
+                if not _want_album or best_match is None:
+                    return conf > best_confidence
+                new_on = self._on_album(trk, _want_album)
+                cur_on = self._on_album(best_match, _want_album)
+                if new_on == cur_on:
+                    return conf > best_confidence
+                margin = self._PREFER_ALBUM_MARGIN
+                if new_on:
+                    # the asked-for album's copy, near enough to the best
+                    return conf > best_confidence or (
+                        conf >= confidence_threshold and conf >= best_confidence - margin)
+                # the best is on the album: only a clearly better copy, or
+                # any better one while the album copy misses the threshold
+                if best_confidence < confidence_threshold:
+                    return conf > best_confidence
+                return conf > best_confidence + margin
 
             if candidate_tracks:
                 # BATCHED PATH — score every pre-fetched track in-memory.
@@ -13986,6 +14033,10 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error checking track existence for '{title}' by '{artist}': {e}")
             return None, 0.0
+
+    # how far below the best score a copy on the asked-for album may sit and
+    # still win (check_track_exists' prefer_album)
+    _PREFER_ALBUM_MARGIN = 0.05
 
     def _on_album(self, track, wanted_key: str) -> bool:
         """Whether ``track`` sits on the album whose normalized name is ``wanted_key``."""
@@ -29071,6 +29122,8 @@ class MusicDatabase:
                 # Resolve the seed track and its album / artist
                 cursor.execute("""
                     SELECT t.id, al.primary_artist_id AS artist_id, t.album_id,
+                           t.title    AS title,
+                           al.title   AS album_title,
                            al.genres  AS album_genres,
                            al.mood    AS album_mood,
                            al.style   AS album_style,
@@ -29107,7 +29160,15 @@ class MusicDatabase:
                 exclude_seed = [str(track_id)]
                 if exclude_ids:
                     exclude_seed.extend(str(eid) for eid in exclude_ids)
-                collector = RadioCollector(limit, exclude_ids=exclude_seed)
+                # #2332: holiday songs only in season, unless the seed is one
+                # (radio off a christmas song you picked plays christmas)
+                from core.holiday_music import policy as _holiday_policy
+                _holiday = _holiday_policy(self)
+                if _holiday.is_holiday({'title': seed.get('title'), 'album': seed.get('album_title'),
+                                        'artist': artist_name,
+                                        'genres': [seed.get('album_genres'), seed.get('artist_genres')]}):
+                    _holiday = None
+                collector = RadioCollector(limit, exclude_ids=exclude_seed, holiday=_holiday)
 
                 # Phase 2 smart radio: each tier pulls a generous RANDOM pool,
                 # then core.radio.selection ranks it (play_count + lastfm
@@ -29132,6 +29193,7 @@ class MusicDatabase:
                            json_extract(t.enrichment, '$.lastfm.playcount')
                                AS lastfm_playcount,
                            al.title   AS album,
+                           al.genres  AS album_genres,
                            COALESCE(al.image_url, ar.image_url) AS image_url,
                            ar.name    AS artist
                     FROM lib2_tracks t
@@ -29290,7 +29352,9 @@ class MusicDatabase:
 
                 from core.radio.selection import RadioCollector
 
-                collector = RadioCollector(limit, exclude_ids=exclude_ids)
+                from core.holiday_music import policy as _holiday_policy
+                collector = RadioCollector(limit, exclude_ids=exclude_ids,
+                                           holiday=_holiday_policy(self))
 
                 # No seed track means the exclude set can be EMPTY — and
                 # "NOT IN ()" is a syntax error — so the clause is conditional.
@@ -29306,6 +29370,7 @@ class MusicDatabase:
                            json_extract(t.enrichment, '$.lastfm.playcount')
                                AS lastfm_playcount,
                            al.title   AS album,
+                           al.genres  AS album_genres,
                            COALESCE(al.image_url, ar.image_url) AS image_url,
                            ar.name    AS artist
                     FROM lib2_tracks t

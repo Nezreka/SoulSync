@@ -140,11 +140,33 @@ def sidecars(video_path: str) -> List[Dict[str, Any]]:
             continue  # another video's name that starts the same way
         m = _LANG_IN_NAME.search(rest) if rest else None
         flags = rest.lower().split(".")
-        out.append({"id": f"x{len(out)}", "language": (m.group(1).lower() if m else None),
+        lang = m.group(1).lower() if m else None
+        # the ai marker (``Movie.ai.en.srt``) is never the language
+        if lang == "ai":
+            lang = None
+        out.append({"id": f"x{len(out)}", "language": lang,
                     "title": None, "codec": ext.lower().lstrip("."), "default": False,
-                    "forced": "forced" in flags, "sdh": "sdh" in flags or "hi" in flags or "cc" in flags,
+                    "forced": "forced" in flags,
+                    "sdh": "sdh" in flags or "cc" in flags or ("hi" in flags and m is not None and m.group(1).lower() != "hi"),
+                    "ai": "ai" in flags,
                     "external": True, "kind": "text", "path": os.path.join(folder, entry)})
     return out
+
+
+def sidecar_key(path: str) -> Any:
+    """a subtitle file's cache key: its path, size and mtime, so a rewrite
+    (an upgrade, a resync, a manual replace) is a new WebVTT at once"""
+    try:
+        st = os.stat(path)
+        return ("sidecar", path, st.st_size, getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
+    except OSError:
+        return ("sidecar", path, None, None)
+
+
+def sidecar_sig(path: str) -> str:
+    """size and mtime as one string (the saved delay's check)"""
+    key = sidecar_key(path)
+    return "" if key[2] is None else f"{key[2]}:{key[3]}"
 
 
 def parse_chapters(data: Dict[str, Any]) -> List[Dict[str, Any]]:

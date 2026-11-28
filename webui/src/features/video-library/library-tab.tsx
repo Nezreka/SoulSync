@@ -29,6 +29,7 @@ import type {
   TitleLibrary,
 } from './types';
 
+import { AiSubtitlesDialog } from './ai-subtitles-dialog';
 import {
   type AcquisitionState,
   type ConsolidateState,
@@ -69,6 +70,7 @@ import {
   TitleHistoryDialog,
   UndoToast,
 } from './manage-dialogs';
+import { MarkersPanel } from './markers-editor';
 import s from './video-library.module.css';
 
 /** the page's own flows, which the tab borrows instead of re-implementing. */
@@ -255,6 +257,8 @@ export interface FileActions {
   onRename: (f: LibraryFile) => void;
   onDelete: (f: LibraryFile) => void;
   onSubtitles?: (f: LibraryFile) => void;
+  /** make subtitles with ai on the server (whisper) */
+  onAiSubtitles?: (f: LibraryFile) => void;
   /** search releases for this one title or episode */
   onUpgrade?: (f: LibraryFile) => void;
   /** a show's file can be handed to another episode */
@@ -273,6 +277,16 @@ function fileMenu(f: LibraryFile, a: FileActions): ActionMenuItem[] {
   }
   if (a.onSubtitles) {
     items.push({ key: 'subs', label: 'Search subtitles', onSelect: () => a.onSubtitles?.(f) });
+  }
+  // the page's file controls are the admin's; a member makes them in the player
+  if (a.onAiSubtitles && a.canManage) {
+    items.push({
+      key: 'ai-subs',
+      label: 'Make subtitles with AI…',
+      disabled: !reachable,
+      title: !reachable ? "SoulSync can't reach this file" : undefined,
+      onSelect: () => a.onAiSubtitles?.(f),
+    });
   }
   if (a.canManage) {
     items.push({
@@ -764,6 +778,7 @@ function MovieView({
   const [command, setCommand] = usePageCommands();
   const fresh = useFreshness('movie', data.id, reload);
   const [copies, setCopies] = useState(false);
+  const [aiSubs, setAiSubs] = useState(false);
   const [busy, setBusy] = useState(false);
   const best = data.files.find((f) => f.best) ?? data.files[0];
   const q = data.quality;
@@ -777,6 +792,7 @@ function MovieView({
       ? () => b.subtitleSearch?.('movie', data.id, data.title, '')
       : undefined,
     onUpgrade: b.manualSearch ? () => b.manualSearch?.('movie') : undefined,
+    onAiSubtitles: () => setAiSubs(true),
   };
 
   const upgrade = async () => {
@@ -982,6 +998,10 @@ function MovieView({
         <FileCards files={data.files} actions={actions} label="File" />
       </section>
 
+      {data.files.length ? (
+        <MarkersPanel kind="movie" itemId={data.id} canManage={data.can_manage} />
+      ) : null}
+
       <Extras kind="movie" id={data.id} extras={data.extras} />
 
       {fileDialogs}
@@ -1018,6 +1038,15 @@ function MovieView({
             setCopies(false);
             reload();
           }}
+        />
+      ) : null}
+      {aiSubs ? (
+        <AiSubtitlesDialog
+          kind="movie"
+          id={data.id}
+          title={data.title}
+          onClose={() => setAiSubs(false)}
+          onReady={reload}
         />
       ) : null}
     </div>

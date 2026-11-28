@@ -127,7 +127,8 @@ def _seed_state(playlist_id, states, *, tracks=None, cancelled=False):
 def test_cache_hit_short_circuits():
     """Cache hit appends Found result without live search."""
     states = {}
-    cached = {'name': 'Cached', 'artists': ['CA'], 'album': {'name': 'CAlb'}}
+    # same album as the source track: a cached copy from another album is searched again (#2331)
+    cached = {'name': 'Cached', 'artists': ['CA'], 'album': {'name': 'Album'}}
     _seed_state('p1', states, tracks=[_TidalTrack()])
     deps = _build_deps(states=states, cache_match=cached)
 

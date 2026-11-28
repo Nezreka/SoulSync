@@ -1,7 +1,9 @@
 import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson, refusalText } from '@/app/api-client';
+import { appURL } from '@/platform/url-base';
 
+import type { Chapter } from './-engine/types';
 import type { HomeLayout, LayoutCatalog } from './-lib/home-layout';
 import type { ServerPremiere } from './-lib/premieres';
 import type { ServerResume } from './-lib/rails';
@@ -417,10 +419,18 @@ export type PlayerAccentColor = 'emerald' | 'violet' | 'ocean' | 'amber' | 'rose
 export type CommercialEra = 'auto' | '70s' | '80s' | '90s' | '2000s' | 'kids' | 'mix';
 export type CommercialMode = 'short' | 'cable';
 
+/** what happens at an intro, credits or a recap: a button, skipped on its own, or nothing */
+export type SkipMode = 'ask' | 'auto' | 'never';
+
 export interface PlayerSettings {
   share_activity: boolean;
   autoplay_next: boolean;
   still_watching_after: number;
+  skip_intro?: SkipMode;
+  skip_credits?: SkipMode;
+  skip_recap?: SkipMode;
+  /** the next episode counts down from where the credits start */
+  next_at_credits?: boolean;
   show_movie_ratings: boolean;
   show_tv_episode_count: boolean;
   show_year_on_cards: boolean;
@@ -432,6 +442,16 @@ export interface PlayerSettings {
   sidebar_order?: string[];
   /** places left out of the sidebar */
   sidebar_hidden?: string[];
+  /** volume levelling for music (smart: album gain while an album plays in order) */
+  loudness_mode?: 'off' | 'track' | 'album' | 'smart';
+  /** the loudness levelled music plays at, LUFS */
+  loudness_target?: number;
+  /** dB on top of levelling */
+  loudness_preamp?: number;
+  /** never turn a song up past where its peak distorts */
+  loudness_prevent_clipping?: boolean;
+  /** level very quiet or very loud videos */
+  video_loudness?: boolean;
 }
 
 export interface CommercialClip {
@@ -1710,6 +1730,26 @@ export const playableQuery = (itemType: string, itemId: string) =>
       await apiClient
         .get(`player/playable/${itemType}/${encodeURIComponent(itemId)}`)
         .json<{ duration?: number; chapters?: { start: number; title: string }[] }>(),
+    staleTime: 10 * MINUTE,
+    retry: false,
+  });
+
+/**
+ * a movie's or an episode's chapters with their pictures, for its detail
+ * page. the server answers from what it already knows (never reads the file),
+ * so it's instant; none until the file's been played or its pictures made.
+ */
+export const chaptersQuery = (itemType: string, itemId: string, part?: number | string | null) =>
+  queryOptions({
+    queryKey: ['player', 'chapters', itemType, itemId, part ?? null],
+    queryFn: async () => {
+      const body = await apiClient
+        .get(`player/chapters/${itemType}/${encodeURIComponent(itemId)}`, {
+          searchParams: part ? { part: String(part) } : {},
+        })
+        .json<{ chapters?: Chapter[] }>();
+      return (body.chapters ?? []).map((c) => ({ ...c, thumb: c.thumb ? appURL(c.thumb) : null }));
+    },
     staleTime: 10 * MINUTE,
     retry: false,
   });

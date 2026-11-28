@@ -467,9 +467,16 @@ def get_album_list2(ctx):
 
 @method("getRandomSongs")
 def get_random_songs(ctx):
-    ids = ctx.lib.random_songs(_int("size", 10, 0, MAX_LIST), genre=_one("genre") or "",
+    genre = _one("genre") or ""
+    ids = ctx.lib.random_songs(_int("size", 10, 0, MAX_LIST), genre=genre,
                                from_year=_one("fromYear"), to_year=_one("toYear"))
-    return {"randomSongs": {"song": ctx.lib.songs(ids)}}
+    songs = ctx.lib.songs(ids)
+    # #2332: a client's shuffle leaves holiday songs out of season, unless it
+    # asked for a holiday genre
+    from core.holiday_music import filter_tracks, genres_say_holiday
+    if not genres_say_holiday([genre]):
+        songs = filter_tracks(songs, database=ctx.db)
+    return {"randomSongs": {"song": songs}}
 
 
 @method("getSongsByGenre")

@@ -22,6 +22,7 @@ _JOB_MODULES = [
     "naming_conformance",
     "missing_subtitles",
     "media_info",
+    "loudness_job",
 ]
 
 

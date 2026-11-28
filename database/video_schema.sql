@@ -437,6 +437,25 @@ CREATE INDEX IF NOT EXISTS idx_media_files_size    ON media_files(size_bytes);
 -- scan rewrites media_files, so this is where a probe outlives it: the scan
 -- fills the languages in from here when the server didn't send them (plex
 -- sends no stream data in a library listing).
+-- how loud each video file's main audio track is (v80), measured with ffmpeg
+-- ebur128 in the background (the Loudness maintenance job), so the player can
+-- level a very quiet or very loud video. keyed like video_file_probes, by file
+-- name + size, so a server scan that rewrites media_files keeps it. nothing is
+-- ever written into the video file.
+CREATE TABLE IF NOT EXISTS video_file_loudness (
+    file_name        TEXT NOT NULL,
+    size_bytes       INTEGER NOT NULL,
+    audio_stream     INTEGER NOT NULL DEFAULT 0,   -- which audio track was measured (0 = the first)
+    integrated_lufs  REAL,
+    true_peak_db     REAL,
+    lra              REAL,                         -- loudness range, LU
+    measured_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    attempts         INTEGER NOT NULL DEFAULT 0,   -- failures so far (3 and it's left alone)
+    error            TEXT,
+    PRIMARY KEY (file_name, size_bytes)
+);
+CREATE INDEX IF NOT EXISTS idx_video_file_loudness_size ON video_file_loudness(size_bytes);
+
 CREATE TABLE IF NOT EXISTS video_file_probes (
     file_name          TEXT NOT NULL,
     size_bytes         INTEGER NOT NULL,
@@ -1153,6 +1172,55 @@ CREATE TABLE IF NOT EXISTS subtitle_overrides (
     PRIMARY KEY (kind, item_id)
 );
 
+-- ── ai subtitles (v81) ──
+-- whisper transcription jobs, off the subtitle worker's cycle: one row per
+-- video x language, highest priority first (someone waiting in the player
+-- beats a library backfill). a running row left by a restart goes back to
+-- queued and resumes from its checkpoint.
+CREATE TABLE IF NOT EXISTS subtitle_ai_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_kind TEXT NOT NULL,          -- 'movie' | 'episode'
+    video_id INTEGER NOT NULL,
+    language TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'auto',  -- auto | on_demand | library
+    priority INTEGER NOT NULL DEFAULT 20,
+    state TEXT NOT NULL DEFAULT 'queued', -- queued | running | paused | done | failed | cancelled | no_match | discarded
+    progress REAL NOT NULL DEFAULT 0,
+    stage TEXT,
+    eta_seconds INTEGER,
+    error TEXT,
+    model TEXT,
+    device TEXT,
+    spoken_language TEXT,
+    task TEXT,                         -- transcribe | translate
+    confidence REAL,
+    verdict TEXT,                      -- ok | low | discard
+    output_path TEXT,
+    duration_seconds REAL,
+    created_by INTEGER,                -- the profile that asked (NULL = the system)
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    finished_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_subtitle_ai_jobs_state ON subtitle_ai_jobs(state, priority, id);
+CREATE INDEX IF NOT EXISTS idx_subtitle_ai_jobs_video ON subtitle_ai_jobs(video_kind, video_id);
+CREATE INDEX IF NOT EXISTS idx_subtitle_ai_jobs_output ON subtitle_ai_jobs(output_path);
+
+-- the subtitle delay a profile set for one subtitle of one file (v81). the
+-- web player and the app both read and write it. sub_key is the sidecar's
+-- file name or "s<n>" for a track inside the file; sub_sig is its size and
+-- mtime when saved, so a replaced subtitle starts back at 0.
+CREATE TABLE IF NOT EXISTS subtitle_delays (
+    profile_id INTEGER NOT NULL,
+    video_path TEXT NOT NULL,
+    sub_key TEXT NOT NULL,
+    sub_sig TEXT NOT NULL DEFAULT '',
+    delay_ms INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (profile_id, video_path, sub_key)
+);
+
 -- ── scene numbering (TMDB vs TVDB) ──
 -- the wishlist numbers episodes the TMDB way, the scene names releases the
 -- TVDB way, and for ~40% of wanted episodes they disagree (60 Minutes S59E25
@@ -1358,3 +1426,77 @@ CREATE TABLE IF NOT EXISTS home_videos (
 CREATE INDEX IF NOT EXISTS idx_home_videos_root_sort ON home_videos(root, sort_at);
 CREATE INDEX IF NOT EXISTS idx_home_videos_album ON home_videos(album_key, sort_at);
 CREATE INDEX IF NOT EXISTS idx_home_videos_work ON home_videos(work_state) WHERE work_state > 0;
+
+-- skip markers (v79): intro / credits / recap / preview / commercial spans of
+-- a file. one row per (file, kind, source), except commercials: a file has as
+-- many breaks as it has (an .edl from comskip or a dvr lists each), so those
+-- are many rows. core/video/markers/store.py keeps the one-per-source rule for
+-- the rest. the player shows the best source per kind: user > sidecar (.edl) >
+-- detected > server (plex / jellyfin) > chapter names (read live, never stored)
+CREATE TABLE IF NOT EXISTS video_segments (
+    id             INTEGER PRIMARY KEY,
+    media_file_id  INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
+    kind           TEXT    NOT NULL,          -- intro | credits | recap | preview | commercial
+    start_s        REAL    NOT NULL,
+    end_s          REAL    NOT NULL,
+    source         TEXT    NOT NULL,          -- user | sidecar | detected | plex | jellyfin
+    confidence     REAL,                      -- 0..1, detected only
+    extra          TEXT,                      -- json: post_credits [start, end], how it was found
+    edited_by      INTEGER,                   -- the profile that set a user marker
+    created_at     TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_video_segments_file ON video_segments(media_file_id);
+
+-- a marker an admin removed: every automatic source of that kind stays
+-- hidden for the file, so a rescan or a re-detect can't bring it back
+CREATE TABLE IF NOT EXISTS video_segment_suppressions (
+    media_file_id  INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
+    kind           TEXT    NOT NULL,
+    created_at     TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (media_file_id, kind)
+);
+
+-- audio fingerprints (chromaprint, or soulsync's own when fpcalc is missing)
+-- of a file's head, tail and (recaps, opt in) whole body, plus a 75 Hz
+-- loudness envelope for edges finer than a fingerprint step. kept so a new
+-- episode compares against its season without decoding the others again
+CREATE TABLE IF NOT EXISTS video_audio_fingerprints (
+    media_file_id    INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
+    region           TEXT    NOT NULL,        -- head | tail | body
+    algo             TEXT    NOT NULL,        -- chromaprint | soulsync
+    offset_s         REAL    NOT NULL,        -- where the region starts in the file
+    step_s           REAL    NOT NULL,        -- seconds per fingerprint item
+    fp               BLOB    NOT NULL,        -- little-endian uint32s
+    envelope         BLOB,                    -- uint8 loudness, 75 per second
+    analyzer_version INTEGER NOT NULL,
+    created_at       TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (media_file_id, region)
+);
+
+-- one row per (file, task): what the marker job did, so it resumes where it
+-- was and never retries a broken file forever
+CREATE TABLE IF NOT EXISTS video_analysis_state (
+    media_file_id    INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
+    task             TEXT    NOT NULL,        -- markers | server | sidecar
+    status           TEXT    NOT NULL DEFAULT 'pending',  -- pending | running | done | failed
+    attempts         INTEGER NOT NULL DEFAULT 0,
+    priority         INTEGER NOT NULL DEFAULT 0,          -- "find now" and first plays jump the queue
+    last_error       TEXT,
+    result           TEXT,                    -- json the matcher reads (visual credits, duration)
+    file_sig         TEXT,                    -- size:mtime the result was made from
+    analyzer_version INTEGER,
+    heartbeat        REAL,
+    analyzed_at      TEXT,
+    PRIMARY KEY (media_file_id, task)
+);
+CREATE INDEX IF NOT EXISTS idx_video_analysis_queue ON video_analysis_state(task, status, priority);
+
+-- an .edl soulsync wrote: only these are ever rewritten. a user's own is
+-- read, never touched
+CREATE TABLE IF NOT EXISTS video_marker_sidecars (
+    media_file_id  INTEGER PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
+    path           TEXT    NOT NULL,
+    size_bytes     INTEGER,
+    mtime          REAL,
+    written_at     TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

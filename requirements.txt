@@ -107,3 +107,13 @@ websockets>=12  # required by SpotipyFree/spotapi, not pulled in automatically
 # RUNTIME -- core/library/folder_watch.py checks every folder on a timer
 # without it. ~80 KB, no dependencies.
 watchdog==6.0.0
+
+# AI subtitles: whisper speech-to-text on this server (CTranslate2, int8 on the
+# CPU; silero VAD runs on the onnxruntime above). Models are NOT in the image:
+# they download to the data volume from Settings (75 MB to 1.6 GB each).
+# Adds about 250 MB installed (ctranslate2, PyAV, tokenizers, huggingface-hub).
+# For an NVIDIA GPU build the image with --build-arg WHISPER_CUDA=1 (the :cuda tag).
+faster-whisper==1.2.1
+# Subtitle timing fix (opt-in auto-sync): ffsubsync, MIT, offline. Pulls
+# webrtcvad-wheels (prebuilt for amd64 and arm64, no compiler needed).
+ffsubsync==0.5.1

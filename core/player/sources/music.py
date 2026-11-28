@@ -22,7 +22,7 @@ logger = get_logger("player.music")
 def _track_files(conn, track_id: int):
     """the track's imported files, best first (lossless, then bitrate)"""
     return conn.execute("""
-        SELECT f.path, f.format, f.bitrate, t.duration
+        SELECT f.path, f.format, f.bitrate, t.duration, f.id
         FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id = t.id
         WHERE t.id = ? AND COALESCE(f.import_status, 'imported') = 'imported'
         ORDER BY CASE WHEN f.quality_tier = 'lossless' THEN 0 ELSE 1 END,
@@ -95,13 +95,16 @@ def locate(item_id: str) -> Source:
         if not files:
             raise Refused(404, "no_file", "That track has no file.")
         duration = (files[0][3] or 0) / 1000 or None
-        for stored, _fmt, _bitrate, _ in files:
+        for stored, _fmt, _bitrate, _, file_id in files:
             local = _on_disk(stored)
             if local:
-                return Source("file", audio_mime(local), path=local, duration=duration)
+                # the file's id stays server side: its loudness is looked up by it
+                return Source("file", audio_mime(local), path=local, duration=duration,
+                              private={"file_id": file_id, "track_id": track_id})
         url = _server_stream(conn, track_id)
     if url:
         from core.settings import config_manager
         return Source("relay", audio_mime(files[0][0]), url=url, duration=duration,
-                      extra={"via": config_manager.get_active_media_server()})
+                      extra={"via": config_manager.get_active_media_server()},
+                      private={"file_id": files[0][4], "track_id": track_id})
     raise Refused(404, "no_file", "SoulSync can't reach that track's file.")

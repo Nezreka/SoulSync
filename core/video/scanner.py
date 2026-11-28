@@ -429,6 +429,15 @@ class VideoLibraryScanner:
                 drive_map.forget_server_folders()
             except Exception:   # noqa: BLE001
                 logger.debug("drive map folders not cleared", exc_info=True)
+            # skip markers: the .edl files beside the videos are read back
+            # (a stat each when nothing changed), and new files join the queue
+            try:
+                from core.video.markers.job import peek_job
+                job = peek_job()
+                if job is not None:
+                    job.after_scan()
+            except Exception:   # noqa: BLE001
+                logger.debug("marker job not told about the scan", exc_info=True)
             if paused:
                 self._resume_after_scan()
 

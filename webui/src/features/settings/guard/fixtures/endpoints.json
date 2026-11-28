@@ -326,6 +326,45 @@
       }
     ]
   },
+  "/api/giveback": {
+    "acoustid": {
+      "message": "",
+      "ready": false
+    },
+    "counts": {
+      "acoustid": {
+        "present": 0,
+        "rejected": 0,
+        "skipped": 0,
+        "submitted": 0
+      },
+      "isrc": {
+        "present": 0,
+        "rejected": 0,
+        "skipped": 0,
+        "submitted": 0
+      }
+    },
+    "last": {},
+    "last_at": null,
+    "musicbrainz": {
+      "available": true,
+      "connected": false,
+      "message": "",
+      "username": ""
+    },
+    "running": false,
+    "success": true,
+    "switches": {
+      "acoustid": false,
+      "isrc": false,
+      "releases": false
+    }
+  },
+  "/api/giveback/releases": {
+    "releases": [],
+    "success": true
+  },
   "/api/metasync": {
     "local_key_set": true,
     "node_fingerprint": "ab:cd",
@@ -3837,6 +3876,20 @@
     "pending": 2,
     "success": true
   },
+  "/api/secondary-library": {
+    "check": {},
+    "rules": {
+      "active": false,
+      "album_titles": [],
+      "enabled": false,
+      "genres": [],
+      "match_holiday": true,
+      "name": "Holiday",
+      "path": "",
+      "problem": ""
+    },
+    "success": true
+  },
   "/api/server-activity/settings": {
     "ok": true,
     "settings": {
@@ -4250,6 +4303,12 @@
       "token": "************"
     }
   },
+  "/api/video/subtitles/ai/jobs?active=1": {
+    "available": true,
+    "jobs": [],
+    "watching": false,
+    "why": null
+  },
   "/api/video/subtitles/whisper/status": {
     "download": {
       "state": "idle"
@@ -4258,21 +4317,38 @@
     "downloaded_at": "2026-11-01T10:00:00",
     "enabled": true,
     "engine": true,
+    "hardware": {
+      "cuda": false,
+      "summary": "CPU, 8 cores, 16 GB"
+    },
+    "installed": [
+      "base"
+    ],
     "model": "base",
     "models": {
       "base": {
+        "bench": {
+          "device": "cpu",
+          "speed": 10.5
+        },
         "blurb": "balanced",
-        "label": "base"
+        "disk_bytes": 145000000,
+        "installed": true,
+        "label": "base",
+        "size_bytes": 145000000
       },
       "small": {
         "blurb": "best, slower",
-        "label": "small"
+        "label": "small",
+        "size_bytes": 486000000
       },
       "tiny": {
         "blurb": "fastest, rough",
-        "label": "tiny"
+        "label": "tiny",
+        "size_bytes": 78000000
       }
     },
+    "recommended": "small",
     "size_bytes": 145000000
   },
   "/api/weather": {

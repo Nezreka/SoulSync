@@ -198,6 +198,7 @@ class PersonalizedPlaylistManager:
         # bookkeeping. Filters are config-driven; defaults preserve
         # the pre-overhaul behavior (no filtering).
         tracks = self._apply_quality_filters(tracks, kind, profile_id, config)
+        tracks = self._drop_holiday(tracks, kind, variant)
 
         return self._persist_snapshot(record.id, kind, profile_id, tracks)
 
@@ -236,6 +237,19 @@ class PersonalizedPlaylistManager:
             return tracks
 
         return [t for t in tracks if not t.primary_id() or t.primary_id() not in recent_set]
+
+    # kinds that are holiday music on purpose (#2332)
+    _HOLIDAY_KINDS = ('holiday_mix',)
+
+    def _drop_holiday(self, tracks: List[Track], kind: str, variant: str = '') -> List[Track]:
+        """#2332: holiday songs only in season (or always, or never, as set).
+        the Holiday mix and the Christmas seasonal mix keep theirs"""
+        if not tracks or kind in self._HOLIDAY_KINDS:
+            return tracks
+        if kind == 'seasonal_mix' and variant == 'christmas':
+            return tracks
+        from core.holiday_music import filter_tracks
+        return filter_tracks(tracks, database=self.database)
 
     def _drop_blocked(self, tracks: List[Track], profile_id: int) -> List[Track]:
         if not tracks or not hasattr(self.database, 'get_blocklist'):

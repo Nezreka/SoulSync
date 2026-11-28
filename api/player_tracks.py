@@ -1,18 +1,35 @@
 """a video's audio and subtitle tracks for the player, and its subtitles.
 
-    GET /api/player/tracks/<item_type>/<item_id>?part=     {audio, subtitles}
+    GET /api/player/tracks/<item_type>/<item_id>?part=     {audio, subtitles, chapters, markers}
+    GET /api/player/markers/<item_type>/<item_id>?part=    {markers}
     GET /api/player/subtitle/<item_type>/<item_id>?part=&sub=s0|x0
                                                            WebVTT
+    GET /api/player/chapters/<item_type>/<item_id>?part=   {chapters}
+    GET /api/player/chapter-thumb/<item_type>/<item_id>/<n>?part=&v=
+                                                           a chapter's picture
+    PUT /api/player/subtitle-delay/<item_type>/<item_id>?part=&sub=x0
+        {"delay_ms": -1200}                                {delay_ms}
+
+each subtitle in the tracks answer carries this profile's saved ``delay_ms``
+for that subtitle file (the web player and the app both use it), ``ai`` for
+one whisper made, and ``low_confidence`` when whisper wasn't sure.
 
 the same play check as the bytes (core/player/playable.resolve). audio
 tracks are numbered among the file's audio, subtitles ``s<n>`` (in the
 file, among its subtitles) or ``x<n>`` (a file beside it). an image
 subtitle can't be WebVTT: the player burns it in through the converter.
+
+a chapter carries ``thumb``, its picture's url, once the background worker
+has made it (core/player/chapter_thumbs.py), else null. the chapters route
+is for a detail page: it never reads the file, only what the worker and the
+player already know, so a page of cards costs nothing.
 """
 
 from __future__ import annotations
 
-from flask import Blueprint, Response, jsonify, request
+import os
+
+from flask import Blueprint, Response, jsonify, request, send_file
 
 from core.connect.device_access import device_playback
 from core.permissions import requires_any
@@ -54,6 +71,59 @@ def _resolve(item_type, item_id):
     return resolve(item_type, item_id, request.args.get("part"))
 
 
+def _video_key(source) -> str:
+    """what a saved delay is filed under: the file on this box, or the
+    media server's file id for a relayed stream"""
+    if source.mode == "file" and source.path:
+        return str(source.path)
+    return "media-file:%s" % (source.extra.get("file_id") or source.url or "")
+
+
+def _sub_key(sub) -> tuple:
+    """(key, signature) of one subtitle: a sidecar by its name (and size +
+    mtime, so a replaced file starts at 0), a track in the file by its id"""
+    import os
+    from core.player import tracks as K
+    if sub.get("external") and sub.get("path"):
+        return os.path.basename(sub["path"]), K.sidecar_sig(sub["path"])
+    return str(sub.get("id")), ""
+
+
+def _profile():
+    from core.profile_context import get_current_profile_id
+    try:
+        return int(get_current_profile_id() or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def _decorate(source, subs) -> None:
+    """this profile's delay per subtitle, and the ai confidence flag"""
+    pid = _profile()
+    try:
+        from core.video.subtitles.ai import guards
+        from api.video import get_video_db
+        db = get_video_db()
+    except Exception:  # noqa: BLE001 - extras, never a failed tracks answer
+        return
+    try:
+        saved = db.subtitle_delays_for(pid, _video_key(source)) if pid else {}
+    except Exception:  # noqa: BLE001
+        saved = {}
+    for sub in subs:
+        key, sig = _sub_key(sub)
+        d, at_sig = saved.get(key, (0, ""))
+        sub["delay_ms"] = 0 if (sig and at_sig and sig != at_sig) else d
+        sub.setdefault("ai", False)
+        if sub.get("ai") and sub.get("path"):
+            try:
+                job = db.ai_job_for_output(sub["path"])
+            except Exception:  # noqa: BLE001
+                job = None
+            conf = (job or {}).get("confidence")
+            sub["low_confidence"] = conf is not None and float(conf) < guards.LOW_CONFIDENCE
+
+
 @bp.route("/api/player/tracks/<item_type>/<path:item_id>", methods=["GET"])
 @requires_any(*SECTIONS)
 @device_playback
@@ -66,8 +136,154 @@ def tracks(item_type, item_id):
         return _refused(e)
     found = source_tracks(source)
     if found is None:
-        return jsonify({"success": True, "audio": [], "subtitles": [], "unavailable": "no ffmpeg"})
-    return jsonify({"success": True, **K.public(found[0])})
+        return jsonify({"success": True, "audio": [], "subtitles": [], "unavailable": "no ffmpeg",
+                        "markers": _markers(item_type, source, [])})
+    subs = [dict(x) for x in found[0]["subtitles"]]
+    _decorate(source, subs)
+    out = K.public(dict(found[0], subtitles=subs))
+    found_markers = _markers(item_type, source, out.get("chapters") or [])
+    if out.get("chapters"):
+        out["chapters"] = _with_thumbs(item_type, item_id, source, out["chapters"])
+    return jsonify({"success": True, **out, "markers": found_markers})
+
+
+@bp.route("/api/player/subtitle-delay/<item_type>/<path:item_id>", methods=["PUT"])
+@requires_any(*SECTIONS)
+@device_playback
+def subtitle_delay(item_type, item_id):
+    """save this profile's delay for one subtitle of one file (0 clears)"""
+    from core.player.playable import Refused
+    try:
+        source = _resolve(item_type, item_id)
+    except Refused as e:
+        return _refused(e)
+    pid = _profile()
+    if not pid:
+        return jsonify({"success": False, "error": "no_profile", "message": "Pick a profile first."}), 400
+    body = request.get_json(silent=True) or {}
+    try:
+        delay = int(round(float(body.get("delay_ms"))))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "bad_delay", "message": "delay_ms must be a number."}), 400
+    found = source_tracks(source)
+    if found is None:
+        return jsonify({"success": False, "error": "no_ffmpeg", "message": "SoulSync can't find ffmpeg."}), 503
+    want = request.args.get("sub") or ""
+    pick = next((x for x in found[0]["subtitles"] if x["id"] == want), None)
+    if pick is None:
+        return jsonify({"success": False, "error": "not_found", "message": "There's no such subtitle."}), 404
+    key, sig = _sub_key(pick)
+    from api.video import get_video_db
+    stored = get_video_db().subtitle_delay_set(pid, _video_key(source), key, delay, sig)
+    return jsonify({"success": True, "delay_ms": stored})
+
+
+def _thumb_key(item_type, source):
+    """the chapter pictures' key for a resolved movie or episode, or None"""
+    from core.player import chapter_thumbs as C
+    file_id = source.extra.get("file_id")
+    if item_type not in ("movie", "episode") or not file_id:
+        return None
+    from api.video import get_video_db
+    return C.key_for_media_file(get_video_db(), file_id)
+
+
+def _with_thumbs(item_type, item_id, source, chapters):
+    from core.player import chapter_thumbs as C
+    try:
+        manifest = C.read_manifest(_thumb_key(item_type, source))
+    except Exception:  # noqa: BLE001 - chapters without pictures still work
+        logger.debug("chapter pictures for %s %s", item_type, item_id, exc_info=True)
+        manifest = None
+    return C.attach(chapters, manifest, item_type=item_type, item_id=item_id,
+                    file_id=source.extra.get("file_id"))
+
+
+@bp.route("/api/player/chapters/<item_type>/<path:item_id>", methods=["GET"])
+@requires_any(*SECTIONS)
+@device_playback
+def chapters(item_type, item_id):
+    """a movie's or an episode's chapters with their pictures, for its
+    detail page. from the pictures' manifest, else from a probe the player
+    already made; never reads the file"""
+    from core.player import chapter_thumbs as C
+    from core.player import tracks as K
+    from core.player.playable import Refused
+    try:
+        source = _resolve(item_type, item_id)
+    except Refused as e:
+        return _refused(e)
+    file_id = source.extra.get("file_id")
+    key = _thumb_key(item_type, source)
+    manifest = C.read_manifest(key)
+    found = C.from_manifest(manifest, item_type=item_type, item_id=item_id, file_id=file_id)
+    if not found and source.mode == "file" and source.path:
+        size = (source.extra.get("file") or {}).get("size_bytes")
+        probed = K.cached(K.file_key(source.path, None)) or K.cached_like(
+            os.path.basename(source.path), size)
+        if probed and probed.get("chapters"):
+            found = C.attach(probed["chapters"], manifest, item_type=item_type, item_id=item_id,
+                             file_id=file_id)
+    return jsonify({"success": True, "chapters": found, "file_id": file_id})
+
+
+@bp.route("/api/player/chapter-thumb/<item_type>/<path:item_id>/<int:index>", methods=["GET"])
+@requires_any(*SECTIONS)
+@device_playback
+def chapter_thumb(item_type, item_id, index):
+    """one chapter's picture. the same play check as the video itself, so a
+    profile never sees a frame of something it can't watch. 404 until the
+    worker has made it"""
+    from core.player import chapter_thumbs as C
+    from core.player.playable import Refused
+    try:
+        source = _resolve(item_type, item_id)
+    except Refused as e:
+        return _refused(e)
+    path = C.thumb_path(_thumb_key(item_type, source), index)
+    if path is None:
+        return jsonify({"success": False, "error": "not_found",
+                        "message": "That chapter has no picture yet."}), 404
+    res = send_file(str(path), mimetype="image/webp" if path.suffix == ".webp" else "image/jpeg",
+                    conditional=True, max_age=0)
+    # a picture is made once; a remade one has a new ?v=, so it never goes stale
+    res.headers["Cache-Control"] = ("private, max-age=31536000, immutable" if request.args.get("v")
+                                    else "private, max-age=3600")
+    return res
+
+
+def _markers(item_type, source, chapters):
+    """skip markers beside the chapters (core/video/markers): intro,
+    credits, recap, from the best source each. a home video or a youtube
+    clip has only what its chapters say."""
+    from core.video.markers import merge, service
+    duration = source.duration
+    if not duration:
+        duration = (source.extra.get("file") or {}).get("runtime_seconds")
+    if item_type not in ("movie", "episode") or not source.extra.get("file_id"):
+        return [merge.public(m) for m in merge.best(merge.from_chapters(chapters, duration), (), duration)]
+    from api.video import get_video_db
+    return service.player_markers(get_video_db(), source.extra["file_id"], chapters, duration,
+                                  source.path if source.mode == "file" else None)
+
+
+@bp.route("/api/player/markers/<item_type>/<path:item_id>", methods=["GET"])
+@requires_any(*SECTIONS)
+@device_playback
+def markers(item_type, item_id):
+    """only the skip markers, for a client that reads tracks elsewhere. the
+    chapters count when the file was already probed (a play reads them)."""
+    from core.player import tracks as K
+    from core.player.playable import Refused
+    try:
+        source = _resolve(item_type, item_id)
+    except Refused as e:
+        return _refused(e)
+    origin = source.path if source.mode == "file" else source.url
+    key = K.file_key(source.path, ("media-file", source.extra.get("file_id"),
+                                   origin if source.mode == "file" else None))
+    probed = K.cached(key) or {}
+    return jsonify({"success": True, "markers": _markers(item_type, source, probed.get("chapters") or [])})
 
 
 @bp.route("/api/player/subtitle/<item_type>/<path:item_id>", methods=["GET"])
@@ -93,14 +309,23 @@ def subtitle(item_type, item_id):
         return jsonify({"success": False, "error": "image",
                         "message": "This subtitle is pictures; the player draws it in instead."}), 400
     try:
+        # a sidecar is kept by path + size + mtime: a resync, an upgrade or
+        # a manual replace shows at once instead of the old cached WebVTT
+        cache_key = K.sidecar_key(pick["path"]) if pick["external"] else key
         if pick["external"]:
-            text = K.to_vtt(ffmpeg, pick["path"], None, ("sidecar", pick["path"]))
+            text = K.to_vtt(ffmpeg, pick["path"], None, cache_key)
         else:
             text = K.to_vtt(ffmpeg, origin, int(pick["id"][1:]), key)
     except Exception:  # noqa: BLE001
         logger.exception("subtitle %s of %s %s failed", want, item_type, item_id)
         return jsonify({"success": False, "error": "failed", "message": "Couldn't read that subtitle."}), 500
-    return Response(text, mimetype="text/vtt", headers={"Cache-Control": "private, max-age=3600"})
+    import hashlib
+    etag = hashlib.sha1(repr((cache_key, want)).encode()).hexdigest()[:20]
+    if request.if_none_match and etag in request.if_none_match:
+        return Response(status=304, headers={"ETag": f'"{etag}"', "Cache-Control": "private, no-cache"})
+    # no-cache: the browser asks again each time (a 304 while the file is the
+    # same), so a rewritten subtitle is never served stale from its cache
+    return Response(text, mimetype="text/vtt", headers={"Cache-Control": "private, no-cache", "ETag": f'"{etag}"'})
 
 
 @bp.route("/api/player/lyrics/track/<int:track_id>", methods=["GET"])
@@ -135,3 +360,28 @@ def lyrics(track_id):
         logger.exception("player lyrics failed for track %s", track_id)
         return jsonify({"success": False, "error": "failed", "message": "Couldn't get the lyrics."}), 500
     return jsonify(out), status
+
+
+@bp.route("/api/player/loudness", methods=["GET"])
+@requires_any("music.access")
+@device_playback
+def loudness():
+    """?ids=1,2,3 (library track ids, up to 500): each one's gains and peaks
+    for the file the player would play, null when not known yet. for a
+    client levelling a queue it fetched ahead (Android, a pre-cache)."""
+    from core import loudness as L
+    from database.music_database import get_database
+    raw = (request.args.get("ids") or "").split(",")
+    ids = []
+    for part in raw:
+        part = part.strip()
+        if part.isdigit():
+            ids.append(int(part))
+    if not ids:
+        return jsonify({"success": False, "error": "bad_ids", "message": "Pass ids=1,2,3."}), 400
+    if len(ids) > 500:
+        return jsonify({"success": False, "error": "too_many", "message": "At most 500 ids at once."}), 400
+    with get_database()._get_connection() as conn:
+        found = L.for_tracks(conn, ids)
+    return jsonify({"success": True, "reference_lufs": L.reference_lufs(),
+                    "tracks": {str(k): v for k, v in found.items()}})

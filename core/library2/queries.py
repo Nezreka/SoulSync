@@ -435,7 +435,7 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
                 page: int = 1, limit: int = 75, letter: str = "all",
                 source_filter: str = "",
                 review_filter: str = "", genre: str = "",
-                label: str = "") -> Tuple[List[Dict[str, Any]], int]:
+                label: str = "", holiday: str = "") -> Tuple[List[Dict[str, Any]], int]:
     """The whole library by release (upstream's album browse, A07).
 
     The releases the artist list counts -- a library row, or one this library
@@ -506,6 +506,13 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
     elif review_filter == "unreviewed":
         filters.append("NOT EXISTS (SELECT 1 FROM lib2_entity_locks rlk"
                        " WHERE rlk.entity_type='album' AND rlk.entity_id=al.id)")
+    if holiday in ("only", "hide"):
+        # #2332: holiday music, found by core/holiday_music.py (genres,
+        # titles and the hand flags), in or out
+        from core.holiday_music import holiday_album_ids
+        params["holiday_ids"] = json.dumps(holiday_album_ids())
+        filters.append(("" if holiday == "only" else "NOT ")
+                       + "(al.id IN (SELECT value FROM json_each(:holiday_ids)))")
     order = _ALBUM_SORTS.get(sort, _ALBUM_SORTS["title"])
     offset = (page - 1) * limit
     joined = ("FROM lib2_albums al LEFT JOIN lib2_artists ar"

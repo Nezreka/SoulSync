@@ -18,7 +18,17 @@ import type { SettingsStore } from '../settings-store';
 
 import { Card, NumberField, Row, Segmented, Select, Switch, TextField } from '../ui';
 import s from '../ui/settings.module.css';
-import { HEMISPHERES, LOOKBACK_PERIODS, SYNC_MODES, resolveDiscovery } from './discovery';
+import {
+  HEMISPHERES,
+  HOLIDAY_MODES,
+  LOOKBACK_PERIODS,
+  MONTHS,
+  SYNC_MODES,
+  formatDay,
+  parseDay,
+  resolveDiscovery,
+  sayDay,
+} from './discovery';
 import { useChanged } from './downloads/behaviour-view';
 import { M3uExportOptions } from './library-folders';
 import { useDraft } from './parts';
@@ -242,8 +252,145 @@ export function Recommendations({ store, pool }: { store: SettingsStore; pool: P
             />
           </Row>
         </Card>
+        <HolidayMusic store={store} />
       </div>
     </>
+  );
+}
+
+const MONTH_OPTIONS = MONTHS.map((name, i) => ({ value: String(i + 1), label: name }));
+const DAY_OPTIONS = Array.from({ length: 31 }, (_, i) => ({
+  value: String(i + 1),
+  label: String(i + 1),
+}));
+
+/** one end of the season: a month and a day, saved as 'MM-DD' */
+function SeasonDay({
+  id,
+  label,
+  value,
+  onChange,
+  disabled,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled: boolean;
+}) {
+  const [month, day] = parseDay(value, value);
+  return (
+    <span className={s.rangeLine}>
+      <Select
+        id={`${id}-month`}
+        aria-label={`${label} month`}
+        value={String(month)}
+        options={MONTH_OPTIONS}
+        disabled={disabled}
+        onChange={(event) => onChange(formatDay(Number(event.target.value), day))}
+      />
+      <Select
+        id={`${id}-day`}
+        aria-label={`${label} day`}
+        value={String(day)}
+        options={DAY_OPTIONS}
+        disabled={disabled}
+        onChange={(event) => onChange(formatDay(month, Number(event.target.value)))}
+      />
+    </span>
+  );
+}
+
+/**
+ * #2332: christmas songs carry everyday genres, so they turned up in every
+ * mix all year. when they may play, the season's dates, and an optional
+ * Holiday genre in the files for other apps.
+ */
+export function HolidayMusic({ store }: { store: SettingsStore }) {
+  const { values } = useDiscovery(store);
+  const changed = (key: string) => useChanged(store, 'holiday_music', key); // eslint-disable-line react-hooks/rules-of-hooks
+  const mode = HOLIDAY_MODES.find((m) => m.value === values.holidayMode);
+  const season = values.holidayMode === 'season';
+
+  return (
+    <Card title="Holiday music" hint="Christmas songs only when it's the season">
+      <Row
+        field
+        label="Holiday music in mixes"
+        changed={changed('mode')}
+        help={mode?.say ?? ''}
+        more={
+          <>
+            SoulSync spots holiday music by its genres (Christmas, Holiday, Xmas), by titles like
+            Jingle Bells, Silent Night, Navidad or Hanukkah, and by what you set yourself: an
+            artist, album or track page has a <strong>Holiday music</strong> switch that a rescan or
+            a retag never undoes. This covers daily mixes, genre mixes, discovery playlists, radio,
+            shuffle and the player's music rows.
+          </>
+        }
+      >
+        <Segmented
+          id="holiday-music-mode"
+          label="Holiday music in mixes"
+          value={values.holidayMode}
+          options={HOLIDAY_MODES.map((m) => ({ value: m.value, label: m.label }))}
+          onChange={(value) => store.set('holiday_music', 'mode', value)}
+        />
+      </Row>
+      <Row
+        sub
+        field
+        off={!season}
+        label="Season starts"
+        changed={changed('season_start')}
+        help={
+          season
+            ? `Holiday songs come back on ${sayDay(values.holidayStart)}.`
+            : 'Used when holiday music is set to In season.'
+        }
+      >
+        <SeasonDay
+          id="holiday-season-start"
+          label="Season starts"
+          value={values.holidayStart}
+          disabled={!season}
+          onChange={(value) => store.set('holiday_music', 'season_start', value)}
+        />
+      </Row>
+      <Row
+        sub
+        field
+        off={!season}
+        label="Season ends"
+        changed={changed('season_end')}
+        help={
+          season
+            ? `The last day is ${sayDay(values.holidayEnd)}. A season can run over New Year.`
+            : 'Used when holiday music is set to In season.'
+        }
+      >
+        <SeasonDay
+          id="holiday-season-end"
+          label="Season ends"
+          value={values.holidayEnd}
+          disabled={!season}
+          onChange={(value) => store.set('holiday_music', 'season_end', value)}
+        />
+      </Row>
+      <Row
+        label="Write a Holiday genre to your files"
+        htmlFor="holiday-write-tag"
+        changed={changed('write_tag')}
+        help="Adds Holiday to the genre tag of holiday music, so Navidrome, AudioMuse and other apps can filter it too."
+        more="Off by default. New downloads get it, and Write Tags or a retag adds it to what you have and keeps it there."
+      >
+        <Switch
+          id="holiday-write-tag"
+          checked={values.holidayTag}
+          onChange={(event) => store.set('holiday_music', 'write_tag', event.target.checked)}
+        />
+      </Row>
+    </Card>
   );
 }
 

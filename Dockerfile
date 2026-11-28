@@ -29,6 +29,16 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# AI subtitles on an NVIDIA GPU (the :cuda tag): the cuBLAS and cuDNN 9 libraries
+# for CUDA 12 that CTranslate2 needs, as pip wheels (~2 GB, so never in the
+# default image). SoulSync loads them itself; no LD_LIBRARY_PATH needed.
+#   docker build --build-arg WHISPER_CUDA=1 -t soulsync:cuda .
+# then run with --gpus all (the NVIDIA container toolkit on the host).
+ARG WHISPER_CUDA=0
+RUN if [ "$WHISPER_CUDA" = "1" ]; then \
+        pip install --no-cache-dir nvidia-cublas-cu12 "nvidia-cudnn-cu12==9.*"; \
+    fi
+
 # yt-dlp must track YouTube faster than its stable channel ships — stable can
 # lag months behind a breaking YouTube change while extraction is broken
 # ("Requested format is not available"). Build images with the NIGHTLY channel.
@@ -61,6 +71,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# GPU video conversion for the player (free drivers from Debian main only).
+# ffmpeg above already has nvenc, vaapi and qsv built in; these are the
+# user-space drivers it needs to reach the card through /dev/dri:
+#   mesa-va-drivers        AMD (and other mesa GPUs) over VA-API, amd64 + arm64
+#   intel-media-va-driver  Intel Broadwell and newer over VA-API (amd64)
+#   i965-va-driver         older Intel (Sandy Bridge to Coffee Lake) (amd64)
+#   libmfx-gen1.2          Intel Quick Sync runtime, Tiger Lake and newer (amd64)
+#   vainfo                 `docker exec soulsync-webui vainfo` shows what the card offers
+# NVIDIA needs nothing here: the nvidia container runtime mounts its driver
+# (see docker-compose.yml). about 60 MB on amd64, mostly mesa and the intel
+# driver. the free intel driver leaves out some shader kernels, so a few
+# older Intel chips decode but can't encode on it; build with
+# --build-arg INTEL_NONFREE=1 for Debian's non-free driver instead.
+ARG INTEL_NONFREE=0
+RUN set -e; \
+    PKGS="mesa-va-drivers vainfo"; \
+    if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+        if [ "$INTEL_NONFREE" = "1" ]; then \
+            sed -i 's/^Components: main$/Components: main non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources; \
+            PKGS="$PKGS intel-media-va-driver-non-free"; \
+        else \
+            PKGS="$PKGS intel-media-va-driver"; \
+        fi; \
+        PKGS="$PKGS i965-va-driver libmfx-gen1.2"; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends $PKGS && \
+    rm -rf /var/lib/apt/lists/*
 
 # Deno — JavaScript runtime for yt-dlp. YouTube gates its downloadable formats
 # behind JS challenges (nsig); without a JS runtime, yt-dlp's extraction is

@@ -52,9 +52,15 @@ def direct_source_match(
         if (playlist_source in _DEEZER_SOURCES and discovery_source == "deezer"
                 and not use_spotify):
             return _deezer_track(fallback_client, track_id)
-        if (playlist_source in _SPOTIFY_SOURCES and discovery_source == "spotify"
-                and use_spotify):
-            return _spotify_track(spotify_client, track_id)
+        if playlist_source in _SPOTIFY_SOURCES and discovery_source == "spotify":
+            if use_spotify:
+                return _spotify_track(spotify_client, track_id)
+            # "spotify (no auth)": the metadata client is spotify itself,
+            # reading the same catalogue without a login. the id is still the
+            # exact track, album and all (#2331), where a search picks any
+            # of the albums the song is on
+            if _is_spotify_client(fallback_client):
+                return _spotify_track(fallback_client, track_id)
         if playlist_source in _BEATPORT_SOURCES:
             return _beatport_track(discovery_source, use_spotify, track_id,
                                    spotify_client, fallback_client)
@@ -76,6 +82,14 @@ def _deezer_track(client: Any, track_id: str) -> Optional[Any]:
     return DeezerTrack.from_deezer_track(raw)
 
 
+def _is_spotify_client(client: Any) -> bool:
+    try:
+        from core.spotify_client import SpotifyClient
+    except Exception:  # noqa: BLE001
+        return False
+    return isinstance(client, SpotifyClient)
+
+
 def _spotify_track(client: Any, track_id: str) -> Optional[Any]:
     from core.spotify_client import Track as SpotifyTrack
 
@@ -86,6 +100,10 @@ def _spotify_track(client: Any, track_id: str) -> Optional[Any]:
     # catalogue, where it could collide with a different track
     details = client.get_track_details(track_id, allow_fallback=False)
     raw = (details or {}).get("raw_data")
+    # the no-auth reader hands back the raw track itself
+    if not raw and isinstance(details, dict) and isinstance(details.get("album"), dict) \
+            and details.get("artists"):
+        raw = details
     if not raw or not raw.get("id"):
         return None
     return SpotifyTrack.from_spotify_track(raw)

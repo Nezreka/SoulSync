@@ -45,6 +45,7 @@ import { audioLabel, codecLabel, formatBytes, pad2, rangeLabel, resolutionTone }
 import { invalidate, picked, showData, togglePicked } from './library-store';
 import { bridge, refreshPage } from './library-tab';
 import { DeleteDialog, RenameDialog, RenumberDialog } from './manage-dialogs';
+import { findMarkersNow } from './markers-api';
 import s from './video-library.module.css';
 
 declare global {
@@ -782,6 +783,20 @@ export function EpisodeList(props: EpisodeListProps) {
       label: 'Renumber episodes…',
       title: 'File this season’s files under other episodes, in order',
       onSelect: () => setDialog({ kind: 'renumber' }),
+    });
+    menu.push({
+      key: 'markers',
+      label: 'Find intros now',
+      title:
+        'Look for this season’s intros, credits and recaps first, before the rest of the library',
+      onSelect: () =>
+        void findMarkersNow({ show_id: show.id, season: n })
+          .then((r) =>
+            toast(
+              `Looking at ${plural(r.files, 'file')} next. Skip buttons follow as each is done.`,
+            ),
+          )
+          .catch((e: Error) => toast(e.message || 'Couldn’t queue it', 'error')),
     });
     menu.push({
       key: 'delete',

@@ -8,10 +8,12 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { LibraryFile, ShowLibrary } from './types';
 
+import { AiSubtitlesDialog } from './ai-subtitles-dialog';
 import { pad2 } from './format';
 import { ReassignDialog } from './library-dialogs';
 import { invalidate, onInvalidate, seasonLibrary } from './library-store';
 import { bridge, type FileActions, FileCards, refreshPage, useFileActions } from './library-tab';
+import { MarkersPanel } from './markers-editor';
 import s from './video-library.module.css';
 
 export function EpisodeFiles({
@@ -26,6 +28,7 @@ export function EpisodeFiles({
   const [show, setShow] = useState<ShowLibrary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState<LibraryFile | null>(null);
+  const [aiSubs, setAiSubs] = useState(false);
 
   const load = useCallback(() => {
     let live = true;
@@ -74,10 +77,12 @@ export function EpisodeFiles({
       ? () => b.manualSearch?.('episode', season, ep.episode_number)
       : undefined,
     onReassign: (f) => setMoving(f),
+    onAiSubtitles: () => setAiSubs(true),
   };
   return (
     <div className={s.epCards}>
       <FileCards files={ep.files} actions={actions} label={`${label} file`} />
+      <MarkersPanel kind="episode" itemId={ep.id} canManage={show.can_manage} />
       {dialogs}
       {moving ? (
         <ReassignDialog
@@ -90,6 +95,15 @@ export function EpisodeFiles({
             reload();
             refreshPage();
           }}
+        />
+      ) : null}
+      {aiSubs ? (
+        <AiSubtitlesDialog
+          kind="episode"
+          id={ep.id}
+          title={`${label}${ep.title ? ` · ${ep.title}` : ''}`}
+          onClose={() => setAiSubs(false)}
+          onReady={reload}
         />
       ) : null}
     </div>

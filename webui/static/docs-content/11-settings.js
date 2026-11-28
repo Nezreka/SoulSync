@@ -34,6 +34,22 @@ Each service is a tile on **Connections › Servers and services**, with its sta
 `
         },
         {
+            id: 'set-giveback',
+            title: 'Give back to MusicBrainz and AcoustID',
+            lede: 'Send what SoulSync identified back to the open databases it names your music with. Off until you turn it on.',
+            body: `
+**Connections › Give back** (music side) has three switches, all off until you turn them on. Everything goes under your own accounts, a little at a time, and nothing is ever sent twice.
+
+- **Send fingerprints**: AcoustID fingerprints, each with its MusicBrainz recording, the same submission Picard makes. Only for songs SoulSync is sure of: the file matched by fingerprint at import (or its MusicBrainz track tag names the recording), no tag names a different recording, it never failed a fingerprint check, and its length agrees with the song's to within three seconds. A name match alone never counts. Needs your AcoustID account linked on the AcoustID card. At most 20 fingerprints in one request every 15 minutes or so.
+- **Send ISRCs**: when a file SoulSync is sure of carries an ISRC in its tags that its MusicBrainz recording lacks, SoulSync adds it under your MusicBrainz account (**Connect** opens MusicBrainz; approve SoulSync, then paste the code it shows). It checks each recording first and skips ISRCs MusicBrainz already has. One request a second at most. This needs SoulSync registered as a MusicBrainz application; until a release ships with that, the card says so.
+- **Show albums to add**: lists albums SoulSync found on Spotify, Deezer, Apple Music, Tidal, Qobuz or Bandcamp that MusicBrainz didn't have when SoulSync looked. **Add to MusicBrainz** opens MusicBrainz's add release form already filled in (title, artist, type, date, label, barcode, track list with lengths, and the source page as a link). You check it against the source, fix what is wrong and submit it yourself. SoulSync never edits MusicBrainz on its own.
+
+**Given so far** counts what each part has sent. **Send now** runs a batch without waiting for the next turn, at the same pace.
+
+> MusicBrainz only takes ISRCs, barcodes, tags and ratings from apps; anything else is a person's edit. That is why albums open the form for you instead of being added automatically.
+`
+        },
+        {
             id: 'set-media',
             title: 'Media Servers',
             lede: 'Connect Plex, Jellyfin, or Navidrome — or run standalone — for library scans and streaming.',

@@ -536,6 +536,13 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
             get_config_manager(),
             artist_names=[data.get("artist_name"), data.get("track_artist")],
         )
+    # #2332: the "Holiday" genre (setting on, holiday music): a retag keeps it
+    from core.holiday_music import tag_genres
+    holiday = tag_genres(data.get("genres") or [], {
+        "title": data.get("title"), "album": data.get("album_title"),
+        "artist": data.get("artist_name"), "genres": [row["album_artist_genres"]]})
+    if holiday != (data.get("genres") or []):
+        data["genres"] = holiday
     data["_manual_fields"] = manual
     # ``build_tag_diff`` renders its Cover Art row from ``thumb_url``. Without
     # it the preview claimed "Cover Art: None → None, unchanged" for every lib2

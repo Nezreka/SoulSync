@@ -52,6 +52,7 @@ import {
   getServer,
   type LiveCode,
   type NewCode,
+  type PairingStatus,
   type Probe,
   renameDevice,
   revokeDevice,
@@ -197,6 +198,8 @@ export function DevicesPage({ opened, active }: SettingsTabProps) {
               <ShownCode
                 code={shown.code}
                 since={shown.at}
+                connect={data?.server?.connect ?? shown.code.connect}
+                onChanged={() => void reload()}
                 onCancel={() => void cancel(shown.code.id)}
                 onDone={() => setShown(null)}
               />
@@ -358,14 +361,111 @@ function DeviceItem({ d, since, onChanged }: { d: Device; since: number; onChang
   );
 }
 
+/** "192.168.1.5:8443" */
+function hostPort(t: { ip: string; port: number }) {
+  return t.ip.includes(':') ? `[${t.ip}]:${t.port}` : `${t.ip}:${t.port}`;
+}
+
+/**
+ * Whether a phone can find this server with a code right now, and where it
+ * will connect after (#2328). Said before the code, so nobody scans a code
+ * that can't work without knowing why.
+ */
+export function PairingReadiness({
+  connect,
+  onChanged,
+}: {
+  connect: PairingStatus;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const home = connect.targets.filter((t) => t.home);
+  const away = connect.targets.filter((t) => !t.home);
+  const port = connect.tls_port ?? 8443;
+  const upnpOff = connect.upnp ? !connect.upnp.enabled : false;
+
+  const turnOnUpnp = async () => {
+    setBusy(true);
+    const r = await setUpnpEnabled(true);
+    setBusy(false);
+    if (!r.ok) {
+      toast(r.message, 'error');
+      return;
+    }
+    toast(
+      r.data.upnp?.active
+        ? `Remote access open on port ${r.data.upnp.external_port}`
+        : `Turned on, but no router answered. Forward TCP ${port} yourself.`,
+      r.data.upnp?.active ? 'info' : 'error',
+    );
+    onChanged();
+  };
+
+  return (
+    <div className={css.stack} data-testid="pairing-readiness">
+      {connect.ready ? (
+        <StatusWords tone="ok" live>
+          Connected for pairing
+        </StatusWords>
+      ) : (
+        <Note>
+          <b>The app can&apos;t find this server yet.</b> {connect.words}
+          {connect.error ? ` Last error: ${connect.error}.` : ''}
+        </Note>
+      )}
+      {connect.ready && !connect.listening ? (
+        <Note>
+          {`The app connects on port ${port}, and it isn't open on this server`}
+          {connect.listener_error ? `: ${connect.listener_error}` : ''}. Restart SoulSync, or set
+          another port.
+        </Note>
+      ) : null}
+      {home.length ? (
+        <div className={itemClass.dim}>
+          {'After the code, the app connects to '}
+          <span className={css.mono}>{home.map(hostPort).join(', ')}</span>
+          {away.length ? (
+            <>
+              {' at home, or '}
+              <span className={css.mono}>{away.map(hostPort).join(', ')}</span>
+              {' away'}
+            </>
+          ) : null}
+          {`. Keep the phone on the same wifi as this server. In Docker, publish port ${port} (${port}:${port}).`}
+        </div>
+      ) : (
+        <Note>
+          No home address found for this server, so a phone at home can&apos;t connect. Open this
+          page at the server&apos;s home address (like http://192.168.1.20:8008) and make a new
+          code.
+        </Note>
+      )}
+      {upnpOff ? (
+        <FieldLine wrap>
+          <span className={itemClass.dim}>
+            {`Away from home, the app needs port ${port} open on your router.`}
+          </span>
+          <Btn small busy={busy} onClick={() => void turnOnUpnp()}>
+            Turn on automatic remote access
+          </Btn>
+        </FieldLine>
+      ) : null}
+    </div>
+  );
+}
+
 function ShownCode({
   code,
   since,
+  connect,
+  onChanged,
   onCancel,
   onDone,
 }: {
   code: NewCode;
   since: number;
+  connect?: PairingStatus;
+  onChanged: () => void;
   onCancel: () => void;
   onDone: () => void;
 }) {
@@ -373,6 +473,7 @@ function ShownCode({
   const fp = typeof code.payload.fingerprint === 'string' ? code.payload.fingerprint : '';
   return (
     <div className={css.pad}>
+      {connect ? <PairingReadiness connect={connect} onChanged={onChanged} /> : null}
       <div className={css.shown} role="region" aria-label="Pairing code">
         <div className={css.stack}>
           <div>

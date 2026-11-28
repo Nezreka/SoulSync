@@ -1155,6 +1155,9 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
                 if key is not None:
                     db.subtitle_mark(video_kind, video_id, lang, "failed", hi=hi, forced=forced)
                 continue
+            # a human subtitle replaces an ai one for the same language
+            from core.video.subtitles.worker import _retire_ai
+            _retire_ai(db, dest_path, lang, pid, forced)
             if key is not None:
                 db.subtitle_mark(video_kind, video_id, lang, "have", hi=hi, forced=forced)
                 # the upgrade loop's baseline: without a scored history row
@@ -2504,6 +2507,13 @@ def ensure_started(db_provider, *, wake: bool = True) -> None:
         _ensure_subtitles(db_provider)
     except Exception:  # noqa: BLE001 - subtitles never break the monitor
         logger.exception("subtitle worker failed to start")
+    # the ai subtitle queue: its own thread, so a long transcription never
+    # holds up the wanted loop. idle (a db poll every 30 s) with no jobs.
+    try:
+        from core.video.subtitles.ai.queue import ensure_started as _ensure_ai_subtitles
+        _ensure_ai_subtitles(db_provider)
+    except Exception:  # noqa: BLE001
+        logger.exception("ai subtitle queue failed to start")
 
 
 __all__ = ["process_download", "ensure_started"]

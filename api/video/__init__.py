@@ -222,6 +222,7 @@ def create_video_blueprint() -> Blueprint:
     from .library_manage import register_routes as reg_library_manage
     from .manager import register_routes as reg_manager
     from .title_status import register_routes as reg_title_status
+    from .markers import register_routes as reg_markers
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -252,6 +253,7 @@ def create_video_blueprint() -> Blueprint:
     reg_library_manage(bp)
     reg_manager(bp)
     reg_title_status(bp)
+    reg_markers(bp)
 
     # the route inventory (#2166): every video view declares what it needs,
     # read from the same table the gate enforces, once the routes are on the app

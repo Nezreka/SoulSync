@@ -72,7 +72,7 @@ class FakeJellyfin:
         p = self.playlists[url.split('/')[-2]]
         for tid in params['Ids'].split(','):
             self._n += 1
-            p['entries'].append((tid, f"e{self._n}"))
+            p["entries"].append((tid, f"n{self._n}"))  # unique, like jellyfin's entry ids
         return _Resp(204)
 
     def delete(self, url, params=None, headers=None, timeout=None):
@@ -162,17 +162,26 @@ def test_no_playlist_yet_makes_one(jf):
 
 def test_when_in_place_fails_it_is_deleted_and_made_again(jf):
     client, server = jf({'PL1': {'name': 'exeo', 'entries': [(A, 'e1')]}})
-    real_post = server.post
+    real_get = server.get
 
-    def post(url, **kw):
-        # the add into the old playlist fails, the new one takes it
-        if url.endswith('/Playlists/PL1/Items'):
-            return _Resp(500)
-        return real_post(url, **kw)
-    requests.post = post
+    def get(endpoint, params=None):
+        # the old playlist's tracks can't be read, so it can't be edited
+        if endpoint == '/Playlists/PL1/Items':
+            return None
+        return real_get(endpoint, params)
+    client._make_request = get
     assert client.update_playlist('exeo', _tracks(B, C)) is True
     assert 'PL1' not in server.playlists
     assert [(p['name'], [t for t, _e in p['entries']]) for p in server.playlists.values()] == [('exeo', [B, C])]
+
+
+def test_a_refused_add_keeps_the_playlist_as_it_was(jf):
+    # #2334: it used to be deleted and made again, and when the new one's add
+    # was refused too, an empty playlist was left
+    client, server = jf({'PL1': {'name': 'exeo', 'entries': [(A, 'e1')]}})
+    server.refuse_add = True
+    assert client.update_playlist('exeo', _tracks(B, C)) is False
+    assert list(server.playlists) == ['PL1'] and _ids(server, 'PL1') == [A]
 
 
 def test_a_delete_the_server_refuses_never_leaves_two_with_one_name(jf):

@@ -207,6 +207,23 @@ After the music library folder moves, these point the library's file records at 
 
 Settings: `library.watch_folders` (default true), `library.watch_poll_minutes` (15), `library.watch_root_modes` (`{folder: mode}`), `library.watch_max_live_folders` (100000). A change reaches open pages as the `library:changed` socket event.
 
+### Holiday music (web UI routes, #2332)
+
+- `GET /api/library/v2/holiday/<artist|album|track>/<id>`: `{holiday, decided_by: "track"|"album"|"artist"|"auto", override: true|false|null, detected, scope, season: {mode, season_start, season_end, write_tag, in_season, allows_holiday, shows_holiday_mix}}`.
+- `POST` the same `{holiday: true|false|null}` (admin): on, off, or automatic (null removes the hand flag). Flags are kept by artist, album and track names, so a rescan or a retag never undoes them.
+- `GET /api/library/v2/holiday/overrides`: every hand flag, newest first.
+- `GET /api/library/v2/albums?holiday=only|hide`: holiday albums only, or none (half or more of an album's owned tracks are holiday music).
+
+Settings: `holiday_music.mode` (`season` default, `always`, `never`), `holiday_music.season_start` (`11-15`), `holiday_music.season_end` (`01-06`), `holiday_music.write_tag` (false). Out of season, every Discover track list, personalized playlist, radio, recipe mix, the player's rows and a Subsonic app's `getRandomSongs` leave holiday songs out; the personalized kind `holiday_mix` is the in-season Holiday mix.
+
+### Secondary library (web UI routes, #2332)
+
+- `GET /api/secondary-library`: `{rules: {enabled, path, name, match_holiday, genres, album_titles, active, problem}, check: {checked, hidden, server, folder, files_on_disk, server_sees}}` (the last check, after a scan).
+- `POST /api/secondary-library/check` (admin): check now whether the media server returns any of the folder.
+- `POST /api/secondary-library/move` (admin): `{apply: false}` (default) previews, `{apply: true}` moves; optional `album_ids`. Returns `{items: [{album_id, title, artist, why: "holiday"|"genre"|"album title", action: "move"|"moved"|"exists"|"shared folder"|"failed", src, dst}], to_move, moved, skipped, failed}`. A move asks the media server to rescan.
+
+Settings: `library.secondary_enabled` (false), `library.secondary_path`, `library.secondary_name` (`Holiday`), `library.secondary_match_holiday` (true), `library.secondary_genres`, `library.secondary_album_titles` (words split by `|` or commas). Matching downloads headed for the shared folder are filed under the secondary folder with the same naming template; an album already in the library stays where its files are. The folder is added to `library.music_paths` and counts as owned for the server-scoped ownership checks.
+
 ### Library coverage and folder overrides (web UI routes, admins only)
 
 How much of the media server's music SoulSync can read directly, folder by folder. Each folder is sampled (up to 40 real files, opened and size-checked), never scanned whole.
@@ -229,6 +246,23 @@ From 1 January 2027 an AcoustID lookup needs the person's own AcoustID key with 
 - `POST /api/acoustid/unlink`: forgets the user key.
 
 Settings: `acoustid.user_key` (a secret, redacted like the others), `acoustid.api_key` (an application key the install registered itself; SoulSync's own is used when it has one, or the `ACOUSTID_APP_KEY` env var). Every lookup sends the user key in the `Acoustid-User-Key` header.
+
+### Give back to MusicBrainz and AcoustID (web UI routes, admins only)
+
+Settings, Connections, Give back (#2335). Three switches, all off by default: `giveback.acoustid`, `giveback.isrc`, `giveback.releases`. No answer ever carries a token.
+
+- `GET /api/giveback`: `{switches: {acoustid, isrc, releases}, acoustid: {ready, message}, musicbrainz: {available, connected, username, message}, counts: {acoustid: {submitted, present, skipped, rejected}, isrc: {...}}, running, last, last_at}`.
+- `PUT /api/giveback/settings` `{acoustid?: bool, isrc?: bool, releases?: bool}`: saves the switches; answers as above. Anything but a bool is `400`.
+- `POST /api/giveback/run`: runs a round now in the background (`409` while both sending switches are off).
+- `POST /api/giveback/musicbrainz/connect`: `{url}` to open. OAuth2 with PKCE (S256), installed-application redirect `urn:ietf:wg:oauth:2.0:oob`, scopes `submit_isrc profile`. `409` while SoulSync has no registered MusicBrainz application.
+- `POST /api/giveback/musicbrainz/code` `{code}`: trades the code MusicBrainz showed for tokens (kept in the encrypted `giveback.musicbrainz_auth`); a link older than an hour must be started again.
+- `POST /api/giveback/musicbrainz/disconnect`: revokes the refresh token at MusicBrainz and forgets it.
+- `GET /api/giveback/releases`: `{releases: [{id, title, artist, year, source, source_url}]}`, albums the MusicBrainz worker didn't find that have a Spotify, Deezer, Apple Music, Tidal, Qobuz or Bandcamp id. Empty while `giveback.releases` is off.
+- `GET /api/giveback/releases/<album_id>/seed`: `{action: "https://musicbrainz.org/release/add", fields: [[name, value], ...], source}`, the release editor seeding fields (`name`, `artist_credit.names.0.*`, `type`, `status`, `events.0.date.*`, `labels.0.name`, `barcode`, `mediums.N.format`, `mediums.N.track.M.{name,number,length,artist_credit.names.0.name}`, `urls.0.{url,link_type}`, `edit_note`). The page POSTs them as a form; the person submits the edit. `404` without a source.
+
+What is sent: AcoustID `POST /v2/submit` (gzipped; `client`, `clientversion`, `duration.N`, `fingerprint.N`, `mbid.N`, `fileformat.N`; the user key in the `Acoustid-User-Key` header), at most 20 per request. MusicBrainz `GET /ws/2/recording/<mbid>?inc=isrcs` then `POST /ws/2/recording/?client=soulsync-<version>` with the `mmd-2.0` `<recording-list>` / `<isrc-list>` XML and a Bearer token, one request a second, User-Agent `SoulSync/<version> ( https://github.com/Nezreka/SoulSync )`. Every outcome is kept in `giveback_submissions` (unique on kind, subject, recording), so nothing is sent twice.
+
+A MusicBrainz application can be supplied with the `MUSICBRAINZ_OAUTH_CLIENT_ID` / `MUSICBRAINZ_OAUTH_CLIENT_SECRET` env vars or the `giveback.musicbrainz_client_id` / `giveback.musicbrainz_client_secret` settings until SoulSync ships its own.
 
 ### Paired devices: listen anywhere (web UI and app routes)
 
@@ -277,6 +311,8 @@ Signing in is always a paired music app, never an API key and never a profile's 
 Error codes: `10` a required parameter is missing, `40` wrong username or password (also after 10 wrong tries a minute from one address), `43` an API key with a username or password, `44` an unknown or unpaired API key, `50` not allowed (no profile picked yet, the profile lost **Use music apps**, or something a music app may not do), `70` not found (also a song this profile can't play, or a file SoulSync can't read with the media server switch off), `0` anything else. A device token in `X-Device-Token` works on `/rest` too, with the device gate's JSON refusals. `getOpenSubsonicExtensions` answers without signing in: `apiKeyAuthentication`, `formPost`, `songLyrics`, `transcodeOffset`.
 
 Ids are typed: `ar-<id>` artist, `al-<id>` album, `tr-<id>` song (a bare number is a song), `pl-<id>` playlist, `mx-<n>` a Daily Mix. One music folder, id `1`.
+
+Songs carry OpenSubsonic `replayGain` (`trackGain`, `albumGain`, `trackPeak`, `albumPeak`, `baseGain`), from the file's ReplayGain or Opus R128 tags, or SoulSync's own measurement when the file has none.
 
 Methods: `ping`, `getLicense`, `getOpenSubsonicExtensions`, `tokenInfo`, `getUser` (its own profile only), `getScanStatus`, `getMusicFolders`, `getIndexes`, `getArtists`, `getArtist`, `getAlbum`, `getSong`, `getMusicDirectory`, `getGenres`, `getAlbumList` / `getAlbumList2` (`random`, `newest`, `highest`, `frequent`, `recent`, `alphabeticalByName`, `alphabeticalByArtist`, `starred`, `byYear`, `byGenre`; `size` up to 500), `getRandomSongs`, `getSongsByGenre`, `search2` / `search3` (an empty query pages through the whole library), `getStarred` / `getStarred2`, `star` / `unstar` (`id`, `albumId`, `artistId`, each repeatable), `setRating`, `scrobble` (`submission=true` records the play, `false` is now playing), `getNowPlaying` (this profile's), `getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`, `deletePlaylist`, `getCoverArt` (`size`), `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getSimilarSongs` / `getSimilarSongs2`, `getTopSongs`, `getArtistInfo` / `getArtistInfo2`, `getAlbumInfo` / `getAlbumInfo2`, `getPlayQueue`, `savePlayQueue`. `getBookmarks`, `getPodcasts`, `getNewestPodcasts`, `getInternetRadioStations` and `getShares` answer empty; `startScan` answers `50`.
 
@@ -498,15 +534,48 @@ How the player, and paired apps, play something. Both routes take the signed-in 
 - `GET /api/player/playable/<item_type>/<item_id>`: `{mode, url, mime, duration, parts, chapters, verdict}`, how to play it, never where the file is. `parts` and `chapters` are an audiobook's timeline, read from its files: each part's `start` and `duration` in seconds on the book's clock, and each chapter's `start` and `title`. `verdict` is a video file's direct-play verdict (`yes`, `maybe` or `no`, with `reasons`).
 - `GET /api/player/stream/<item_type>/<item_id>`: the bytes, with `Range` support (`206`), so a player can seek. A file SoulSync can't reach is relayed from your media server.
 
+#### Volume levelling
+
+- `playable` for a track adds `loudness: {track_gain, track_peak, album_gain, album_peak, reference_lufs, source}` for the file `stream` sends: gains in dB to reach `reference_lufs` (-18 unless the library's ReplayGain target was changed), peaks linear (1.0 is full scale), `source` `tags` (the file's ReplayGain or Opus R128 tags) or `measured` (SoulSync measured a file with none, and wrote nothing into it). `null` when nothing is known yet; that song's album is then measured next, in the background.
+- A track's `stream` fetched whole (no `Range`) carries the same numbers as `X-Loudness-Reference` and `X-ReplayGain-Track-Gain` / `-Track-Peak` / `-Album-Gain` / `-Album-Peak` headers, for a client that downloads songs ahead.
+- `GET /api/player/loudness?ids=1,2,3` (up to 500 library track ids): `{reference_lufs, tracks: {"<id>": {...} or null}}`, a queue's worth at once.
+- `playable` for a movie or episode adds `loudness: {integrated_lufs, true_peak_db, lra, audio_stream}` once the video Loudness maintenance job has measured its file (the first audio track), else `null`.
+- The profile's player settings hold `loudness_mode` (`off`, `track`, `album`, `smart`; smart is album gain while an album plays in order, track gain otherwise), `loudness_target` (LUFS, -24 to -10, default -18), `loudness_preamp` (dB, -12 to 12), `loudness_prevent_clipping` and `video_loudness`. The rule every player applies is in `core/loudness.level_db`.
+
 Refusals are `{error, message}`: `403 restricted` for something over the profile's limits, `404` for something not in the library or without a file. Podcast episodes don't come here: they stream from the feed's host through the podcast side's audio proxy.
 
 #### Converting video for a browser
 
-A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is converted by ffmpeg as it streams. Only what has to change is converted: a stream a browser already plays is copied untouched, so a common H.264 file with AC3 sound only has its sound converted. Video is converted to H.264 (on the GPU when there's one that works: NVIDIA, Intel Quick Sync, VA-API or Apple; the CPU otherwise), at 1080p at most, and HDR is tone mapped so it doesn't come out washed out. Sound becomes stereo AAC.
+A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is converted by ffmpeg as it streams. Only what has to change is converted: a stream a browser already plays is copied untouched, so a common H.264 file with AC3 sound only has its sound converted. Video is converted to 8-bit H.264 at 1080p at most, and HDR is tone mapped so it doesn't come out washed out. Sound becomes stereo AAC. A copied picture is converted after all when it's 10-bit or 4:2:2 H.264 (browsers, phones and Chromecasts can't decode it), or when its bitrate is over the picked quality's ceiling (1080p 8 Mbps, 720p 4 Mbps, 480p 1.5 Mbps).
+
+The GPU is the admin's choice (auto, off, or one of NVIDIA, Intel Quick Sync, VA-API, Apple VideoToolbox, AMD AMF, Raspberry Pi), checked with a real test encode. On a GPU the file is decoded and scaled on the card too, where it can be. A GPU job that fails before its first bytes runs again on the CPU in the same stream, and the GPU is tested again and marked off (with ffmpeg's reason) when that fails too.
 
 - `playable` for a movie, episode or YouTube video adds, when it's converted, `transcode: {video, audio, reasons, quality, tonemap, encoder}` (`video` and `audio` are `copy` or what they become; `reasons` reads like "AC3 audio to AAC"), and `url` points at the converted stream. A file that may play (`verdict: maybe`) keeps its direct `url` and adds `fallback_url`, the converted stream to switch to if the browser can't play it. `?q=1080p|720p|480p` asks for a smaller picture, converted. `transcode_unavailable` says why a file that needs converting can't be (no ffmpeg).
 - `GET /api/player/transcode/<item_type>/<item_id>?q=&part=&t=`: the converted stream, fragmented MP4, from `t` seconds. It can't seek by `Range`: to seek, start a new one at the new `t`. A few run at once; past that it answers `503 busy`.
 - `GET /api/player/transcode/<item_type>/<item_id>/start?t=`: where a stream asked to start at `t` really starts, `{start, seek}`. Copied video can only start at a keyframe, so request `t=seek` and count the stream's time from `start`.
+
+- `GET /api/player/converting/settings` (admin): `{slots, gpu, device, using: {key, label, device}, tried: [{key, label, works, reason}], broken: [{key, label, reason}], decode_cpu: [{key, codec, bit_depth, reason}], last_fallback, devices, in_use}`. `PUT` the same path with any of `slots` (1-16), `gpu` (`auto`, `off`, `nvenc`, `qsv`, `vaapi`, `videotoolbox`, `amf`, `v4l2m2m`) and `device` (`auto` or a `/dev/dri/renderD*` path); the GPU is found again at once.
+- `POST /api/player/converting/test` (admin): finds the GPU again (clearing anything marked off) and runs a real 1 second 1080p clip through it, decoded, scaled to 720p and encoded. The same answer as the GET, plus `test: {ok, label, hw_decode, seconds, reason, note}`.
+
+#### Subtitles in the player
+
+- `GET /api/player/tracks/<item_type>/<item_id>?part=`: `{audio, subtitles, chapters}`. Each subtitle is `s<n>` (inside the file) or `x<n>` (a file beside it) with `language`, `kind` (`text`, `image`), `forced`, `sdh`, `external`, `ai` (made by Whisper on this server: `Movie.ai.en.srt`), `low_confidence` (an AI one Whisper wasn't sure of) and `delay_ms`, this profile's saved delay for that subtitle file.
+- `GET /api/player/subtitle/<item_type>/<item_id>?sub=x0`: a text subtitle as WebVTT. Kept by the file's path, size and modified time, so a replaced or re-timed subtitle shows at once; served with an `ETag` and `Cache-Control: no-cache`.
+- `PUT /api/player/subtitle-delay/<item_type>/<item_id>?sub=x0` with `{delay_ms}`: save this profile's delay for that subtitle (positive shows it later, ±30000 at most, `0` clears it). A different file at the same name starts back at 0.
+
+#### AI subtitles
+
+Whisper runs on the server, on its own queue (one job at a time, never inside the subtitle worker's cycle). A job is a movie or episode and a language. Jobs someone asked for in the player come first, then the title page, the library manager, and last the automatic ones for gaps no provider filled after `ai_subs_wait_hours`. Background jobs on the CPU wait while someone is watching; a job someone asked for, or one on an NVIDIA card, doesn't. A restart resumes a job from its last 5 minute chunk.
+
+- `POST /api/video/subtitles/ai/jobs` with `{kind: movie|episode, item_id, lang, origin: player|detail|library}`: `202 {job}`. The same title and language again returns the same job (moved up when the new ask is more urgent). `503 {error: "unavailable", message}` says in plain words why it can't run (no model installed, no engine, no ffmpeg). Needs the profile's get permission for movies or TV.
+- `GET /api/video/subtitles/ai/jobs?kind=&item_id=&active=1`: `{jobs, available, why, watching}`. A job has `state` (`queued`, `running`, `paused`, `done`, `failed`, `cancelled`, `no_match` when the audio is another language and English isn't wanted, `discarded` when Whisper's output looked made up), `progress` (0 to 1), `eta_seconds`, `position` (1 is next), `spoken_language`, `task` (`transcribe`, or `translate` into English), `confidence` and `verdict` (`ok`, `low`).
+- `POST /api/video/subtitles/ai/jobs/<id>/cancel`: stops it (the profile that asked, or an admin).
+- `GET /api/video/subtitles/ai/hardware?refresh=1`: cores, memory, the NVIDIA card when CTranslate2 can use it (and why not when it can't), and the suggested model.
+- `POST /api/video/subtitles/ai/bench` with `{model}` (admin): a 30 second quick test; its speed (times real time) shows in `whisper/status`.
+- `GET /api/video/subtitles/whisper/status`: the models (`tiny`, `base`, `small`, `medium`, `large-v3-turbo`, `distil-large-v3`) with size, `installed`, disk use and quick test, the hardware line, the suggested model and the download's progress.
+- `POST /api/video/subtitles/whisper/download` with `{model}`, `POST /api/video/subtitles/whisper/download/cancel` and `DELETE /api/video/subtitles/whisper/models/<name>` (admin): install, stop installing, remove. Several models can be installed; the one in the settings is used.
+
+An AI subtitle counts as score 0 in the upgrade pass, so the first real subtitle that clears the minimum score replaces it (the AI file goes to the recycle bin). A real subtitle written any other way (an import, a manual pick) retires it too.
 
 #### Downloads
 
@@ -588,9 +657,16 @@ What's new for this profile (new episodes of shows it watches, well-rated films,
 
 #### Audio and subtitle tracks
 
-- `GET /api/player/tracks/<item_type>/<item_id>?part=`: `{audio, subtitles}`, read from the file (with ffprobe, its header only) and the subtitle files beside it (`Movie.en.srt`, `Movie.es.forced.srt`). An audio track is `{index, language, title, codec, channels, layout, default, plays}`; a subtitle is `{id, language, title, codec, kind, forced, sdh, default, external}`, where `id` is `s<n>` (in the file) or `x<n>` (a file beside it), and `kind` is `text` or `image` (PGS, VobSub).
+- `GET /api/player/tracks/<item_type>/<item_id>?part=`: `{audio, subtitles, chapters, markers}` (skip markers: see Skip markers below), read from the file (with ffprobe, its header only) and the subtitle files beside it (`Movie.en.srt`, `Movie.es.forced.srt`). An audio track is `{index, language, title, codec, channels, layout, default, plays}`; a subtitle is `{id, language, title, codec, kind, forced, sdh, default, external}`, where `id` is `s<n>` (in the file) or `x<n>` (a file beside it), and `kind` is `text` or `image` (PGS, VobSub).
 - `GET /api/player/subtitle/<item_type>/<item_id>?sub=s0`: a text subtitle as WebVTT. Made once and cached: an embedded one means reading the whole file the first time.
 - To play another audio track, ask `playable` (or `transcode`) with `&audio=<index>`; to draw an image subtitle into the picture, `&burn=<n>` (its number among the file's subtitles). Both go through the converter: a browser only plays a file's first audio track.
+
+#### Chapters and chapter pictures
+
+- `tracks` also returns `chapters: [{start, end, title, thumb}]` (seconds; a file with fewer than two chapters has none). `thumb` is the chapter's picture url, or null until it's made.
+- `GET /api/player/chapters/<item_type>/<item_id>?part=`: `{chapters, file_id}`, for a detail page. Read from what's already known (the pictures' manifest, or the player's earlier probe), never from the file, so it's instant; `[]` when nothing is known yet.
+- `GET /api/player/chapter-thumb/<item_type>/<item_id>/<n>?part=&v=`: chapter `n`'s picture, 320 px wide WebP (JPEG where WebP can't be written). The same play check as the video (profile, section, rating cap). 404 until it's made. With `v` (the urls above carry it) it may be cached forever: a remade picture gets a new `v`.
+- The pictures are made by a background worker, never while you wait: one per chapter, a frame a couple of seconds in that isn't black, a fade or a blur (several moments are tried and scored). Newest and most watched titles first. It waits while a scan or sync runs and while anyone is watching, and runs ffmpeg at the lowest priority. They live in the image cache's `chapters/` folder, never beside your files. A library's `chapter_thumbs` option (Settings > Folders > Video, on by default) turns it off for that library.
 
 
 ### Watchlist
@@ -3354,4 +3430,14 @@ Public playlists by name, from the services that can be searched without anyone'
 
 ### Video chapters
 
-`GET /api/player/tracks/<type>/<id>` also returns `chapters`: the file's own chapter marks as `[{start, end, title}]` in seconds (empty when the file has fewer than two). The web player lists them in its chapter menu and offers Skip intro, Skip recap or Skip credits while a chapter with that name plays.
+`GET /api/player/tracks/<type>/<id>` also returns `chapters`: the file's own chapter marks as `[{start, end, title}]` in seconds (empty when the file has fewer than two). The web player lists them in its chapter menu.
+
+### Skip markers (intro, recap, credits)
+
+`GET /api/player/tracks/<type>/<id>` also returns `markers`: `[{kind, start, end, source, label, confidence?, post_credits?}]`, one per kind (`intro`, `recap`, `credits`, `preview`; `commercial` spans only from an .edl). `source` says who found it, and the best one wins: `user` (set by an admin), `sidecar` (a Kodi `.edl` beside the file), `detected` (SoulSync's own analysis), `plex`, `jellyfin`, then `chapter` (a chapter named Intro, Recap or Credits). `post_credits` on credits is a scene after them, `{start, end}`. `GET /api/player/markers/<type>/<id>` returns only `{markers}`.
+
+Each profile's player settings (`GET/PUT /api/player/settings`) carry `skip_intro`, `skip_credits` and `skip_recap` (`ask`, `auto` or `never`) and `next_at_credits` (up next counts down from the credits).
+
+SoulSync finds the markers itself in the background: intros by matching the audio of a season's episodes (one new episode is matched against the season before), credits by the shared end song and the picture, recaps when a library asks for them. It waits while a scan runs or anyone is watching. Each library has three switches (`markers`, `markers_recaps`, `markers_write` in its options): find them, find recaps too, and save them beside each video as an `.edl` (on for a new library, off for one from before). A user's own `.edl` is read and never overwritten.
+
+Admin routes: `GET /api/video/markers/<movie|episode>/<id>` (every file's markers, each source's answer, what was removed, the analysis state), `PUT` the same path `{kind, start, end, file_id?, scope?: "file"|"season"}` to set one, `DELETE ?kind=&file_id=` to remove one for good, `POST .../reset {kind, file_id?}` to go back to automatic, `POST /api/video/markers/find {show_id, season?} | {movie_id} | {episode_id}` to look now, `GET /api/video/markers/status` and `POST /api/video/markers/settings {enabled?, when?: "idle"|"night"|"always"}`.

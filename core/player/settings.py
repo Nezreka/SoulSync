@@ -66,6 +66,36 @@ def _commercial_mode(v: Any) -> str:
     raise SettingsError(f"expected one of {', '.join(COMMERCIAL_MODES)}")
 
 
+SKIP_MODES = ("ask", "auto", "never")
+
+
+def _skip_mode(v: Any) -> str:
+    if isinstance(v, str) and v.strip().lower() in SKIP_MODES:
+        return v.strip().lower()
+    raise SettingsError(f"expected one of {', '.join(SKIP_MODES)}")
+
+
+LOUDNESS_MODES = ("off", "track", "album", "smart")
+
+
+def _loudness_mode(v: Any) -> str:
+    if isinstance(v, str) and v.strip().lower() in LOUDNESS_MODES:
+        return v.strip().lower()
+    raise SettingsError(f"expected one of {', '.join(LOUDNESS_MODES)}")
+
+
+def _db(lo: float, hi: float) -> Callable[[Any], float]:
+    """a level in dB, to the half dB"""
+    def clean(v: Any) -> float:
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v:
+            raise SettingsError(f"expected a number from {lo:g} to {hi:g}")
+        n = round(float(v) * 2) / 2
+        if not lo <= n <= hi:
+            raise SettingsError(f"expected a number from {lo:g} to {hi:g}")
+        return n
+    return clean
+
+
 # a place in the player's sidebar: one of its pages ("/player/movies") or a
 # library with a page of its own ("lib:5")
 _NAV_ID = re.compile(r"^(?:/player(?:/[a-z][a-z-]{0,30}){0,3}|lib:\d{1,9})$")
@@ -102,6 +132,14 @@ SETTINGS: Dict[str, Tuple[Any, Callable[[Any], Any], str]] = {
     "autoplay_next": (True, _bool, "the next episode plays on its own"),
     "still_watching_after": (3, _int(0, 20),
                              "episodes in a row nobody touched before asking (0: never ask)"),
+    "skip_intro": ("ask", _skip_mode,
+                   "an intro: a Skip intro button (ask), skipped on its own (auto), or nothing (never)"),
+    "skip_credits": ("ask", _skip_mode,
+                     "credits: a Skip credits button (ask), skipped on its own (auto), or nothing (never)"),
+    "skip_recap": ("ask", _skip_mode,
+                   "a recap: a Skip recap button (ask), skipped on its own (auto), or nothing (never)"),
+    "next_at_credits": (True, _bool,
+                        "the next episode counts down from where the credits start, not the last seconds"),
     "show_movie_ratings": (False, _bool,
                            "show the star rating badge in the corner of movie poster cards"),
     "show_tv_episode_count": (True, _bool,
@@ -116,6 +154,17 @@ SETTINGS: Dict[str, Tuple[Any, Callable[[Any], Any], str]] = {
                         "decade or vibe for retro commercials (auto matches each channel)"),
     "commercials_mode": ("cable", _commercial_mode,
                          "classic cable continuous breaks or short 1-2 spot breaks"),
+    "loudness_mode": ("smart", _loudness_mode,
+                      "volume levelling for music: off, track, album, or smart (album gain while an "
+                      "album plays in order, track gain otherwise)"),
+    "loudness_target": (-18.0, _db(-24, -10),
+                        "the loudness levelled music plays at, in LUFS (-18 is the ReplayGain standard)"),
+    "loudness_preamp": (0.0, _db(-12, 12),
+                        "extra gain on top of levelling, in dB"),
+    "loudness_prevent_clipping": (True, _bool,
+                                  "never turn a song up past where its loudest moment would distort"),
+    "video_loudness": (False, _bool,
+                       "level very quiet or very loud videos to the same loudness"),
     "sidebar_order": ([], _nav_ids,
                       "the order of the places in the sidebar; any not listed keep their usual place"),
     "sidebar_hidden": ([], _nav_hidden,

@@ -717,6 +717,16 @@ _set_bulk_emit(socketio.emit)
 from core.video.repair.worker import get_video_repair_worker as _get_video_repair
 _get_video_repair().set_emitter(socketio.emit)
 _get_video_repair().start()
+# skip markers (intro / credits / recap): the background job that finds them
+# (core/video/markers/job.py). it waits for scans, syncs and anyone watching
+try:
+    from core.video.markers.job import get_job as _get_marker_job
+    _get_marker_job().start()
+except Exception:   # noqa: BLE001 - no markers is still a working server
+    logger.exception("the skip marker job didn't start")
+# ai subtitles: live 'video:subtitles:ai' job progress (player, title page, settings)
+from core.video.subtitles.ai.queue import set_emitter as _set_ai_subs_emit
+_set_ai_subs_emit(socketio.emit)
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}
@@ -4775,7 +4785,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'flaresolverr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'fanart', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'seerr_compat', 'mcp', 'server_activity']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'flaresolverr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'fanart', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'holiday_music', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'seerr_compat', 'mcp', 'server_activity']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -4791,6 +4801,15 @@ def handle_settings():
             # default profile so "the page edits the active profile" holds —
             # without this, a checkbox change here would never reach the
             # pipeline (see MusicDatabase.sync_default_quality_profile_from_config).
+            if 'holiday_music' in new_settings:
+                # #2332: the season and the mode reach every mix now, not in a minute
+                try:
+                    from core.holiday_music import forget_cache as _holiday_forget
+                    from api.discover_routes import invalidate_discover_shelf_cache as _shelf_forget
+                    _holiday_forget()
+                    _shelf_forget()
+                except Exception as _hm_err:
+                    logger.debug("holiday caches not cleared: %s", _hm_err)
             if 'image_cache' in new_settings:
                 # The cache is a singleton built from config on first use, so a
                 # new size limit would otherwise not apply until a restart.
@@ -4811,9 +4830,17 @@ def handle_settings():
                 except Exception as _cc_err:
                     logger.debug("concert cache clear after settings save failed: %s", _cc_err)
 
-            if 'soulseek' in new_settings or 'active_media_server' in new_settings:
+            if 'soulseek' in new_settings or 'active_media_server' in new_settings or 'library' in new_settings:
                 # the shared folder or the server's own-library support may have
-                # moved: every file's library follows its folder (#1199)
+                # moved: every file's library follows its folder (#1199). the
+                # secondary library folder (#2332) is a shared folder too
+                try:
+                    from core.library_rules import ensure_library_folder as _rules_folder
+                    from core.library_rules import forget_decisions as _rules_forget
+                    _rules_forget()
+                    _rules_folder(config_manager)
+                except Exception as _rules_err:
+                    logger.debug("secondary library decisions not cleared: %s", _rules_err)
                 try:
                     from core.library_scope import library_config_changed
                     library_config_changed()
@@ -12256,7 +12283,8 @@ from core.discovery.blocked import WORKS as _BLOCKED_WORKS, hide_blocked_in_resp
 
 @app.route('/api/library/radio')
 @requires("music.access")
-@_hide_blocked_artists({'tracks': _BLOCKED_WORKS})
+# radio keeps its own holiday check: a christmas seed plays christmas (#2332)
+@_hide_blocked_artists({'tracks': _BLOCKED_WORKS}, holiday=False)
 def library_radio():
     """Get a smart queue of similar tracks for radio mode auto-play.
 
@@ -23529,6 +23557,15 @@ except Exception as e:
     logger.error(f"Repair worker initialization failed: {e}")
     repair_worker = None
 
+# songs whose tags carry no ReplayGain are measured in the background, so the
+# players can level every song (core/library2/loudness_worker.py)
+try:
+    from database.music_database import MusicDatabase
+    from core.library2.loudness_worker import start_worker as _start_loudness_worker
+    _start_loudness_worker(MusicDatabase(), config_manager)
+except Exception as e:
+    logger.error(f"Loudness worker initialization failed: {e}")
+
 # Deezer sign-in events ('Deezer Sign-in Failed' / 'Restored' triggers): the
 # download client sends them itself once it knows where to.
 if automation_engine is not None and download_orchestrator is not None:
@@ -24813,6 +24850,11 @@ from api.acoustid_routes import configure as _configure_acoustid_api, create_blu
 _configure_acoustid_api(config_manager_=config_manager)
 app.register_blueprint(_create_acoustid_blueprint())
 
+# Give back to MusicBrainz and AcoustID (#2335), opt-in
+from api.giveback_routes import configure as _configure_giveback_api, create_blueprint as _create_giveback_blueprint
+_configure_giveback_api(config_manager_=config_manager, get_database_=get_database)
+app.register_blueprint(_create_giveback_blueprint())
+
 # Media server descriptors for the UI (settings page, wizard, quick-switch).
 from api.media_servers import configure as _configure_media_servers_api, create_blueprint as _create_media_servers_blueprint
 _configure_media_servers_api(config_manager_=config_manager, engine_getter=lambda: media_server_engine)
@@ -24836,6 +24878,8 @@ _cfg_qp(get_database=get_database, add_activity_item=add_activity_item)
 app.register_blueprint(_bp_qp())
 from api.audiobook_routes import create_blueprint as _bp_abr
 app.register_blueprint(_bp_abr())
+from api.secondary_library import create_blueprint as _bp_seclib
+app.register_blueprint(_bp_seclib())
 from api.auto_import import configure as _cfg_ai, create_blueprint as _bp_ai
 def _get_auto_import_worker():
     # the worker handle lives (and is rebound) in api.import_routes
@@ -25420,6 +25464,18 @@ try:
     _ensure_video_folder_watch(_get_video_db_for_watch)
 except Exception:
     logger.warning("could not start the video folder watch", exc_info=True)
+
+# chapter pictures (core/player/chapter_thumbs.py): a picture per chapter for
+# movies and episodes whose files have chapters, made in the background at
+# the lowest priority. it waits while a scan runs or anyone is watching.
+# never under pytest: a test importing the app must not run ffmpeg over a library
+if 'pytest' not in _sys.modules and os.environ.get('SOULSYNC_NO_LIBRARY_BACKGROUND', '0') != '1':
+    try:
+        from core.player.chapter_thumbs import ensure_started as _ensure_chapter_thumbs
+        from api.video import get_video_db as _get_video_db_for_chapters
+        _ensure_chapter_thumbs(_get_video_db_for_chapters)
+    except Exception:
+        logger.warning("could not start the chapter thumbnail worker", exc_info=True)
 
 # Library Manager v2 — the UI-facing API mounted on /api/library/v2/*.
 # NOT opt-in: the cutover happened, lib2_* is the maintained catalogue, and
@@ -26540,6 +26596,14 @@ def start_runtime_services():
         # to fire at module import, which started the 30s loop in every
         # importer — tests, workers, CLI tools.)
         start_batch_healing_timer()
+
+        # #2335: give back to acoustid and musicbrainz, slowly. the thread
+        # only sleeps until a Give back switch is on
+        try:
+            from core.giveback import worker as _giveback_worker
+            _giveback_worker.start(get_database, config_manager, version=SOULSYNC_VERSION)
+        except Exception as _gb_err:
+            logger.debug(f"could not start the give back worker: {_gb_err}")
 
         # #2205: fold the wal back in every few minutes, so a busy install
         # can't sit on a multi-GB wal file (SOULSYNC_DB_CHECKPOINT_MINUTES=0

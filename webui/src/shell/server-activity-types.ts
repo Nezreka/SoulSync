@@ -96,6 +96,7 @@ export interface Transcoder {
   hw_decode: string | null; // "Intel Quick Sync"
   hw_encode: string | null;
   hw_full_pipeline: boolean;
+  fell_back?: string | null; // soulsync: the GPU failed and this runs on the CPU
   speed: number | null; // 2.4
   buffered_s: number | null; // plex only
   throttled: boolean | null; // plex only; true = "resting"

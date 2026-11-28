@@ -467,6 +467,28 @@ def check_library_coverage() -> List[dict]:
                     "lib-coverage")]
 
 
+def check_secondary_library() -> List[dict]:
+    """#2332: the media server returns none of the secondary library folder
+    (its account lost access). the last scan's answer, else a check now"""
+    try:
+        from core.library_rules import active_rules, hidden_message, last_check, visibility_check
+    except Exception:  # noqa: BLE001
+        return []
+    if active_rules() is None:
+        return []
+    result = last_check() or visibility_check()
+    if not result.get("checked"):
+        return []
+    name = result.get("name") or "Secondary"
+    fix = [fix_settings("Open library folders", "library-folders")]
+    if result.get("hidden"):
+        return [finding("paths.secondary_library", "warning", "paths",
+                        f"Your media server returns none of your {name} library",
+                        hidden_message(result), fix)]
+    return [finding("paths.secondary_library", "ok", "paths",
+                    f"Your media server sees your {name} library")]
+
+
 def _video_settings() -> dict:
     fn = _p("video_settings")
     if fn is None:
@@ -702,6 +724,7 @@ def _plan() -> List[tuple]:
         ("paths", "folders", check_paths, 4.0),
         ("path_mapping", "path mapping", check_path_mapping, 4.0),
         ("library_coverage", "library coverage", check_library_coverage, 8.0),
+        ("secondary_library", "the secondary library", check_secondary_library, 6.0),
         ("disk", "free disk space", check_disk, 4.0),
         ("video", "the video side", check_video, 5.0),
         ("workers", "enrichment workers", check_workers, 2.0),

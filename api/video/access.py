@@ -311,7 +311,10 @@ ADMIN_ANY = ("/api/video/overlays", "/api/video/import", "/api/video/collections
              # server operations the notification panel shows an admin
              # (#2170): disk, roots and monitor health, and the library
              # manager's bulk job. members never see either
-             "/api/video/health", "/api/video/bulk")
+             "/api/video/health", "/api/video/bulk",
+             # skip markers: setting, removing and finding them is the
+             # admin's; the player reads its markers from /api/player/tracks
+             "/api/video/markers")
 
 # config the Settings page writes but content views read: the writes are admin's
 ADMIN_WRITES = ("/api/video/server", "/api/video/downloads/config",
@@ -340,7 +343,9 @@ ADMIN_WRITES = ("/api/video/server", "/api/video/downloads/config",
                 "/api/video/manual-match",
                 "/api/video/files",
                 "/api/video/subtitles/overrides",
-                "/api/video/subtitles/whisper/download")
+                # whisper models: install, cancel, delete, and the quick test
+                "/api/video/subtitles/whisper",
+                "/api/video/subtitles/ai/bench")
 ADMIN_WRITE_SUFFIXES = ("/metadata", "/lock", "/refresh-art", "/monitor",
                         "/quality-profile", "/series-type", "/overrides", "/sync",
                         "/identify", "/identify/release", "/padlock")
@@ -352,6 +357,10 @@ GET_PREFIXES = ("/api/video/downloads/grab", "/api/video/downloads/retry",
                 "/api/video/youtube/download",
                 # manual subtitle download: an explicit download, same as a grab
                 "/api/video/subtitles/manual-download",
+                # making ai subtitles spends the server's cpu, like a grab
+                # spends its disk (cancel rides along: the route lets a
+                # profile stop only its own ask unless it's the admin)
+                "/api/video/subtitles/ai/jobs",
                 # the tab's bulk action spends the same disk and bandwidth
                 "/api/video/wishlist/youtube/download-all",
                 "/api/video/wishlist/add",

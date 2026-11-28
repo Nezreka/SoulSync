@@ -8,6 +8,7 @@ import { episodeItems } from '../-lib/play-items';
 import { backdropUrl, fraction, posterUrl } from '../-lib/rails';
 import { rankVersions, resolutionLabel } from '../-lib/video';
 import { progressLookupQuery, showDetailQuery, showFilesQuery } from '../-player.api';
+import { ChaptersRow } from '../-ui/chapters-row';
 import { Comments } from '../-ui/comments';
 import { MoreButton } from '../-ui/context-menu';
 import { DetailLayout, InfoPanel, Section } from '../-ui/detail';
@@ -107,12 +108,12 @@ function EpisodePage() {
     .slice()
     .sort((a, b) => (a.season_number || 999) - (b.season_number || 999));
 
-  const playThis = (fileId?: number) => {
+  const playThis = (fileId?: number, startAt?: number) => {
     const queue = episodeItems(show, sortedSeasons, ep.id);
     if (!queue.length) return;
     const pick = fileId ?? activeFile?.id;
     if (pick) queue[0] = { ...queue[0], part: String(pick) };
-    playItems(queue);
+    playItems(queue, 0, startAt !== undefined ? { startAt } : undefined);
   };
 
   const still = ep.has_still ? stillSet(ep.id) : null;
@@ -224,6 +225,16 @@ function EpisodePage() {
                   onChange={(fid) => setSelectedFileId(fid)}
                 />
               </Section>
+            ) : null}
+
+            {activeFile ? (
+              <ChaptersRow
+                itemType="episode"
+                itemId={String(ep.id)}
+                part={activeFile.id}
+                duration={seconds}
+                onPlayAt={(t) => playThis(undefined, t)}
+              />
             ) : null}
 
             <Section title={`More in ${entry.seasonName}`}>

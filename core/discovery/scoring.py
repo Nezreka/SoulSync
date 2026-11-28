@@ -212,9 +212,18 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                     track_name
                 ]
 
+        # the album the source names comes first: a piece on fifty
+        # compilations is only one of them in the playlist (#2331)
+        from core.discovery.album_pref import album_query, album_rank, best_with_album
+        source_album = getattr(tidal_track, 'album', None)
+        _aq = album_query(track_name, artist_name, source_album)
+        if _aq and _aq not in search_queries:
+            search_queries = [_aq] + list(search_queries)
+
         best_match = None
         best_match_raw = None
         best_confidence = 0.0
+        best_rank = 0.0
         min_confidence = 0.9
 
         # deezer's free text can leave the original out entirely (#1565)
@@ -235,12 +244,15 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                         continue
 
                 # Score all results using the matching engine
-                match, confidence, match_idx = _discovery_score_candidates(
-                    track_name, artist_name, source_duration, results
-                )
+                match, confidence, _on_album = best_with_album(
+                    lambda rs: _discovery_score_candidates(
+                        track_name, artist_name, source_duration, rs)[:2],
+                    source_album, results, min_confidence)
+                rank = album_rank(confidence, source_album, match, min_confidence) if match else 0.0
 
-                if match and confidence > best_confidence and confidence >= min_confidence:
+                if match and rank > best_rank and confidence >= min_confidence:
                     best_confidence = confidence
+                    best_rank = rank
                     best_match = match
                     if use_spotify and match.id:
                         _cache = get_metadata_cache()
@@ -266,9 +278,10 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
             else:
                 extended_results = itunes_client.search_tracks(query, limit=50)
             if extended_results:
-                match, confidence, match_idx = _discovery_score_candidates(
-                    track_name, artist_name, source_duration, extended_results
-                )
+                match, confidence, _on_album = best_with_album(
+                    lambda rs: _discovery_score_candidates(
+                        track_name, artist_name, source_duration, rs)[:2],
+                    source_album, extended_results, min_confidence)
                 if match and confidence >= min_confidence:
                     best_match = match
                     best_confidence = confidence

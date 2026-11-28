@@ -174,6 +174,10 @@ describe('the values', () => {
       statsEnabled: false,
       statsInterval: 30,
       adventurousness: 0.3,
+      holidayMode: 'season',
+      holidayStart: '11-15',
+      holidayEnd: '01-06',
+      holidayTag: false,
     });
     expect(resolveDiscovery({ discover: { adventurousness: 0 } }).adventurousness).toBe(0);
     expect(
@@ -308,5 +312,47 @@ describe('the discovery pool', () => {
       'Settings saved, but discovery lookback period failed to save',
       'warning',
     );
+  });
+});
+
+describe('holiday music (#2332)', () => {
+  it('an install with none saved is in season, Nov 15 to Jan 6, no tag', () => {
+    const values = resolveDiscovery({});
+    expect(values.holidayMode).toBe('season');
+    expect(values.holidayStart).toBe('11-15');
+    expect(values.holidayEnd).toBe('01-06');
+    expect(values.holidayTag).toBe(false);
+    expect(
+      resolveDiscovery({ holiday_music: { mode: 'bogus', season_start: '99-99' } }),
+    ).toMatchObject({ holidayMode: 'season', holidayStart: '11-15' });
+  });
+
+  it('the card is on Recommendations, music side only, and says when songs come back', () => {
+    store.hydrate({
+      holiday_music: { mode: 'season', season_start: '12-01', season_end: '01-02' },
+    });
+    page();
+    expect(panel('recommendations').contains(box('holiday-music-mode'))).toBe(true);
+    expect(box('holiday-music-mode').closest('[data-music-only]')).not.toBeNull();
+    expect(picked('holiday-music-mode')).toBe('season');
+    expect(box('holiday-season-start-month').value).toBe('12');
+    expect(box('holiday-season-end-day').value).toBe('2');
+    expect(rowOf('holiday-season-start-month').textContent).toContain('December 1');
+    expect(box('holiday-write-tag').checked).toBe(false);
+  });
+
+  it('saves the mode, the dates as MM-DD and the tag', async () => {
+    page();
+    pick('holiday-music-mode', 'never');
+    await waitFor(() => expect(posted.at(-1)).toEqual({ holiday_music: { mode: 'never' } }));
+    // the dates dim when they don't apply
+    expect(dimmed('holiday-season-start-month')).toBe(true);
+    pick('holiday-music-mode', 'season');
+    fireEvent.change(box('holiday-season-start-month'), { target: { value: '12' } });
+    await waitFor(() =>
+      expect(posted.some((p) => p.holiday_music?.season_start === '12-15')).toBe(true),
+    );
+    fireEvent.click(box('holiday-write-tag'));
+    await waitFor(() => expect(posted.at(-1)).toEqual({ holiday_music: { write_tag: true } }));
   });
 });

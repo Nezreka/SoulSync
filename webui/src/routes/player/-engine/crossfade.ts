@@ -11,7 +11,10 @@ import { useSyncExternalStore } from 'react';
 
 import { appURL } from '@/platform/url-base';
 
+import type { Loudness } from './loudness';
 import type { PlayItem } from './types';
+
+import { loudnessFromHeaders } from './loudness';
 
 export const CROSSFADE_OPTIONS = [0, 2, 4, 6, 8, 10, 12] as const;
 export const PREFETCH_OPTIONS = [0, 3, 5, 10] as const;
@@ -127,6 +130,8 @@ const MAX_CACHED_BYTES = 200 * 1024 * 1024;
 const MAX_TRACK_BYTES = 80 * 1024 * 1024;
 const blobCache = new Map<string, string>();
 const blobBytes = new Map<string, number>();
+/** each cached song's loudness, from its response headers */
+const blobLoudness = new Map<string, Loudness>();
 const inflight = new Set<string>();
 
 function cachedBytes(): number {
@@ -141,6 +146,7 @@ function evictOldest() {
   const oldestUrl = blobCache.get(oldestKey);
   blobCache.delete(oldestKey);
   blobBytes.delete(oldestKey);
+  blobLoudness.delete(oldestKey);
   if (oldestUrl) URL.revokeObjectURL(oldestUrl);
   return true;
 }
@@ -160,6 +166,11 @@ export function getCachedTrackBlobUrl(trackId: string): string | null {
   return hit;
 }
 
+/** a pre-cached song's loudness, when its bytes brought it */
+export function getCachedTrackLoudness(trackId: string): Loudness | null {
+  return blobLoudness.get(trackId) ?? null;
+}
+
 export function prefetchUpcomingTracks(items: readonly PlayItem[], currentIndex: number) {
   if (typeof window === 'undefined' || typeof fetch !== 'function') return;
   const count = getPrefetchCount();
@@ -171,13 +182,19 @@ export function prefetchUpcomingTracks(items: readonly PlayItem[], currentIndex:
   for (const track of upcoming) {
     inflight.add(track.id);
     const url = appURL(`/api/player/stream/track/${encodeURIComponent(track.id)}`);
+    let loud: Loudness | null = null;
     void fetch(url, { credentials: 'same-origin' })
-      .then((res) => (res.ok ? res.blob() : null))
+      .then((res) => {
+        if (!res.ok) return null;
+        loud = loudnessFromHeaders(res.headers);
+        return res.blob();
+      })
       .then((blob) => {
         if (!blob || blob.size > MAX_TRACK_BYTES) return;
         const objectUrl = URL.createObjectURL(blob);
         blobCache.set(track.id, objectUrl);
         blobBytes.set(track.id, blob.size);
+        if (loud) blobLoudness.set(track.id, loud);
         while (
           (blobCache.size > MAX_CACHED_BLOBS || cachedBytes() > MAX_CACHED_BYTES) &&
           evictOldest()
@@ -195,42 +212,60 @@ export function prefetchUpcomingTracks(items: readonly PlayItem[], currentIndex:
  * smoothly crossfades out (equal-power cosine curve) while ramping the primary
  * incoming deck in (equal-power sine curve).
  */
+export interface CrossfadeLevels {
+  /** the outgoing song's levelling (linear): its tail keeps the level it played at */
+  outLevel?: number;
+  /** level the outgoing copy through web audio (a boost); null: it can't be */
+  levelOut?: (el: HTMLMediaElement, linear: number) => (() => void) | null;
+  /** the incoming element's full volume, read as it fades in (it may change mid-fade) */
+  inVolume?: () => number;
+}
+
 export function startEqualPowerCrossfade(
   primaryEl: HTMLMediaElement,
   durationSec: number,
   targetVolume: number,
+  levels: CrossfadeLevels = {},
 ): () => void {
   if (typeof document === 'undefined' || durationSec <= 0) return () => undefined;
   const clampedVol = Math.max(0, Math.min(1, targetVolume));
+  const outLevel = levels.outLevel ?? 1;
   const outEl = document.createElement('audio');
   outEl.src = primaryEl.currentSrc || primaryEl.src;
   outEl.currentTime = primaryEl.currentTime;
   outEl.playbackRate = primaryEl.playbackRate;
-  outEl.volume = clampedVol;
+  // the tail plays at the level the song had: turned down on the element,
+  // turned up through web audio when it can be
+  const unwire = outLevel > 1 ? (levels.levelOut?.(outEl, outLevel) ?? null) : null;
+  const outVol = clampedVol * (unwire ? 1 : Math.min(1, outLevel));
+  outEl.volume = outVol;
   void outEl.play().catch(() => undefined);
+  const inVolume = () => Math.max(0, Math.min(1, levels.inVolume?.() ?? clampedVol));
 
   primaryEl.volume = 0;
   const startedAt = Date.now();
   const totalMs = Math.max(400, durationSec * 1000);
+  const release = () => {
+    outEl.pause();
+    outEl.removeAttribute('src');
+    outEl.load();
+    unwire?.();
+  };
   const timer = window.setInterval(() => {
     const t = Math.min(1, (Date.now() - startedAt) / totalMs);
     const outGain = Math.cos((t * Math.PI) / 2);
     const inGain = Math.sin((t * Math.PI) / 2);
-    outEl.volume = Math.max(0, Math.min(1, outGain * clampedVol));
-    primaryEl.volume = Math.max(0, Math.min(1, inGain * clampedVol));
+    outEl.volume = Math.max(0, Math.min(1, outGain * outVol));
+    primaryEl.volume = Math.max(0, Math.min(1, inGain * inVolume()));
     if (t >= 1) {
       window.clearInterval(timer);
-      outEl.pause();
-      outEl.removeAttribute('src');
-      outEl.load();
+      release();
     }
   }, 50);
 
   return () => {
     window.clearInterval(timer);
-    outEl.pause();
-    outEl.removeAttribute('src');
-    outEl.load();
-    primaryEl.volume = clampedVol;
+    release();
+    primaryEl.volume = inVolume();
   };
 }

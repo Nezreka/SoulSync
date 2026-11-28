@@ -125,6 +125,8 @@ export interface LibraryV2ListFilters {
   quality?: string;
   /** #2046: 'reviewed' | 'unreviewed' (artists); #2223: locked or not (albums) */
   review?: string;
+  /** #2332: albums only: 'only' holiday music, or 'hide' it */
+  holiday?: string;
   /** ask for each artist card's "could be better" count */
   includeUpgradable?: boolean;
   /** #2107: sort direction, collection filters, featured-only artists */
@@ -143,6 +145,9 @@ function setListFilters(params: URLSearchParams, filters: LibraryV2ListFilters) 
   if (filters.quality === 'upgradable') params.set('quality', 'upgradable');
   if (filters.review === 'reviewed' || filters.review === 'unreviewed') {
     params.set('review', filters.review);
+  }
+  if (filters.holiday === 'only' || filters.holiday === 'hide') {
+    params.set('holiday', filters.holiday);
   }
   if (filters.dir) params.set('dir', filters.dir);
   if (filters.completion) params.set('completion', filters.completion);
@@ -203,14 +208,19 @@ interface AlbumsResponse extends Ok {
 /** The library by release (A07). */
 export async function fetchLibraryV2Albums(
   search: Pick<LibraryV2Search, 'q' | 'albumSort' | 'page' | 'monitored'> &
-    Pick<LibraryV2ListFilters, 'letter' | 'source' | 'review'>,
+    Pick<LibraryV2ListFilters, 'letter' | 'source' | 'review' | 'holiday'>,
 ): Promise<AlbumsResponse> {
   const params = new URLSearchParams();
   if (search.q) params.set('search', search.q);
   params.set('sort', search.albumSort);
   params.set('monitored', search.monitored);
   params.set('page', String(search.page));
-  setListFilters(params, { letter: search.letter, source: search.source, review: search.review });
+  setListFilters(params, {
+    letter: search.letter,
+    source: search.source,
+    review: search.review,
+    holiday: search.holiday,
+  });
   return lib2Json<AlbumsResponse>(
     apiClient.get('library/v2/albums', { searchParams: params }),
     'Failed to load albums',
@@ -1213,6 +1223,50 @@ export async function deleteLibraryV2Entity(
   id: number,
 ): Promise<void> {
   await lib2Json(apiClient.delete(`library/v2/${entity}/${id}`), 'Delete failed');
+}
+
+/** #2333: what deleting the files of several artists would do. */
+export interface LibraryV2BulkFileDeletePreview {
+  artists: number;
+  albums: number;
+  files: number;
+  total_size: number;
+  /** files already gone from disk: only their rows go */
+  missing: number;
+  /** artists a file delete refuses (a file outside the library folders) */
+  blocked: { id: number; name: string; reason: string }[];
+  not_found: number;
+  /** quarantine: into the deleted-files folder, restorable */
+  mode: 'quarantine' | 'permanent';
+  /** how long the deleted-files folder keeps them; 0 keeps them until emptied */
+  keep_days: number;
+}
+
+export async function previewLibraryV2BulkFileDelete(
+  ids: number[],
+): Promise<LibraryV2BulkFileDeletePreview> {
+  return lib2Json<Ok & LibraryV2BulkFileDeletePreview>(
+    apiClient.post('library/v2/artists/delete-files/preview', { json: { ids } }),
+    'Delete preview failed',
+  );
+}
+
+export interface LibraryV2BulkFileDeleteResult {
+  deleted: number;
+  failed: number;
+  files_deleted: number;
+  results: { id: number; ok: boolean; error?: string; files_deleted?: number }[];
+}
+
+/** #2333: each artist's files into the deleted-files folder, then the artist
+ *  off the library, the way the single delete does it. */
+export async function deleteLibraryV2ArtistsWithFiles(
+  ids: number[],
+): Promise<LibraryV2BulkFileDeleteResult> {
+  return lib2Json<Ok & LibraryV2BulkFileDeleteResult>(
+    apiClient.post('library/v2/artists/delete-files', { json: { ids } }),
+    'Delete failed',
+  );
 }
 
 /** Impact preview for artist delete: owned releases cascade, featured
@@ -2412,7 +2466,7 @@ export function libraryV2ArtistsQueryOptions(
 
 export function libraryV2AlbumsQueryOptions(
   search: Pick<LibraryV2Search, 'q' | 'albumSort' | 'page' | 'monitored'> &
-    Pick<LibraryV2ListFilters, 'letter' | 'source' | 'review'>,
+    Pick<LibraryV2ListFilters, 'letter' | 'source' | 'review' | 'holiday'>,
 ) {
   return queryOptions({
     queryKey: [
@@ -2425,6 +2479,7 @@ export function libraryV2AlbumsQueryOptions(
       search.letter ?? 'all',
       search.source ?? '',
       search.review ?? '',
+      search.holiday ?? '',
     ],
     queryFn: () => fetchLibraryV2Albums(search),
   });
@@ -3148,4 +3203,38 @@ export function libraryV2OverviewUpgradesQueryOptions(enabled = true) {
     enabled,
     staleTime: 60_000,
   });
+}
+
+/** #2332: holiday music, set by hand or worked out */
+export type LibraryV2HolidayEntity = 'artist' | 'album' | 'track';
+
+export interface LibraryV2HolidayState {
+  holiday: boolean;
+  /** 'track' | 'album' | 'artist' when a hand flag decided, else 'auto' */
+  decided_by: string;
+  /** the hand flag on this very row; null is automatic */
+  override: boolean | null;
+  detected: boolean;
+  season: { mode: string; in_season: boolean; allows_holiday: boolean };
+}
+
+export async function fetchLibraryV2Holiday(
+  entity: LibraryV2HolidayEntity,
+  id: number,
+): Promise<LibraryV2HolidayState> {
+  return lib2Json<Ok & LibraryV2HolidayState>(
+    apiClient.get(`library/v2/holiday/${entity}/${id}`),
+    'Could not read holiday music',
+  );
+}
+
+export async function setLibraryV2Holiday(
+  entity: LibraryV2HolidayEntity,
+  id: number,
+  holiday: boolean | null,
+): Promise<LibraryV2HolidayState> {
+  return lib2Json<Ok & LibraryV2HolidayState>(
+    apiClient.post(`library/v2/holiday/${entity}/${id}`, { json: { holiday } }),
+    'Could not save holiday music',
+  );
 }

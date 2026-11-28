@@ -117,7 +117,7 @@ SoulSync is one server with a few faces. Everything below talks to your own serv
 
 | | |
 |---|---|
-| **Player** | Its own web player and Android / Android TV app: rows you arrange, libraries (4K, Kids, Anime, home videos), a live guide with channels, watch parties, Chromecast, chapters and skip intro, downloads for offline, notifications |
+| **Player** | Its own web player and Android / Android TV app: rows you arrange, libraries (4K, Kids, Anime, home videos), a live guide with channels, watch parties, Chromecast, chapters with pictures and skip intro, downloads for offline, notifications |
 | **Remote streaming** | Free. Pair with a one-time code, then direct, certificate-pinned HTTPS between the app and your server. No subscription and no media through any cloud |
 | **Download sources** | Soulseek (slskd), Tidal, Qobuz, Deezer, HiFi, YouTube, SoundCloud, Lidarr, Torrent and Usenet (via Prowlarr). One source or a drag-ordered hybrid chain. |
 | **Metadata** | Spotify (with or without an account), Apple Music / iTunes, Deezer, Discogs, MusicBrainz, plus 14 background enrichment workers |
@@ -228,9 +228,13 @@ Every page is there: **Home, Movies, TV, Music, YouTube, Audiobooks, Podcasts, H
 
 ## Watching
 
-- **Plays anything**: files a browser can't play are converted on the fly by the server (on the GPU when it works), with seeking.
+- **Plays anything**: files a browser can't play are converted on the fly by the server, with seeking. Free hardware conversion (NVIDIA, Intel Quick Sync, VA-API for Intel and AMD, Apple, AMD AMF, Raspberry Pi): decoded, scaled and encoded on the GPU, and a GPU that fails hands the stream to the CPU before you notice. Only what has to change is converted, and a picked quality caps copied video too.
 - **Chapters and skip intro**: a file's own chapter marks show in the chapter menu, and a chapter named intro, recap or credits gets a skip button. Nothing is guessed.
+- **Chapter pictures**: every movie and episode with chapters gets a picture per chapter, made in the background while nobody's watching. Never a black frame or a fade: a few moments are tried and the sharpest well-lit one wins. They show in the player's chapter strip, over the seek bar as you scrub, and in a Chapters row on the detail page that plays from any chapter. Kept in the image cache, never beside your files; switch it off per library.
+- **Skip intro, recap and credits**: SoulSync finds intros by matching a season's episodes (one new episode works, it uses the season before), credits by the end song and the picture (movies too, with a hint when a scene follows them), and recaps if you want. It also reads Plex's and Jellyfin's markers, Kodi `.edl` files and chapter names, and can save its own as `.edl` beside each video. Each profile picks ask, skip automatically or never for each, and the next episode can count down from the credits. Admins can adjust or remove any marker from the title's page.
 - **Find subtitles while you watch** from SoulSync's own subtitle providers, best match first. The one you pick is saved beside the video and switched on at once.
+- **AI subtitles, made on your server**: when no provider has a language, SoulSync listens to the audio itself (Whisper, from tiny to large-v3-turbo, on the CPU or an NVIDIA card) and writes proper subtitles: two lines at most, timed to the words, with made-up lines ("thanks for watching", repeats, music) thrown out. Ask for them in the player or on a title, or let it fill gaps on its own after a day of waiting. They're named `Movie.ai.en.srt` so Plex, Jellyfin, Emby and Kodi still read the language, and the first real subtitle that turns up replaces them. Nothing leaves your server.
+- **Subtitle timing you set once**: nudge a subtitle earlier or later and it's saved for that subtitle file and your profile, in the browser and the app.
 - **The end of a video**: the next episode counts down, what you were in the middle of sits beside it, and a long unattended run asks "are you still watching?".
 - **Casting**: Chromecast plays anything, with files the TV can't decode converted on the way.
 - **Info and stats**: an info sheet on every item says what it is and what file it is. **Stats for nerds** shows the stream live: the file, direct play or converted (and why), the tracks in use, dropped frames and buffer.
@@ -241,6 +245,8 @@ Every page is there: **Home, Movies, TV, Music, YouTube, Audiobooks, Podcasts, H
 ## Music, audiobooks & podcasts
 
 - **A music hub** with artists, albums, playlists, your mixes and artist mixes, a full now-playing view with synced lyrics, a queue, and visuals that move to the song.
+- **Volume levelling** from the ReplayGain SoulSync already measures: Off, Track, Album or Smart (album levels while an album plays in order, song levels on shuffle and playlists), a target loudness, a pre-amp and clipping prevention from each song's peak. Songs without ReplayGain are measured in the background, the moment they're played first. Set per profile in Settings, You, Music; Subsonic apps get the same gains.
+- **Level video loudness**: very quiet films and very loud videos brought to one level, measured in the background (nothing is written into the files).
 - **Audiobooks and podcasts** with chapters, resume and progress kept across every screen.
 - **YouTube**: a video you downloaded plays in the player with resume and queue; one you haven't plays in YouTube's own embed.
 - **Plays count**: a song played in the player is a play in your stats, mixes and scrobbles.
@@ -430,9 +436,10 @@ Live batches with speed and ETA, "download this next", and a step-by-step detail
 
 - **Quality profiles**: named profiles built from a ranked ladder of formats, bit depths, sample rates and bitrates, with a cutoff. Start from *Audiophile*, *Balanced* or *Space Saver*, then assign profiles per playlist, artist or wishlist item. **Upgrade until cutoff** keeps chasing a better copy, and a file is only ever replaced by a measured upgrade. **Upgrade whole albums** does it per album instead: the complete release from one source, checked file by file, swapped in all at once or not at all.
 - **Verification**: AcoustID fingerprinting (link your AcoustID account once in Settings: lookups need it from 1 January 2027), real-audio checks with ffmpeg (catches padded previews), silence, duration (with an adjustable tolerance) and integrity guards, and a **fake-lossless** detector.
+- **Give back** (opt-in, off by default): send what SoulSync identified back to the open databases it uses. AcoustID fingerprints with their MusicBrainz recording for songs it is sure of (matched by fingerprint or MusicBrainz tags, lengths agreeing), ISRCs from your tags that a MusicBrainz recording lacks (under your MusicBrainz account), and an **Add to MusicBrainz** button that opens MusicBrainz's add release form filled in for albums it doesn't have, for you to check and submit. Slow, under your own accounts, never sent twice.
 - **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention. The trash icon at the top of the Library opens it. Review stays quiet on its own: near-misses leave once a later candidate for the same track imports, automatic quality upgrades never send anything to Review (your current file stays), and old items can age out after N days (off by default). All of it lands in the recycle bin, restorable.
 - **Tagging**: Picard-style **MusicBrainz release preflight** pins one release per album so every track agrees. Tags are written with mutagen (ID3v2.4, FLAC, Vorbis, MP4), enriched in the order you choose. What the library learns later (a genre, a year, a track total) is filled into the tags a file left blank on its own, never over a tag the file has, and every fill can be undone from **Tools → Filled Tags** (**Fill empty tags automatically**: fill only, fill and update, or off).
-- **Extras**: preferred-source cover art with a minimum size, synced lyrics from LRClib, **ReplayGain 2.0** (track + album), optional lossy copies (MP3 / Opus / AAC), and **atomic album publishing** so half-downloaded albums never appear in your server.
+- **Extras**: preferred-source cover art with a minimum size, synced lyrics from LRClib, **ReplayGain 2.0** (track + album; Opus gets RFC 7845 R128 tags), optional lossy copies (MP3 / Opus / AAC), and **atomic album publishing** so half-downloaded albums never appear in your server.
 - **File organization**: templates for albums, singles, compilations, playlists, music videos, podcasts and audiobooks (`$albumartist/$album/$track - $title` and friends). Every template shows the path it makes right under it as you type.
 
 <details>
@@ -459,6 +466,8 @@ A personal front page shaped by your library, your listening and your watchlist.
 - **Adventurousness dial**: drag from "safe" to "deep cuts" and the recommendations re-rank live. Each profile has its own dial; one that never turned it follows the default set in Settings.
 - **Shelves**: Recommended artists, Because you listen to…, New releases for you, New in your genres, Albums you're missing, More from your labels, Deep cuts.
 - **What you love counts**: Liked Songs, songs you starred or rated highly on your media server, and the artists on your Watchlist seed recommendations, Daily Mixes and stations next to what you play, per profile, weighed against your own play counts.
+- **Holiday music in season**: Christmas songs found by genre, title or a flag you set on an artist, album or track stay out of mixes, radio and generated playlists outside the season you pick (Nov 15 to Jan 6 by default, or always, or never). In season a Holiday mix shows up, and an optional Holiday genre tag lets Navidrome and AudioMuse filter them too.
+- **Secondary library**: holiday albums (or a genre or album title you choose) are filed in a folder of their own, decided per album so one is never split, with a preview-first move for the albums you already have. Your media server can show that folder as its own library, and SoulSync still counts it as owned when the server account loses access, with a warning after the scan.
 - **Stations**: endless artist radio, or a stable 40-track snapshot you can download or sync.
 - **Outside picks**: **Deezer Curated** editorial playlists (no key needed), **ListenBrainz** recommendations, and **Last.fm Radio**.
 - **SoulSync Charts**: what the SoulSync network is wishlisting, keeping and playing this week, as playlists that open ready to sync (needs [MetaSync](#metasync--soulsync-charts), and the shelf hides itself without it).
@@ -943,6 +952,16 @@ The image runs as a non-root user with `PUID` / `PGID` / `UMASK` support, and bu
 | **Snapshot** | `ghcr.io/nezreka/soulsync:dev-YYYYMMDD-<sha>` | An exact dev build to pin to |
 
 To switch, change `image:` in `docker-compose.yml`, then `docker compose pull && docker compose up -d`.
+
+### GPU video conversion
+
+The player converts video a screen can't play as it streams, on a GPU when there is one. No subscription. In Docker:
+
+- **Intel or AMD**: add `devices: - /dev/dri:/dev/dri` to the soulsync service. The image ships the free VA-API and Quick Sync drivers and joins the card's group on its own (any host gid), still running as your `PUID`.
+- **NVIDIA**: install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) on the host, then add `runtime: nvidia` with `NVIDIA_DRIVER_CAPABILITIES=compute,video,utility`, or the `deploy` GPU block. Both are in `docker-compose.yml`, commented.
+- Older Intel chips (before Ice Lake) may need Debian's non-free driver to encode: build with `--build-arg INTEL_NONFREE=1`.
+
+Then open the player's **Settings → Converting** and press **Test GPU**. It says what it found, and why anything didn't work. `docker exec soulsync-webui vainfo` lists what an Intel or AMD card offers.
 
 ### Unraid
 

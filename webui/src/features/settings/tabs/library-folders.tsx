@@ -33,6 +33,7 @@ import {
 } from './library-card';
 import { ServerFoldersSection } from './library-coverage';
 import { FolderWatchSection } from './library-folder-watch';
+import { SecondaryLibrary } from './library-secondary';
 import { text } from './source-panels';
 
 export { isDocker };
@@ -394,11 +395,26 @@ export function MusicFolders({ store }: { store: SettingsStore }) {
         </div>
         <p className={s.cardFoot}>
           <strong>You don&apos;t need to repeat it here.</strong> Only for <em>extra</em> music,
-          like a second collection or an archive drive. Your music
-          library folder is already read. <strong>Docker:</strong> mount the folder into the
-          container read-write and add its container path here (like <code>/music2</code>).
+          like a second collection or an archive drive. Your music library folder is already read.{' '}
+          <strong>Docker:</strong> mount the folder into the container read-write and add its
+          container path here (like <code>/music2</code>).
         </p>
       </Card>
+
+      <SecondaryLibrary
+        store={store}
+        onFolder={(path) => {
+          // the saved list, not this page's rows: on a load the card can ask
+          // before the rows are filled in, and saving those would drop folders
+          const saved =
+            (store.getState().settings.library?.music_paths as string[] | undefined) || [];
+          const rows = saved.map((r) => String(r).trim()).filter(Boolean);
+          if (rows.includes(path)) return;
+          const next = [...rows, path];
+          setMusic(next);
+          saveList('music_paths', next);
+        }}
+      />
 
       {/* every music folder the media server has, and whether SoulSync scans
           it (library-coverage.tsx). "Add as a library folder" adds a row to

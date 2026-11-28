@@ -317,6 +317,7 @@ export function transcoderLine(t: Transcoder): string {
   if (t.speed) bits.push(`Running at ${Math.round(t.speed * 10) / 10}×`);
   if (t.buffered_s != null) bits.push(bufferedPhrase(t.buffered_s));
   if (t.throttled) bits.push('resting');
+  if (t.fell_back) bits.push(t.fell_back);
   return bits.join(' · ') || (t.hw ? 'Hardware' : 'Software');
 }
 

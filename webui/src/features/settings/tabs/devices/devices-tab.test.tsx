@@ -80,10 +80,35 @@ const MUSIC_APPS = {
   ffmpeg: true,
 };
 
+// #2328: what the server says about pairing, swapped per test
+const NOT_CONNECTED = {
+  state: 'connecting',
+  ready: false,
+  words: "Not connected to the pairing service right now, so the app can't find this server.",
+  error: 'connection refused',
+  listening: true,
+  listener_error: null,
+  tls_port: 8443,
+  targets: [
+    { ip: '192.168.1.5', port: 8443, home: true },
+    { ip: '203.0.113.9', port: 8443, home: false },
+  ],
+  upnp: {
+    enabled: false,
+    active: false,
+    method: null,
+    external_ip: null,
+    external_port: null,
+    internal_port: 8443,
+  },
+};
+let connect: Record<string, unknown> | undefined;
+
 let calls: Array<{ url: string; method: string; body?: unknown }>;
 
 beforeEach(() => {
   calls = [];
+  connect = undefined;
   shell.getCurrentProfileContext = () => ({ profileId: 1, isAdmin: true });
   shell.showToast = vi.fn();
   shell.showConfirmDialog = vi.fn(() => Promise.resolve(true));
@@ -114,8 +139,9 @@ beforeEach(() => {
           payload_text: '{"code":"7KQ4-M2XD-9FHA-T3VB"}',
           qr_text: 'soulsync://pair?d=eyJjb2RlIjoiN0tRNC1NMlhELTlGSEEtVDNWQiJ9',
           warnings: [],
+          connect,
         };
-      else if (url === '/api/devices/server') data = SERVER;
+      else if (url === '/api/devices/server') data = { ...SERVER, connect };
       else if (url === '/api/devices/reachability' && method === 'POST')
         data = {
           success: true,
@@ -215,6 +241,56 @@ describe('Settings > Devices', () => {
       'https://github.com/Nezreka/soulsync-mobile-app/releases',
     );
     expect(calls.some((c) => c.url === '/api/devices/codes' && c.method === 'POST')).toBe(true);
+  });
+
+  it('says before the code when the app cannot find this server (#2328)', async () => {
+    connect = NOT_CONNECTED;
+    const { findByText, getByText, getByTestId } = tab();
+    await findByText('Car');
+    await act(async () => {
+      fireEvent.click(getByText('Add a device'));
+    });
+    const ready = getByTestId('pairing-readiness');
+    expect(ready.textContent).toContain("The app can't find this server yet.");
+    expect(ready.textContent).toContain('Last error: connection refused.');
+    expect(ready.textContent).toContain('192.168.1.5:8443');
+    expect(ready.textContent).toContain('203.0.113.9:8443');
+    // the warning comes before the code
+    const code = getByTestId('pairing-code');
+    expect(ready.compareDocumentPosition(code) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(getByText('Turn on automatic remote access'));
+    });
+    const put = calls.find((c) => c.url === '/api/devices/upnp');
+    expect(put?.body).toEqual({ enabled: true });
+  });
+
+  it('says when this server is connected for pairing', async () => {
+    connect = {
+      ...NOT_CONNECTED,
+      state: 'connected',
+      ready: true,
+      error: null,
+      upnp: { ...NOT_CONNECTED.upnp, enabled: true },
+    };
+    const { findByText, getByText, getByTestId, queryByText } = tab();
+    await findByText('Car');
+    await act(async () => {
+      fireEvent.click(getByText('Add a device'));
+    });
+    expect(getByTestId('pairing-readiness').textContent).toContain('Connected for pairing');
+    expect(queryByText(/can't find this server yet/)).toBeNull();
+    expect(queryByText('Turn on automatic remote access')).toBeNull();
+  });
+
+  it('says when no home address is known', async () => {
+    connect = { ...NOT_CONNECTED, ready: true, state: 'connected', targets: [] };
+    const { findByText, getByText, getByTestId } = tab();
+    await findByText('Car');
+    await act(async () => {
+      fireEvent.click(getByText('Add a device'));
+    });
+    expect(getByTestId('pairing-readiness').textContent).toContain('No home address found');
   });
 
   it('unpairing asks first, then unpairs', async () => {

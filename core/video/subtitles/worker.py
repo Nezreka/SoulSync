@@ -438,9 +438,11 @@ def run_cycle(db, settings, fs=None) -> dict:
                 except Exception:  # noqa: BLE001 - quota is accounting, never fatal
                     pass
             try:
+                # whisper never runs in this chain: ai subtitles have their
+                # own queue (see queue_after_miss below)
                 text, pid, candidate, score = fetch_subtitle_detailed(
                     query, provider_order, get_setting, on_download=_bump,
-                    quota_check=_quota_left)
+                    quota_check=_quota_left, skip_background=True)
             except Exception:  # noqa: BLE001 - fetch is best-effort by contract
                 text, pid, candidate, score = None, None, None, 0.0
 
@@ -467,6 +469,7 @@ def run_cycle(db, settings, fs=None) -> dict:
                                       provider=str(pid or ""),
                                       candidate_title=getattr(candidate, "title", None),
                                       score=score, hi=hi, forced=forced)
+                _retire_ai(db, file_path, lang, pid, forced)
                 # Just evaluated: the fetch picked the best available candidate
                 # seconds ago, so an upgrade re-search right now is pure
                 # waste — start the upgrade re-check cooldown immediately.
@@ -485,6 +488,15 @@ def run_cycle(db, settings, fs=None) -> dict:
                                       candidate_title=getattr(candidate, "title", None),
                                       score=score)
                 stats["missed"] += 1
+                # nothing human turned up in time: whisper makes one, on its
+                # own queue (never inside this cycle)
+                try:
+                    from .ai.queue import queue_after_miss
+                    if queue_after_miss(db, settings, dict(row, video_kind=video_kind,
+                                                           video_id=video_id)):
+                        stats["ai_queued"] = stats.get("ai_queued", 0) + 1
+                except Exception:  # noqa: BLE001 - the ai queue is optional
+                    logger.debug("ai subtitle queueing failed", exc_info=True)
         # Phase 3 upgrade pass: same cycle, one settings load, one quota view,
         # one daemon thread, one stats report. The retry pass runs first
         # because a MISSING subtitle outranks a BETTER one.
@@ -523,6 +535,54 @@ def _default_fs():
                 f.write(content)
 
     return _RealFS()
+
+
+def _retire_ai(db, file_path, lang, provider_id, forced=False) -> int:
+    """a human subtitle for ``lang`` was just written: the ai one beside it
+    goes to the recycle bin. never raises."""
+    try:
+        from .ai.naming import default_discarder, is_ai_provider, retire_ai_sidecars
+        if forced or is_ai_provider(provider_id):
+            return 0
+        return retire_ai_sidecars(file_path, lang, default_discarder(db))
+    except Exception:  # noqa: BLE001 - tidying, never fatal
+        return 0
+
+
+def _upgrade_baseline(db, row, file_path, listing) -> float | None:
+    """the score a new candidate has to beat. an ai subtitle (history from
+    whisper, or only an ai sidecar on disk) counts as 0: any human subtitle
+    that clears the min-score gate replaces it. None = unknown, skip."""
+    from .ai.naming import ai_sidecars_for, is_ai_provider
+    kind, vid = row.get("video_kind"), row.get("video_id")
+    lang = str(row.get("language") or "en")
+    hi, forced = bool(row.get("hi")), bool(row.get("forced"))
+    latest = None
+    try:
+        latest = db.subtitle_latest_download(kind, vid, lang, hi=hi, forced=forced)
+    except Exception:  # noqa: BLE001
+        latest = None
+    if latest is None:
+        try:
+            score = db.subtitle_latest_download_score(kind, vid, lang, hi=hi, forced=forced)
+        except Exception:  # noqa: BLE001
+            score = None
+        latest = None if score is None else {"score": score, "provider": ""}
+    if latest is not None and is_ai_provider(latest.get("provider")):
+        return 0.0
+    if not forced and file_path:
+        try:
+            ai_files = ai_sidecars_for(file_path, lang, names=listing)
+        except Exception:  # noqa: BLE001
+            ai_files = []
+        if ai_files:
+            from . import existing as existing_subs
+            humans = [t for t in existing_subs.external_tracks(file_path, names=listing) if not t.ai]
+            if not existing_subs.covered(humans, lang, hi=hi):
+                return 0.0
+    if latest is None or latest.get("score") is None:
+        return None
+    return float(latest["score"])
 
 
 def _upgrade_min_delta(get_setting) -> float:
@@ -699,11 +759,7 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
                 continue
 
             # The baseline: the current subtitle's score from fetch history.
-            try:
-                current = db.subtitle_latest_download_score(
-                    video_kind, video_id, lang, hi=hi, forced=forced)
-            except Exception:  # noqa: BLE001
-                current = None
+            current = _upgrade_baseline(db, row, file_path, _listing)
             if current is None:
                 _stamp(row)
                 stats["skipped"] += 1
@@ -790,6 +846,7 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
                                       provider=str(pid or ""),
                                       candidate_title=getattr(candidate, "title", None),
                                       score=score, hi=hi, forced=forced)
+                _retire_ai(db, file_path, lang, pid, forced)
                 upgraded = True
                 break
             _stamp(row)

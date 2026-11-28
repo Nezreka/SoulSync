@@ -140,6 +140,11 @@ class ConfigManager:
         'security.oidc_client_secret',
         # the seerr in front of soulsync (#2324)
         'seerr_compat.seerr_api_key',
+        # give back (#2335): the person's musicbrainz tokens, the pkce
+        # verifier of a link in progress, a self-registered app's secret
+        'giveback.musicbrainz_auth',
+        'giveback.musicbrainz_pending',
+        'giveback.musicbrainz_client_secret',
     })
 
     def _get_fernet(self) -> Fernet:
@@ -914,6 +919,18 @@ class ConfigManager:
                 "user_key": "",
                 "enabled": False  # Disabled by default - requires API key and fpcalc
             },
+            # #2335: give back to acoustid and musicbrainz. every part is off
+            # until the person turns it on (Settings, Connections, Give back)
+            "giveback": {
+                "acoustid": False,
+                "isrc": False,
+                "releases": False,
+                "musicbrainz_client_id": "",
+                "musicbrainz_client_secret": "",
+                "musicbrainz_auth": {},
+                "musicbrainz_pending": {},
+                "musicbrainz_user": "",
+            },
             "lastfm": {
                 "api_key": "",
                 "api_secret": "",
@@ -1065,6 +1082,16 @@ class ConfigManager:
                 "enabled": True,
                 "poll_interval": 30
             },
+            # #2332 holiday music: when christmas songs may play in mixes,
+            # radio and generated playlists. mode is "season" (only between
+            # season_start and season_end, MM-DD), "always" or "never".
+            # write_tag adds a "Holiday" genre to the files (core/holiday_music.py)
+            "holiday_music": {
+                "mode": "season",
+                "season_start": "11-15",
+                "season_end": "01-06",
+                "write_tag": False,
+            },
             "library": {
                 "music_paths": [],
                 # live folder watching (core/library/folder_watch.py): a change
@@ -1079,6 +1106,17 @@ class ConfigManager:
                 "watch_root_modes": {},
                 "watch_max_live_folders": 100000,
                 "music_videos_path": "",
+                # #2332 secondary library (core/library_rules.py): albums a
+                # rule matches are filed in this folder instead of the main
+                # one, so a media server can show it as its own library.
+                # off by default. genres and album_titles are words split on
+                # | or commas; match_holiday uses core/holiday_music.py
+                "secondary_enabled": False,
+                "secondary_path": "",
+                "secondary_name": "Holiday",
+                "secondary_match_holiday": True,
+                "secondary_genres": "",
+                "secondary_album_titles": "",
                 "podcasts_path": default_podcast_path,
                 "audiobooks_path": default_audiobook_path,
                 # extra folders an existing audiobook collection lives in (a

@@ -131,11 +131,6 @@ def _artist_of(track: dict) -> str:
     return first.get("name", "") if isinstance(first, dict) else str(first or "")
 
 
-def _album_of(track: dict) -> str:
-    album = track.get("album")
-    return album.get("name", "") if isinstance(album, dict) else str(album or "")
-
-
 def is_filler(title: Any, duration_ms: Any) -> bool:
     """too short to be a song, or a short skit/intro"""
     try:
@@ -147,15 +142,11 @@ def is_filler(title: Any, duration_ms: Any) -> bool:
     return bool(_SKIT.search(str(title or ""))) and 0 < ms < 120_000
 
 
-_HOLIDAY = ("christmas", "xmas", "x-mas", "navidad", "noel", "jingle", "santa", "holiday")
-
-
 def in_season(track: dict, today: date) -> bool:
-    """a christmas song is for november and december"""
-    if today.month in (11, 12):
-        return True
-    text = f"{track.get('name', '')} {_album_of(track)}".lower()
-    return not any(word in text for word in _HOLIDAY)
+    """a holiday song plays only in its season (#2332, core/holiday_music.py:
+    the dates, always or never, and the hand flags are the user's)"""
+    from core.holiday_music import policy
+    return policy(today=today).keep(track)
 
 
 # ── seeds (pure) ──────────────────────────────────────────────────────────

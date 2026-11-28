@@ -39,6 +39,9 @@ export interface PlayItem {
   /** who/what it belongs to, saved with progress (a show, an album, a podcast) */
   parentId?: string;
   parentTitle?: string;
+  /** a song's place on its album, when the page knows (smart levelling checks album order) */
+  trackNumber?: number | null;
+  discNumber?: number | null;
 }
 
 export const MEDIA_KIND: Record<ItemType, MediaKind> = {
@@ -71,7 +74,11 @@ export interface Part {
 
 export interface Chapter {
   start: number;
+  /** where it ends (the next one's start); none for a book's or the last */
+  end?: number | null;
   title: string;
+  /** its picture (a video's, made in the background), once there is one */
+  thumb?: string | null;
 }
 
 export type RepeatMode = 'off' | 'all' | 'one';

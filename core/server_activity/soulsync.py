@@ -253,14 +253,29 @@ def _playback(kind: str, stream: Dict[str, Any], facts: Dict[str, Any]) -> Tuple
     return playback, reason, int(out_kbps or 0)
 
 
-def _transcoder(stream: Dict[str, Any], method: Optional[str]) -> Optional[Dict[str, Any]]:
+def _transcoder(stream: Dict[str, Any], method: Optional[str], owner: Optional[str] = None) -> Optional[Dict[str, Any]]:
     t = (stream or {}).get("transcode")
     if not t or method not in ("direct_stream", "transcode"):
         return None
     enc = t.get("encoder")
+    hw_decode = None
+    fell_back = None
+    # what the server really runs: the GPU can fail and the job go on on the CPU
+    live = None
+    if owner:
+        try:
+            from core.player import transcode
+            live = transcode.running(owner)
+        except Exception:  # noqa: BLE001 - the screen's own word stands
+            live = None
+    if live:
+        enc = live.get("encoder") or enc
+        hw_decode = enc if live.get("hw_decode") else None
+        fell_back = live.get("fell_back")
     hw = bool(enc and enc != "CPU")
     vd = "copy" if t["video"] == "copy" else "transcode"
-    return {"hw": hw, "hw_decode": None, "hw_encode": enc if hw else None, "hw_full_pipeline": False,
+    return {"hw": hw, "hw_decode": hw_decode if vd == "transcode" else None, "hw_encode": enc if hw else None,
+            "hw_full_pipeline": bool(hw and hw_decode), "fell_back": fell_back,
             "speed": None, "buffered_s": None, "throttled": None, "progress_pct": None,
             "video": vd, "audio": "copy" if t["audio"] == "copy" else "transcode"}
 
@@ -361,7 +376,7 @@ def normalize(p: Any, *, server_name: str = "SoulSync", profile: Optional[Dict[s
         "bandwidth_kbps": bw,
         "playback": playback,
         "reason": reason,
-        "transcoder": _transcoder(stream, playback["method"]),
+        "transcoder": _transcoder(stream, playback["method"], f"{pid}:{p.session}"),
         "controls": {"stop": True, "message": True, "stop_note": None},
         "keys": {"rating_key": rating_key, "parent_key": parent_key, "grandparent_key": grandparent_key},
         "link": _link(p.item_type, str(p.item_id), facts, meta),

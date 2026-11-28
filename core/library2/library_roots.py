@@ -107,14 +107,18 @@ def normalize_prefix(folder: Any) -> str:
 
 
 def desired_roots(shared_root: Optional[str],
-                  own_roots: Iterable[Tuple[int, Optional[str]]]) -> Dict[str, int]:
+                  own_roots: Iterable[Tuple[int, Optional[str]]],
+                  extra_shared: Iterable[Optional[str]] = ()) -> Dict[str, int]:
     """``{prefix: profile_id}`` for the shared folder and every own folder.
     An own folder that equals the shared one is refused at save time; should
-    one slip through, the own library wins it, as the longer claim would."""
+    one slip through, the own library wins it, as the longer claim would.
+    ``extra_shared`` are more shared folders: the secondary library (#2332)
+    is everyone's library, only in another folder."""
     roots: Dict[str, int] = {}
-    shared = normalize_prefix(shared_root)
-    if shared:
-        roots[shared] = SHARED
+    for folder in (shared_root, *extra_shared):
+        prefix = normalize_prefix(folder)
+        if prefix:
+            roots[prefix] = SHARED
     for profile_id, root in own_roots:
         prefix = normalize_prefix(root)
         if prefix and profile_id:
@@ -202,7 +206,13 @@ def configured_roots(database: Any = None) -> Dict[str, int]:
     except Exception as exc:  # noqa: BLE001
         logger.debug("shared transfer folder unavailable: %s", exc)
         shared = None
-    return desired_roots(shared, own)
+    extra: List[Optional[str]] = []
+    try:
+        from core.library_rules import secondary_root
+        extra.append(secondary_root())
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("secondary library folder unavailable: %s", exc)
+    return desired_roots(shared, own, extra)
 
 
 def sync_library_roots(database: Any = None) -> int:

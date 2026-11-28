@@ -5162,3 +5162,119 @@ def test_use_file_tags_answers_404_for_something_that_is_not_there(api):
     assert client.get("/api/library/v2/albums/999999/use-file-tags").status_code == 404
     assert client.post("/api/library/v2/artists/999999/use-file-tags").status_code == 404
     assert client.get("/api/library/v2/playlists/1/use-file-tags").status_code in (400, 404)
+
+
+# --- #2333: delete the files of several artists at once ----------------------
+
+def _second_artist_with_file(db, path):
+    with _conn(db) as conn:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO lib2_artists(name, sort_name, monitored) VALUES('Kendrick','Kendrick',0)")
+        artist = cur.lastrowid
+        cur.execute("INSERT INTO lib2_albums(primary_artist_id, title, album_type, monitored) "
+                    "VALUES(?, 'DAMN.', 'album', 0)", (artist,))
+        album = cur.lastrowid
+        cur.execute("INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)", (album, artist))
+        cur.execute("INSERT INTO lib2_tracks(album_id, title, track_number, monitored) "
+                    "VALUES(?, 'DNA.', 1, 0)", (album,))
+        track = cur.lastrowid
+        cur.execute("INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?,?)", (track, artist))
+        cur.execute("INSERT INTO lib2_track_files(track_id, path, format, bitrate, size) "
+                    "VALUES(?, ?, 'flac', 900, ?)", (track, str(path), path.stat().st_size))
+        conn.commit()
+    return artist
+
+
+def _bulk_setup(api, tmp_path, monkeypatch):
+    client, db, ids = api
+    root = tmp_path / "music"
+    root.mkdir()
+    drake_file = root / "one-dance.flac"
+    drake_file.write_bytes(b"a" * 100)
+    kendrick_file = root / "dna.flac"
+    kendrick_file.write_bytes(b"b" * 50)
+    with _conn(db) as conn:
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                     (str(drake_file), ids["album_track"]))
+        conn.commit()
+    kendrick = _second_artist_with_file(db, kendrick_file)
+    monkeypatch.setattr("core.library2.file_delete._library_roots", lambda _config=None: [str(root)])
+    return client, db, ids, kendrick, drake_file, kendrick_file
+
+
+def test_bulk_delete_files_is_admin_only(api, tmp_path, monkeypatch):
+    client, db, ids, kendrick, drake_file, kendrick_file = _bulk_setup(api, tmp_path, monkeypatch)
+    db.active_profile = 7
+    for url in ("/api/library/v2/artists/delete-files/preview",
+                "/api/library/v2/artists/delete-files"):
+        resp = client.post(url, json={"ids": [ids["artist"], kendrick]})
+        assert resp.status_code == 403, url
+    assert drake_file.exists() and kendrick_file.exists()
+    with _conn(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lib2_artists").fetchone()[0] == 2
+
+
+def test_bulk_delete_files_preview_counts(api, tmp_path, monkeypatch):
+    client, db, ids, kendrick, _, _ = _bulk_setup(api, tmp_path, monkeypatch)
+    db.config["library.deleted_keep_days"] = 30
+    body = client.post("/api/library/v2/artists/delete-files/preview",
+                       json={"ids": [ids["artist"], kendrick, 99999]}).get_json()
+    assert body["success"] is True
+    assert body["artists"] == 2 and body["not_found"] == 1
+    assert body["albums"] == 4
+    assert body["files"] == 2 and body["total_size"] == 150
+    assert body["mode"] == "quarantine" and body["keep_days"] == 30
+    assert body["blocked"] == []
+    # a preview deletes nothing
+    assert client.post("/api/library/v2/artists/delete-files/preview",
+                       json={"ids": []}).status_code == 400
+
+
+def test_bulk_delete_files_goes_through_the_single_delete(api, tmp_path, monkeypatch):
+    client, db, ids, kendrick, drake_file, kendrick_file = _bulk_setup(api, tmp_path, monkeypatch)
+    from core.library2 import file_delete
+    calls = []
+    real = file_delete.delete_entity_files
+
+    def spy(*args, **kwargs):
+        calls.append((kwargs["entity"], kwargs["entity_id"], kwargs["mode"]))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(file_delete, "delete_entity_files", spy)
+    body = client.post("/api/library/v2/artists/delete-files",
+                       json={"ids": [ids["artist"], kendrick]}).get_json()
+    assert body["success"] is True
+    assert body["deleted"] == 2 and body["failed"] == 0 and body["files_deleted"] == 2
+    assert calls == [("artists", ids["artist"], "quarantine"), ("artists", kendrick, "quarantine")]
+    # into the deleted-files folder, not gone for good
+    assert not drake_file.exists() and not kendrick_file.exists()
+    kept = [p.name for p in (tmp_path / "Transfer").rglob("*.flac")]
+    assert sorted(kept) == ["dna.flac", "one-dance.flac"]
+    with _conn(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lib2_artists").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM lib2_albums").fetchone()[0] == 0
+
+
+def test_bulk_delete_files_reports_a_partial_failure(api, tmp_path, monkeypatch):
+    client, db, ids, kendrick, drake_file, kendrick_file = _bulk_setup(api, tmp_path, monkeypatch)
+    # kendrick's file sits outside the library folders: the single delete
+    # refuses it, so the bulk one does too, and carries on with drake
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    moved = outside / "dna.flac"
+    kendrick_file.rename(moved)
+    with _conn(db) as conn:
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE path=?", (str(moved), str(kendrick_file)))
+        conn.commit()
+    preview = client.post("/api/library/v2/artists/delete-files/preview",
+                          json={"ids": [ids["artist"], kendrick]}).get_json()
+    assert [b["id"] for b in preview["blocked"]] == [kendrick]
+    body = client.post("/api/library/v2/artists/delete-files",
+                       json={"ids": [kendrick, ids["artist"]]}).get_json()
+    assert body["deleted"] == 1 and body["failed"] == 1
+    failed = next(r for r in body["results"] if not r["ok"])
+    assert failed["id"] == kendrick and "outside your library" in failed["error"]
+    assert moved.exists() and not drake_file.exists()
+    with _conn(db) as conn:
+        left = [r[0] for r in conn.execute("SELECT id FROM lib2_artists")]
+    assert left == [kendrick]
