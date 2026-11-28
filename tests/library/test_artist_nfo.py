@@ -24,6 +24,7 @@ class Config:
 
 
 MBID = "b9ca7096-68de-455f-8a36-1f1ebb2abf2a"
+FILE_MBID = "0383dadf-2a4e-4d10-a46a-e9e041da8eb3"
 
 
 @pytest.fixture(autouse=True)
@@ -287,14 +288,14 @@ class TestEnsureArtistNfoForTrack:
 
     def test_file_tag_mbid_beats_fallback(self, tmp_path, monkeypatch):
         from core.library.artist_nfo import ensure_artist_nfo_for_track
-        track, artist, tags = self._track(tmp_path, mbid="file-mbid-wins")
+        track, artist, tags = self._track(tmp_path, mbid=FILE_MBID)
         self._stub_tags(monkeypatch, tags)
         ok, detail = ensure_artist_nfo_for_track(
             track, Config(**{"library.write_artist_nfo": True}),
             fallback_mbid=MBID, fallback_name="Mammoth")
         assert ok, detail
         root = ET.parse(os.path.join(artist, "artist.nfo")).getroot()
-        assert root.findtext("musicbrainzartistid") == "file-mbid-wins"
+        assert root.findtext("musicbrainzartistid") == FILE_MBID
 
     def test_mp4_mbid_key_shape(self, tmp_path, monkeypatch):
         """MP4 freeform atoms surface as musicbrainz_album_artist_id."""
@@ -308,6 +309,45 @@ class TestEnsureArtistNfoForTrack:
         assert ok, detail
         root = ET.parse(os.path.join(artist, "artist.nfo")).getroot()
         assert root.findtext("musicbrainzartistid") == MBID
+
+    def test_vorbis_albumartist_key_writes_nfo(self, tmp_path, monkeypatch):
+        """FLAC/OGG/Opus surface the album artist as ``albumartist`` (Vorbis
+        ALBUMARTIST), not ``album_artist`` (ID3 TPE2 / MP4 aART) — #2343."""
+        from core.library.artist_nfo import ensure_artist_nfo_for_track
+        track, artist, tags = self._track(tmp_path, name=None)
+        tags["tags"]["albumartist"] = "Mammoth"
+        self._stub_tags(monkeypatch, tags)
+        ok, detail = ensure_artist_nfo_for_track(
+            track, Config(**{"library.write_artist_nfo": True}))
+        assert ok, detail
+        root = ET.parse(os.path.join(artist, "artist.nfo")).getroot()
+        assert root.findtext("name") == "Mammoth"
+        assert root.findtext("musicbrainzartistid") == MBID
+
+    def test_multi_value_mbid_uses_first_id(self, tmp_path, monkeypatch):
+        """A multi-artist release joins its album-artist IDs with ", "; only
+        the first valid UUID may reach artist.nfo and the artwork callback."""
+        from core.library.artist_nfo import ensure_artist_nfo_for_track
+        other = "6210813c-0000-4000-8000-000000000000"
+        track, artist, tags = self._track(tmp_path, mbid=f"{MBID}, {other}")
+        self._stub_tags(monkeypatch, tags)
+        seen = []
+        ok, detail = ensure_artist_nfo_for_track(
+            track, Config(**{"library.write_artist_nfo": True}),
+            artwork=lambda folder, name, mbid: seen.append(mbid))
+        assert ok, detail
+        root = ET.parse(os.path.join(artist, "artist.nfo")).getroot()
+        assert root.findtext("musicbrainzartistid") == MBID
+        assert seen == [MBID]
+
+    def test_non_uuid_mbid_is_ignored(self, tmp_path, monkeypatch):
+        from core.library.artist_nfo import ensure_artist_nfo_for_track
+        track, artist, tags = self._track(tmp_path, mbid="not-a-uuid")
+        self._stub_tags(monkeypatch, tags)
+        ok, _ = ensure_artist_nfo_for_track(
+            track, Config(**{"library.write_artist_nfo": True}))
+        assert not ok
+        assert not os.path.exists(os.path.join(artist, "artist.nfo"))
 
     @pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="needs ffmpeg")
     def test_real_mp3_tags_end_to_end(self, tmp_path):
