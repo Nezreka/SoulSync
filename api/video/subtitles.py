@@ -15,6 +15,20 @@ Endpoints (exact contract — the webui builder depends on it):
          {"kind", "item_id", "lang", "candidate_id"}
          → {"ok": true, "path": "..."}  (404 unknown/expired candidate, 400 bad input)
 
+AI subtitles (whisper on this server, its own queue):
+
+- GET    /api/video/subtitles/ai/jobs?kind=&item_id=&active=1
+         → {"jobs": [{id, video_kind, video_id, language, state, progress,
+                      eta_seconds, position, confidence, verdict, ...}],
+            "available": bool, "why": str|null, "watching": bool}
+- POST   /api/video/subtitles/ai/jobs {"kind", "item_id", "lang", "origin": player|detail|library}
+         → 202 {"job": {...}}  (503 + plain-words "message" when ai can't run here)
+- POST   /api/video/subtitles/ai/jobs/<id>/cancel → {"ok": true}
+- GET    /api/video/subtitles/ai/hardware?refresh=1 → {summary, cuda, gpu, cores, ..., recommended}
+- POST   /api/video/subtitles/ai/bench {"model"} → 202 (admin; the quick test, result in whisper/status)
+- POST   /api/video/subtitles/whisper/download/cancel → {"ok": true} (admin)
+- DELETE /api/video/subtitles/whisper/models/<name> → {"ok": true} (admin)
+
 The search endpoint caches its candidate list server-side (10-minute TTL,
 keyed by a uuid candidate_id per candidate) so the download endpoint resolves
 the user's pick WITHOUT re-searching.
@@ -141,6 +155,20 @@ def _settings_for(db):
         return {}
 
 
+def _sync_in_background(path, video_path, text, provider_id, get_setting) -> None:
+    from core.video.subtitles.worker import _maybe_autosync
+    try:
+        synced = _maybe_autosync(text, video_path, provider_id, get_setting)
+        if synced and synced != text and os.path.exists(path):
+            tmp = path + ".part"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(synced)
+            os.replace(tmp, path)
+            logger.info("auto-sync fixed the timing of %s", os.path.basename(path))
+    except Exception:  # noqa: BLE001 - sync is a bonus
+        logger.debug("background auto-sync failed for %s", path, exc_info=True)
+
+
 def tracks_in_file(file_path, lang, forced, get_setting) -> list:
     """The subtitle tracks this video already has in ``lang``: sidecars beside
     it and tracks inside it. manual search shows them, so a title whose french
@@ -161,6 +189,54 @@ def tracks_in_file(file_path, lang, forced, get_setting) -> list:
              "hi": bool(t.hi), "codec": t.codec, "bitmap": t.codec in bitmap}
             for t in tracks
             if satisfies_language(t.language, lang) and bool(t.forced) == bool(forced)]
+
+
+_bench_lock = threading.Lock()
+_bench_state: dict = {"running": None, "error": None}
+
+
+def _bench_results() -> dict:
+    """{model: {speed, seconds, device, at}} from the top-level setting."""
+    import json
+    try:
+        from . import get_video_db
+        raw = get_video_db().get_setting("whisper_bench")
+        data = json.loads(raw) if isinstance(raw, str) and raw else (raw or {})
+        return data if isinstance(data, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _bench_public() -> dict:
+    with _bench_lock:
+        return {"running": _bench_state.get("running"),
+                "error": "the quick test failed, see the server log" if _bench_state.get("error") else None}
+
+
+def _run_bench(db, name, settings) -> None:
+    """the quick test on its own thread; the result goes to the
+    ``whisper_bench`` setting (outside the settings page's form, so a save
+    there never wipes it)."""
+    import json
+    from core.video.subtitles.ai import hardware
+    from core.video.subtitles.providers import whisper as whisper_mod
+    try:
+        info = hardware.detect()
+        pref = str(settings.get("whisper_device") or "auto")
+        device = "cuda" if pref in ("auto", "cuda") and info.get("cuda") else "cpu"
+        threads = int(settings.get("ai_subs_threads") or 0) or max(1, (os.cpu_count() or 2) - 1)
+        res = hardware.run_bench(str(whisper_mod.model_dir(name)), device=device,
+                                 compute_type="int8_float16" if device == "cuda" else "int8",
+                                 threads=0 if device == "cuda" else threads)
+        data = _bench_results()
+        data[name] = res
+        db.set_setting("whisper_bench", json.dumps(data))
+        with _bench_lock:
+            _bench_state.update(running=None, error=None)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("whisper quick test failed for %s", name)
+        with _bench_lock:
+            _bench_state.update(running=None, error=str(e))
 
 
 def register_routes(bp):
@@ -202,6 +278,117 @@ def register_routes(bp):
             return jsonify({"error": reason}), code
         return jsonify({"ok": True,
                         "model": whisper_mod.valid_model_name(model)}), 202
+
+    @bp.route("/subtitles/whisper/download/cancel", methods=["POST"])
+    def subtitles_whisper_download_cancel():
+        from core.video.subtitles.providers import whisper as whisper_mod
+        return jsonify({"ok": True, "cancelled": whisper_mod.cancel_download()})
+
+    @bp.route("/subtitles/whisper/models/<name>", methods=["DELETE"])
+    def subtitles_whisper_delete_model(name):
+        from core.video.subtitles.providers import whisper as whisper_mod
+        if whisper_mod.valid_model_name(name) is None:
+            return jsonify({"error": "unknown model"}), 400
+        try:
+            removed = whisper_mod.delete_model(name)
+        except RuntimeError as e:
+            return jsonify({"error": str(e)}), 409
+        except OSError:
+            logger.exception("whisper: delete failed for %s", name)
+            return jsonify({"error": "couldn't remove the model files"}), 500
+        return jsonify({"ok": True, "removed": removed})
+
+    @bp.route("/subtitles/ai/hardware", methods=["GET"])
+    def subtitles_ai_hardware():
+        from core.video.subtitles.ai import hardware
+        info = hardware.detect(refresh=str(request.args.get("refresh") or "") in ("1", "true"))
+        return jsonify(dict(info, summary=hardware.summary(info),
+                            recommended=hardware.recommend(info, _bench_results())))
+
+    @bp.route("/subtitles/ai/bench", methods=["POST"])
+    def subtitles_ai_bench():
+        from . import get_video_db
+        from core.video.subtitles.providers import whisper as whisper_mod
+        body = request.get_json(silent=True) or {}
+        name = whisper_mod.valid_model_name(body.get("model"))
+        if name is None or not whisper_mod.model_file_exists(name):
+            return jsonify({"error": "install that model first"}), 400
+        if whisper_mod.transcription_engine() is None:
+            return jsonify({"error": "the faster-whisper package is missing on the server"}), 503
+        with _bench_lock:
+            if _bench_state.get("running"):
+                return jsonify({"error": "a quick test is already running"}), 409
+            _bench_state.update(running=name, error=None)
+        db = get_video_db()
+        settings = _settings_for(db)
+        threading.Thread(target=_run_bench, args=(db, name, settings), daemon=True,
+                         name="whisper-bench").start()
+        return jsonify({"ok": True, "model": name}), 202
+
+    @bp.route("/subtitles/ai/jobs", methods=["GET"])
+    @device_playback
+    def subtitles_ai_jobs():
+        from . import get_video_db
+        from core.video.subtitles.ai import queue as aiq
+        db = get_video_db()
+        kind = request.args.get("kind")
+        item_id = request.args.get("item_id", type=int)
+        active = str(request.args.get("active") or "") in ("1", "true")
+        rows = db.ai_job_list(active_only=active, limit=100,
+                              video_kind=kind if kind else None,
+                              video_id=item_id if kind and item_id is not None else None)
+        jobs = [aiq.public_job(r, db.ai_job_position(r["id"])
+                               if r["state"] in ("queued", "running", "paused") else None)
+                for r in rows]
+        settings = _settings_for(db)
+        return jsonify({"jobs": jobs, "available": aiq.availability(settings) is None,
+                        "why": aiq.availability(settings), "watching": aiq.someone_watching(),
+                        "auto": bool(settings.get("whisper_enabled")), "bench": _bench_public()})
+
+    @bp.route("/subtitles/ai/jobs", methods=["POST"])
+    @device_playback
+    def subtitles_ai_enqueue():
+        from . import get_video_db
+        from core.profile_context import get_current_profile_id
+        from core.video.subtitles.ai import queue as aiq
+        body = request.get_json(silent=True) or {}
+        kind, item_id = body.get("kind"), body.get("item_id")
+        if kind not in ("movie", "episode") or not isinstance(item_id, int):
+            return jsonify({"error": "kind must be movie|episode and item_id an int"}), 400
+        origin = str(body.get("origin") or "detail")
+        if origin not in ("player", "detail", "library"):
+            origin = "detail"
+        db = get_video_db()
+        if db.subtitle_source_exists(kind, item_id) is False:
+            return jsonify({"error": "not found"}), 404
+        try:
+            job = aiq.enqueue(db, kind, item_id, body.get("lang") or "en", origin=origin,
+                              profile_id=get_current_profile_id())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        except aiq.NotAvailable as e:
+            return jsonify({"error": "unavailable", "message": str(e)}), 503
+        return jsonify({"job": aiq.public_job(job, db.ai_job_position(job["id"]))}), 202
+
+    @bp.route("/subtitles/ai/jobs/<int:job_id>/cancel", methods=["POST"])
+    @device_playback
+    def subtitles_ai_cancel(job_id):
+        from . import get_video_db
+        from core.profile_context import get_current_profile_id, is_admin_request
+        from core.video.subtitles.ai import queue as aiq
+        db = get_video_db()
+        job = db.ai_job_get(job_id)
+        if not job:
+            return jsonify({"error": "not found"}), 404
+        try:
+            admin = bool(is_admin_request())
+        except Exception:  # noqa: BLE001
+            admin = False
+        if not admin and job.get("created_by") not in (None, get_current_profile_id()):
+            return jsonify({"error": "only the profile that asked (or an admin) can cancel this"}), 403
+        ok = db.ai_job_cancel(job_id)
+        aiq.wake()
+        return jsonify({"ok": ok})
 
     @bp.route("/subtitles/overrides/<kind>/<int:item_id>", methods=["GET"])
     def subtitles_get_override(kind, item_id):
@@ -425,4 +612,14 @@ def register_routes(bp):
                               provider=str(c["provider_id"]),
                               candidate_title=c["title"], score=c["score"],
                               hi=c["hi"], forced=c["forced"])
+        # a human pick replaces an ai subtitle for the same language
+        from core.video.subtitles.worker import _retire_ai
+        _retire_ai(db, file_path, lang, c["provider_id"], c["forced"])
+        # timing: a manual pick gets the same auto-sync as the worker's
+        # downloads, on a thread (ffsubsync takes 20 to 30 s). the player's
+        # cache is keyed by mtime, so the fixed file shows on its next load
+        if bool(get_setting("subtitle_autosync", False)):
+            threading.Thread(target=_sync_in_background,
+                             args=(path, file_path, text, c["provider_id"], get_setting),
+                             daemon=True, name="subtitle-autosync").start()
         return jsonify({"ok": True, "path": path})

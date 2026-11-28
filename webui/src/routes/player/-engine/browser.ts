@@ -142,6 +142,13 @@ async function subtitle(item: PlayItem, id: string): Promise<string> {
     .text();
 }
 
+async function saveSubtitleDelay(item: PlayItem, id: string, ms: number): Promise<void> {
+  await apiClient.put(`player/subtitle-delay/${item.type}/${encodeURIComponent(item.id)}`, {
+    searchParams: { sub: id, ...(item.part ? { part: item.part } : {}) },
+    json: { delay_ms: ms },
+  });
+}
+
 /** where a converted stream (copied video) really starts if asked for ``t`` */
 async function transcodeStart(url: string, t: number): Promise<{ start: number; seek: number }> {
   const [path, query] = url.split('?');
@@ -385,6 +392,7 @@ export function browserDeps(): EngineDeps {
     analyser,
     tracks,
     subtitle,
+    saveSubtitleDelay,
     save,
     watched,
     listened,

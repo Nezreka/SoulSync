@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { LibraryFile, ShowLibrary } from './types';
 
+import { AiSubtitlesDialog } from './ai-subtitles-dialog';
 import { pad2 } from './format';
 import { ReassignDialog } from './library-dialogs';
 import { invalidate, onInvalidate, seasonLibrary } from './library-store';
@@ -27,6 +28,7 @@ export function EpisodeFiles({
   const [show, setShow] = useState<ShowLibrary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState<LibraryFile | null>(null);
+  const [aiSubs, setAiSubs] = useState(false);
 
   const load = useCallback(() => {
     let live = true;
@@ -75,6 +77,7 @@ export function EpisodeFiles({
       ? () => b.manualSearch?.('episode', season, ep.episode_number)
       : undefined,
     onReassign: (f) => setMoving(f),
+    onAiSubtitles: () => setAiSubs(true),
   };
   return (
     <div className={s.epCards}>
@@ -92,6 +95,15 @@ export function EpisodeFiles({
             reload();
             refreshPage();
           }}
+        />
+      ) : null}
+      {aiSubs ? (
+        <AiSubtitlesDialog
+          kind="episode"
+          id={ep.id}
+          title={`${label}${ep.title ? ` · ${ep.title}` : ''}`}
+          onClose={() => setAiSubs(false)}
+          onReady={reload}
         />
       ) : null}
     </div>

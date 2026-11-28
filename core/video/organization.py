@@ -95,7 +95,14 @@ DEFAULTS = {
     # echoed back by the settings page (same echo pattern as
     # subtitle_provider_order) so a settings save never wipes them.
     "whisper_enabled": False,         # transcribe locally as a last resort
-    "whisper_model": "small",          # tiny | base | small (allowlisted)
+    "whisper_model": "small",          # tiny .. large-v3-turbo (allowlisted, see WHISPER_MODELS)
+    "whisper_device": "auto",          # auto (the gpu when ctranslate2 sees one) | cpu | cuda
+    # ai subtitles queue: hours a wanted language waits for a human subtitle
+    # before whisper makes one, whether background jobs wait while someone
+    # watches, and the cpu threads a job may use (0 = all cores but one)
+    "ai_subs_wait_hours": 24,
+    "ai_subs_pause_while_watching": True,
+    "ai_subs_threads": 0,
     "whisper_model_downloaded": False,
     "whisper_model_path": "",
     "whisper_model_size_bytes": 0,
@@ -228,6 +235,16 @@ def normalize(raw: Any) -> dict:
         _wm = valid_model_name(raw.get("whisper_model"))
         if _wm is not None:
             d["whisper_model"] = _wm
+    if str(raw.get("whisper_device") or "").strip().lower() in ("auto", "cpu", "cuda"):
+        d["whisper_device"] = str(raw.get("whisper_device")).strip().lower()
+    if "ai_subs_pause_while_watching" in raw:
+        d["ai_subs_pause_while_watching"] = bool(raw.get("ai_subs_pause_while_watching"))
+    for _key, _lo, _hi in (("ai_subs_wait_hours", 0, 720), ("ai_subs_threads", 0, 64)):
+        if _key in raw:
+            try:
+                d[_key] = max(_lo, min(_hi, int(raw.get(_key))))
+            except (TypeError, ValueError):
+                pass
     if "whisper_model_downloaded" in raw:
         d["whisper_model_downloaded"] = bool(raw.get("whisper_model_downloaded"))
     if "whisper_model_path" in raw:

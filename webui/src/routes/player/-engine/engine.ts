@@ -103,6 +103,8 @@ export interface EngineDeps {
   tracks: (item: PlayItem) => Promise<Tracks>;
   /** a text subtitle as WebVTT */
   subtitle: (item: PlayItem, id: string) => Promise<string>;
+  /** save this profile's delay for one subtitle file on the server (the app reads it too) */
+  saveSubtitleDelay?: (item: PlayItem, id: string, ms: number) => Promise<void>;
   progress: (item: PlayItem) => Promise<SavedPosition | null>;
   /**
    * where a converted stream with copied video really starts if asked for
@@ -619,6 +621,8 @@ export class PlayerEngine {
     const reload = burn !== this.pick.burn;
     this.pick = { ...this.pick, burn };
     this.set({ subtitle: pick?.id ?? null, cues: [] });
+    const saved = this.delayFor(pick?.id ?? null);
+    if (saved !== null) this.set({ subtitleDelay: saved });
     if (reload)
       void this.load({ startAt: this.state.position, live: this.state.live, keepTracks: true });
     if (pick?.kind === 'text') void this.loadCues(pick.id);
@@ -639,13 +643,37 @@ export class PlayerEngine {
     }
   }
 
-  /** subtitle sync: the player draws them, so it's only a shift of its own clock. kept for the title */
+  /**
+   * subtitle sync: the player draws them, so it's only a shift of its own
+   * clock. saved on the server per subtitle file and profile (the app and
+   * every browser get it), with the title's browser copy as a fallback
+   */
   setSubtitleDelay(ms: number) {
     const item = this.state.item;
     if (!item) return;
     const delay = Math.max(-30_000, Math.min(30_000, Math.round(ms)));
     this.deps.store.set(`subdelay:${item.type}:${item.id}`, String(delay));
     this.set({ subtitleDelay: delay });
+    const sub = this.state.subtitle;
+    const track = this.state.tracks?.subtitles.find((t) => t.id === sub);
+    if (track) track.delay_ms = delay;
+    if (sub && this.deps.saveSubtitleDelay) {
+      if (this.delaySave) clearTimeout(this.delaySave);
+      const save = this.deps.saveSubtitleDelay;
+      // a run of nudges is one save
+      this.delaySave = setTimeout(() => {
+        this.delaySave = null;
+        void save(item, sub, delay).catch(() => undefined);
+      }, 600);
+    }
+  }
+
+  private delaySave: ReturnType<typeof setTimeout> | null = null;
+
+  /** the delay saved for this subtitle file, when the server has one */
+  private delayFor(id: string | null): number | null {
+    const t = id ? this.state.tracks?.subtitles.find((x) => x.id === id) : null;
+    return t && typeof t.delay_ms === 'number' ? t.delay_ms : null;
   }
 
   /**
@@ -811,6 +839,8 @@ export class PlayerEngine {
           burn: sub?.kind === 'image' && !sub.external ? Number(sub.id.slice(1)) : null,
         };
         this.set({ tracks, audioTrack: audio, subtitle });
+        const saved = this.delayFor(subtitle);
+        if (saved !== null) this.set({ subtitleDelay: saved });
         if (sub?.kind === 'text') void this.loadCues(sub.id);
       }
     }

@@ -23,16 +23,36 @@ export type Org = Record<string, unknown>;
 export type Form = Record<string, string | boolean>;
 export type LoadState = 'idle' | 'loading' | 'loaded' | 'failed';
 
+export interface WhisperModel {
+  label: string;
+  blurb: string;
+  size_bytes?: number;
+  installed?: boolean;
+  disk_bytes?: number;
+  english_only?: boolean;
+  /** the quick test: how many times faster than real time */
+  bench?: { speed?: number; seconds?: number; device?: string; at?: string } | null;
+}
+
 export interface WhisperStatus {
   enabled?: boolean;
   downloaded?: boolean;
-  engine?: boolean;
-  engine_hint?: string;
+  engine?: boolean | string | null;
+  engine_hint?: string | null;
   model?: string;
-  disk_model?: string;
+  disk_model?: string | null;
+  installed?: string[];
   size_bytes?: number;
   downloaded_at?: string;
-  models?: Record<string, { label: string; blurb: string }>;
+  recommended?: string;
+  device?: string;
+  hardware?: {
+    summary?: string;
+    cuda?: boolean;
+    gpu?: string | null;
+    cuda_problem?: string | null;
+  };
+  models?: Record<string, WhisperModel>;
   download?: {
     state?: string;
     error?: string;
@@ -51,6 +71,48 @@ export interface Job {
   pending_findings_count?: number;
 }
 
+/** one ai subtitle job, as /api/video/subtitles/ai/jobs lists it */
+export interface AiJob {
+  id: number;
+  video_kind: string;
+  video_id: number;
+  language: string;
+  source: string;
+  state: string;
+  progress: number;
+  stage?: string | null;
+  eta_seconds?: number | null;
+  error?: string | null;
+  model?: string | null;
+  position?: number | null;
+  confidence?: number | null;
+}
+
+export interface AiQueue {
+  jobs: AiJob[];
+  watching?: boolean;
+  bench?: { running?: string | null; error?: string | null };
+}
+
+/** the order the model list shows, smallest first */
+export const WHISPER_ORDER = [
+  'tiny',
+  'base',
+  'small',
+  'medium',
+  'large-v3-turbo',
+  'distil-large-v3',
+];
+
+/** "about 7 min for a 45 minute episode" from a measured speed (x real time);
+ *  vad skips silence and music, so about 70% of it is listened to */
+export function episodeMinutes(speed: number | undefined, minutes = 45) {
+  const v = Number(speed) || 0;
+  if (v <= 0) return '';
+  const m = Math.max(1, Math.round((minutes * 0.7) / v));
+  return `about ${m} min for a ${minutes} minute episode`;
+}
+
 interface State {
   org: Org | null;
   form: Form;
@@ -64,6 +126,8 @@ interface State {
   langsError: string;
   /** null: no status yet (or none to show) */
   job: Job | null;
+  /** the ai subtitle queue (running and waiting jobs) */
+  ai: AiQueue | null;
 }
 
 // ── the template previews: mirrors of core/video/organization ──
@@ -256,6 +320,10 @@ export function fillForm(o: Org): Form {
     subtitle_autosync: !!o.subtitle_autosync,
     whisper_model: text(o.whisper_model, 'small'),
     whisper_enabled: !!o.whisper_enabled,
+    whisper_device: text(o.whisper_device, 'auto'),
+    ai_subs_wait_hours: or(o.ai_subs_wait_hours, 24),
+    ai_subs_pause_while_watching: o.ai_subs_pause_while_watching !== false,
+    ai_subs_threads: or(o.ai_subs_threads, 0),
     recycle_deletes: !!o.recycle_deletes,
     recycle_keep_days: text(o.recycle_keep_days || '', '7'),
     recycle_path: text(o.recycle_path),
@@ -294,6 +362,10 @@ const EMPTY_FORM: Form = {
   subtitle_autosync: false,
   whisper_model: 'tiny',
   whisper_enabled: false,
+  whisper_device: 'auto',
+  ai_subs_wait_hours: '',
+  ai_subs_pause_while_watching: false,
+  ai_subs_threads: '',
   recycle_deletes: false,
   recycle_keep_days: '',
   recycle_path: '',
@@ -356,6 +428,10 @@ export function orgBody(f: Form, order: string[], echo: Echo) {
     subtitle_autosync: b('subtitle_autosync'),
     whisper_enabled: b('whisper_enabled'),
     whisper_model: s('whisper_model'),
+    whisper_device: s('whisper_device') || 'auto',
+    ai_subs_wait_hours: clampInt(f.ai_subs_wait_hours, 0, 720, 24),
+    ai_subs_pause_while_watching: b('ai_subs_pause_while_watching'),
+    ai_subs_threads: clampInt(f.ai_subs_threads, 0, 64, 0),
     ...echo,
     recycle_deletes: b('recycle_deletes'),
     recycle_keep_days: s('recycle_keep_days'),
@@ -399,6 +475,13 @@ export function badLanguage(value: string) {
   return toks.find((t) => !/^[A-Za-z]{2,3}$/.test(t)) ?? null;
 }
 
+export function etaWords(seconds: number | null | undefined) {
+  const v = Number(seconds) || 0;
+  if (v <= 0) return '';
+  if (v < 90) return 'under 2 min left';
+  return `about ${Math.round(v / 60)} min left`;
+}
+
 export function whisperBytes(n: unknown) {
   const v = Number(n) || 0;
   if (v >= 1e9) return (v / 1e9).toFixed(1) + ' GB';
@@ -440,6 +523,7 @@ function createVideoOrganization() {
     whisperError: '',
     langsError: '',
     job: null,
+    ai: null,
   };
   let echo: Echo = {
     whisper_model_downloaded: false,
@@ -472,6 +556,7 @@ function createVideoOrganization() {
       loads: state.loads + 1,
     });
     void loadWhisper();
+    void loadAi();
   }
 
   async function load(): Promise<boolean> {
@@ -548,6 +633,45 @@ function createVideoOrganization() {
     }
   }
 
+  let aiPoll: ReturnType<typeof setInterval> | null = null;
+  function stopAiPoll() {
+    if (aiPoll) {
+      clearInterval(aiPoll);
+      aiPoll = null;
+    }
+  }
+
+  /** the queue: polled every 3 s while something runs, waits or is tested */
+  async function loadAi(): Promise<void> {
+    try {
+      const r = await fetch('/api/video/subtitles/ai/jobs?active=1', {
+        headers: { Accept: 'application/json' },
+      });
+      const d = r.ok ? ((await r.json()) as AiQueue | null) : null;
+      if (!d) return;
+      const wasTesting = !!state.ai?.bench?.running;
+      set({ ai: d });
+      const busy = (d.jobs || []).length > 0 || !!d.bench?.running;
+      if (busy && !aiPoll) aiPoll = setInterval(() => void loadAi(), 3000);
+      if (!busy) stopAiPoll();
+      // a quick test just finished: its speed is in the model list
+      if (wasTesting && !d.bench?.running) void loadWhisper();
+    } catch {
+      // best-effort
+    }
+  }
+
+  async function post(url: string, body?: unknown, method = 'POST') {
+    const init: RequestInit = {
+      method,
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    const r = await fetch(url, init);
+    const d = ((await r.json().catch(() => ({}))) || {}) as { error?: string; message?: string };
+    return { ok: r.ok, status: r.status, error: d.message || d.error || '' };
+  }
+
   return {
     subscribe: (listener: () => void) => {
       listeners.add(listener);
@@ -591,6 +715,40 @@ function createVideoOrganization() {
       set({ form: { ...state.form, whisper_enabled: on } });
       await save();
       await loadWhisper();
+    },
+    loadAi,
+    /** pick a model: an installed one is used from now on (saved), another
+     *  is only picked until it is installed */
+    pickModel: (model: string) => {
+      const installed = state.whisper?.installed || [];
+      set({ form: { ...state.form, whisper_model: model } });
+      if (installed.includes(model)) void save();
+    },
+    cancelDownload: async () => {
+      try {
+        await post(`${WHISPER_URL}/download/cancel`);
+      } finally {
+        void loadWhisper();
+      }
+    },
+    removeModel: async (model: string) => {
+      const r = await post(
+        `${WHISPER_URL}/models/${encodeURIComponent(model)}`,
+        undefined,
+        'DELETE',
+      );
+      if (!r.ok) set({ whisperError: `Could not remove ${model}: ${r.error || r.status}` });
+      await loadWhisper();
+    },
+    /** the 30 second quick test: how fast this server runs the model */
+    bench: async (model: string) => {
+      const r = await post('/api/video/subtitles/ai/bench', { model });
+      if (!r.ok) set({ whisperError: `Could not run the quick test: ${r.error || r.status}` });
+      void loadAi();
+    },
+    cancelAiJob: async (id: number) => {
+      await post(`/api/video/subtitles/ai/jobs/${id}/cancel`);
+      void loadAi();
     },
     /** the picked model saved first, so the download names it */
     download: async () => {
@@ -654,7 +812,9 @@ function createVideoOrganization() {
         whisperError: '',
         langsError: '',
         job: null,
+        ai: null,
       };
+      stopAiPoll();
       loading = null;
       langsGood = 'en';
     },

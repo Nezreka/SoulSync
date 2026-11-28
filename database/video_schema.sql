@@ -1172,6 +1172,55 @@ CREATE TABLE IF NOT EXISTS subtitle_overrides (
     PRIMARY KEY (kind, item_id)
 );
 
+-- ── ai subtitles (v81) ──
+-- whisper transcription jobs, off the subtitle worker's cycle: one row per
+-- video x language, highest priority first (someone waiting in the player
+-- beats a library backfill). a running row left by a restart goes back to
+-- queued and resumes from its checkpoint.
+CREATE TABLE IF NOT EXISTS subtitle_ai_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_kind TEXT NOT NULL,          -- 'movie' | 'episode'
+    video_id INTEGER NOT NULL,
+    language TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'auto',  -- auto | on_demand | library
+    priority INTEGER NOT NULL DEFAULT 20,
+    state TEXT NOT NULL DEFAULT 'queued', -- queued | running | paused | done | failed | cancelled | no_match | discarded
+    progress REAL NOT NULL DEFAULT 0,
+    stage TEXT,
+    eta_seconds INTEGER,
+    error TEXT,
+    model TEXT,
+    device TEXT,
+    spoken_language TEXT,
+    task TEXT,                         -- transcribe | translate
+    confidence REAL,
+    verdict TEXT,                      -- ok | low | discard
+    output_path TEXT,
+    duration_seconds REAL,
+    created_by INTEGER,                -- the profile that asked (NULL = the system)
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    finished_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_subtitle_ai_jobs_state ON subtitle_ai_jobs(state, priority, id);
+CREATE INDEX IF NOT EXISTS idx_subtitle_ai_jobs_video ON subtitle_ai_jobs(video_kind, video_id);
+CREATE INDEX IF NOT EXISTS idx_subtitle_ai_jobs_output ON subtitle_ai_jobs(output_path);
+
+-- the subtitle delay a profile set for one subtitle of one file (v81). the
+-- web player and the app both read and write it. sub_key is the sidecar's
+-- file name or "s<n>" for a track inside the file; sub_sig is its size and
+-- mtime when saved, so a replaced subtitle starts back at 0.
+CREATE TABLE IF NOT EXISTS subtitle_delays (
+    profile_id INTEGER NOT NULL,
+    video_path TEXT NOT NULL,
+    sub_key TEXT NOT NULL,
+    sub_sig TEXT NOT NULL DEFAULT '',
+    delay_ms INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (profile_id, video_path, sub_key)
+);
+
 -- ── scene numbering (TMDB vs TVDB) ──
 -- the wishlist numbers episodes the TMDB way, the scene names releases the
 -- TVDB way, and for ~40% of wanted episodes they disagree (60 Minutes S59E25

@@ -29,6 +29,12 @@ export interface SubtitleTrack {
   sdh?: boolean;
   default: boolean;
   external: boolean;
+  /** made by whisper on the server (Movie.ai.en.srt) */
+  ai?: boolean;
+  /** whisper wasn't sure of it */
+  low_confidence?: boolean;
+  /** this profile's saved delay for this subtitle file, ms (later is positive) */
+  delay_ms?: number;
 }
 
 export interface Tracks {
@@ -110,9 +116,13 @@ export function pickSubtitle(
   const usable = subs.filter((s) => s.kind !== 'unknown');
   if (prefs.subtitle && prefs.subtitle !== 'off') {
     const mine = usable.filter((s) => sameLanguage(s.language, prefs.subtitle));
-    // a full track over a forced-only one, text over pictures
+    // a full track over a forced-only one, text over pictures, a real one
+    // over one ai made
     const best =
-      mine.find((s) => !s.forced && s.kind === 'text') ?? mine.find((s) => !s.forced) ?? mine[0];
+      mine.find((s) => !s.forced && s.kind === 'text' && !s.ai) ??
+      mine.find((s) => !s.forced && s.kind === 'text') ??
+      mine.find((s) => !s.forced) ??
+      mine[0];
     if (best) return best.id;
   }
   if (prefs.subtitle === 'off') return null;
@@ -153,13 +163,15 @@ export function audioLabel(t: AudioTrack): { label: string; detail: string } {
 
 export function subtitleLabel(t: SubtitleTrack): { label: string; detail: string } {
   const bits = [
+    t.ai ? (t.low_confidence ? 'Made by AI, low confidence' : 'Made by AI') : '',
     t.forced ? 'Forced' : '',
     t.sdh ? 'SDH' : '',
     t.kind === 'image' ? 'Drawn in' : '',
-    t.external ? 'File' : '',
+    t.external && !t.ai ? 'File' : '',
   ].filter(Boolean);
+  const lang = languageLabel(t.language) + (t.ai ? ' (AI)' : '');
   return {
-    label: t.title ? `${languageLabel(t.language)} · ${t.title}` : languageLabel(t.language),
+    label: t.title ? `${lang} · ${t.title}` : lang,
     detail: bits.join(' · ') || t.codec.toUpperCase(),
   };
 }

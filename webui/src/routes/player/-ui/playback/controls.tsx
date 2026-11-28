@@ -5,11 +5,15 @@
 
 import { useEffect, useState } from 'react';
 
+import { jobWords, useAiSubtitles } from '@/features/video-library/ai-subtitles';
+
 import type { PlayerState, Quality } from '../../-engine/engine';
 
 import { MAX_VOLUME } from '../../-engine/engine';
 import { chapterAt, clock } from '../../-engine/timeline';
 import { audioLabel, subtitleLabel } from '../../-engine/tracks';
+import { languageName } from '../video-facts';
+import { startLang } from './find-subtitles';
 import {
   AudioIcon,
   BrightnessIcon,
@@ -289,8 +293,54 @@ export function SubtitleMenu({ state, onFind }: { state: PlayerState; onFind?: (
   const style = useSubtitleStyle();
   const current = subs.find((t) => t.id === state.subtitle);
   const delay = state.subtitleDelay;
-  if (!subs.length && !onFind) return null;
+  const item = state.item;
+  const kind = item?.type === 'movie' || item?.type === 'episode' ? item.type : null;
+  // the language ai makes: the one picked before, else the browser's
+  const lang = current?.language?.slice(0, 2) || startLang();
+  const ai = useAiSubtitles(
+    kind,
+    kind ? item?.id : null,
+    lang,
+    'player',
+    (l) => void getEngine().refreshTracks(l),
+  );
+  if (!subs.length && !onFind && !kind) return null;
   const step = (ms: number) => getEngine().setSubtitleDelay(delay + ms);
+  const aiWords = ai.job ? jobWords(ai.job, ai.watching) : null;
+  const aiOptions = !kind
+    ? []
+    : ai.active && aiWords
+      ? [
+          {
+            key: 'ai-status',
+            group: 'AI subtitles',
+            label: aiWords.label,
+            detail: aiWords.detail,
+            keepOpen: true,
+            onSelect: () => undefined,
+          },
+          {
+            key: 'ai-stop',
+            group: 'AI subtitles',
+            label: 'Stop making them',
+            keepOpen: true,
+            onSelect: () => void ai.cancel(),
+          },
+        ]
+      : [
+          {
+            key: 'ai-make',
+            group: 'AI subtitles',
+            label: ai.asking ? 'Asking…' : `Generate ${languageName(lang)} subtitles`,
+            detail:
+              ai.error ||
+              (!ai.available && ai.why) ||
+              (aiWords && ai.job?.state !== 'done' ? `${aiWords.label}: ${aiWords.detail}` : '') ||
+              'Made on your server from the audio. Real ones replace them',
+            keepOpen: true,
+            onSelect: () => void ai.generate(),
+          },
+        ];
   return (
     <PopMenu
       label="Subtitles"
@@ -329,6 +379,7 @@ export function SubtitleMenu({ state, onFind }: { state: PlayerState; onFind?: (
               },
             ]
           : []),
+        ...aiOptions,
         // the player draws text subtitles itself, so their timing can move freely
         ...(current?.kind === 'text'
           ? [
@@ -347,6 +398,21 @@ export function SubtitleMenu({ state, onFind }: { state: PlayerState; onFind?: (
                 detail: 'If lines come before they are spoken',
                 keepOpen: true,
                 onSelect: () => step(100),
+              },
+              {
+                key: 'earlier-1s',
+                group: 'Sync',
+                label: 'A second earlier',
+                detail: 'Saved for this subtitle file, on every screen',
+                keepOpen: true,
+                onSelect: () => step(-1000),
+              },
+              {
+                key: 'later-1s',
+                group: 'Sync',
+                label: 'A second later',
+                keepOpen: true,
+                onSelect: () => step(1000),
               },
               ...(delay
                 ? [

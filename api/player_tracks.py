@@ -7,6 +7,12 @@
     GET /api/player/chapters/<item_type>/<item_id>?part=   {chapters}
     GET /api/player/chapter-thumb/<item_type>/<item_id>/<n>?part=&v=
                                                            a chapter's picture
+    PUT /api/player/subtitle-delay/<item_type>/<item_id>?part=&sub=x0
+        {"delay_ms": -1200}                                {delay_ms}
+
+each subtitle in the tracks answer carries this profile's saved ``delay_ms``
+for that subtitle file (the web player and the app both use it), ``ai`` for
+one whisper made, and ``low_confidence`` when whisper wasn't sure.
 
 the same play check as the bytes (core/player/playable.resolve). audio
 tracks are numbered among the file's audio, subtitles ``s<n>`` (in the
@@ -65,6 +71,59 @@ def _resolve(item_type, item_id):
     return resolve(item_type, item_id, request.args.get("part"))
 
 
+def _video_key(source) -> str:
+    """what a saved delay is filed under: the file on this box, or the
+    media server's file id for a relayed stream"""
+    if source.mode == "file" and source.path:
+        return str(source.path)
+    return "media-file:%s" % (source.extra.get("file_id") or source.url or "")
+
+
+def _sub_key(sub) -> tuple:
+    """(key, signature) of one subtitle: a sidecar by its name (and size +
+    mtime, so a replaced file starts at 0), a track in the file by its id"""
+    import os
+    from core.player import tracks as K
+    if sub.get("external") and sub.get("path"):
+        return os.path.basename(sub["path"]), K.sidecar_sig(sub["path"])
+    return str(sub.get("id")), ""
+
+
+def _profile():
+    from core.profile_context import get_current_profile_id
+    try:
+        return int(get_current_profile_id() or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def _decorate(source, subs) -> None:
+    """this profile's delay per subtitle, and the ai confidence flag"""
+    pid = _profile()
+    try:
+        from core.video.subtitles.ai import guards
+        from api.video import get_video_db
+        db = get_video_db()
+    except Exception:  # noqa: BLE001 - extras, never a failed tracks answer
+        return
+    try:
+        saved = db.subtitle_delays_for(pid, _video_key(source)) if pid else {}
+    except Exception:  # noqa: BLE001
+        saved = {}
+    for sub in subs:
+        key, sig = _sub_key(sub)
+        d, at_sig = saved.get(key, (0, ""))
+        sub["delay_ms"] = 0 if (sig and at_sig and sig != at_sig) else d
+        sub.setdefault("ai", False)
+        if sub.get("ai") and sub.get("path"):
+            try:
+                job = db.ai_job_for_output(sub["path"])
+            except Exception:  # noqa: BLE001
+                job = None
+            conf = (job or {}).get("confidence")
+            sub["low_confidence"] = conf is not None and float(conf) < guards.LOW_CONFIDENCE
+
+
 @bp.route("/api/player/tracks/<item_type>/<path:item_id>", methods=["GET"])
 @requires_any(*SECTIONS)
 @device_playback
@@ -79,11 +138,44 @@ def tracks(item_type, item_id):
     if found is None:
         return jsonify({"success": True, "audio": [], "subtitles": [], "unavailable": "no ffmpeg",
                         "markers": _markers(item_type, source, [])})
-    out = K.public(found[0])
+    subs = [dict(x) for x in found[0]["subtitles"]]
+    _decorate(source, subs)
+    out = K.public(dict(found[0], subtitles=subs))
     found_markers = _markers(item_type, source, out.get("chapters") or [])
     if out.get("chapters"):
         out["chapters"] = _with_thumbs(item_type, item_id, source, out["chapters"])
     return jsonify({"success": True, **out, "markers": found_markers})
+
+
+@bp.route("/api/player/subtitle-delay/<item_type>/<path:item_id>", methods=["PUT"])
+@requires_any(*SECTIONS)
+@device_playback
+def subtitle_delay(item_type, item_id):
+    """save this profile's delay for one subtitle of one file (0 clears)"""
+    from core.player.playable import Refused
+    try:
+        source = _resolve(item_type, item_id)
+    except Refused as e:
+        return _refused(e)
+    pid = _profile()
+    if not pid:
+        return jsonify({"success": False, "error": "no_profile", "message": "Pick a profile first."}), 400
+    body = request.get_json(silent=True) or {}
+    try:
+        delay = int(round(float(body.get("delay_ms"))))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "bad_delay", "message": "delay_ms must be a number."}), 400
+    found = source_tracks(source)
+    if found is None:
+        return jsonify({"success": False, "error": "no_ffmpeg", "message": "SoulSync can't find ffmpeg."}), 503
+    want = request.args.get("sub") or ""
+    pick = next((x for x in found[0]["subtitles"] if x["id"] == want), None)
+    if pick is None:
+        return jsonify({"success": False, "error": "not_found", "message": "There's no such subtitle."}), 404
+    key, sig = _sub_key(pick)
+    from api.video import get_video_db
+    stored = get_video_db().subtitle_delay_set(pid, _video_key(source), key, delay, sig)
+    return jsonify({"success": True, "delay_ms": stored})
 
 
 def _thumb_key(item_type, source):
@@ -217,14 +309,23 @@ def subtitle(item_type, item_id):
         return jsonify({"success": False, "error": "image",
                         "message": "This subtitle is pictures; the player draws it in instead."}), 400
     try:
+        # a sidecar is kept by path + size + mtime: a resync, an upgrade or
+        # a manual replace shows at once instead of the old cached WebVTT
+        cache_key = K.sidecar_key(pick["path"]) if pick["external"] else key
         if pick["external"]:
-            text = K.to_vtt(ffmpeg, pick["path"], None, ("sidecar", pick["path"]))
+            text = K.to_vtt(ffmpeg, pick["path"], None, cache_key)
         else:
             text = K.to_vtt(ffmpeg, origin, int(pick["id"][1:]), key)
     except Exception:  # noqa: BLE001
         logger.exception("subtitle %s of %s %s failed", want, item_type, item_id)
         return jsonify({"success": False, "error": "failed", "message": "Couldn't read that subtitle."}), 500
-    return Response(text, mimetype="text/vtt", headers={"Cache-Control": "private, max-age=3600"})
+    import hashlib
+    etag = hashlib.sha1(repr((cache_key, want)).encode()).hexdigest()[:20]
+    if request.if_none_match and etag in request.if_none_match:
+        return Response(status=304, headers={"ETag": f'"{etag}"', "Cache-Control": "private, no-cache"})
+    # no-cache: the browser asks again each time (a 304 while the file is the
+    # same), so a rewritten subtitle is never served stale from its cache
+    return Response(text, mimetype="text/vtt", headers={"Cache-Control": "private, no-cache", "ETag": f'"{etag}"'})
 
 
 @bp.route("/api/player/lyrics/track/<int:track_id>", methods=["GET"])

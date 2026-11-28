@@ -724,6 +724,9 @@ try:
     _get_marker_job().start()
 except Exception:   # noqa: BLE001 - no markers is still a working server
     logger.exception("the skip marker job didn't start")
+# ai subtitles: live 'video:subtitles:ai' job progress (player, title page, settings)
+from core.video.subtitles.ai.queue import set_emitter as _set_ai_subs_emit
+_set_ai_subs_emit(socketio.emit)
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}
