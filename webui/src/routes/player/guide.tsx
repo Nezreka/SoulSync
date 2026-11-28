@@ -62,6 +62,8 @@ import {
 import { ChannelForm } from './-ui/guide-form';
 import { GuideDetail, GuideGrid, OnNow, type Picked } from './-ui/guide-grid';
 import { GuidePop, GuideStrip } from './-ui/guide-pop';
+import { LivePlayerModal } from './-ui/live-player';
+import { fetchLiveChannels, fetchLivePrograms, type LiveChannel } from './-lib/live';
 import { SearchIcon } from './-ui/icons';
 import { Empty, PageTitle, Tabs, styles as s } from './-ui/kit';
 import { LineupEditor } from './-ui/lineup-editor';
@@ -259,6 +261,28 @@ function GuidePage() {
   // added-in-the-last-n-days moves once a day, not every tick
   const today = Math.floor(now / 86_400_000) * 86_400_000;
   const [picked, setPickedOnly] = useState<Picked | null>(null);
+  const [watchingLive, setWatchingLive] = useState<{
+    channel: LiveChannel;
+    title?: string;
+    startTs?: number;
+    endTs?: number;
+  } | null>(null);
+  const liveChannelsQuery = useQuery({
+    queryKey: ['player', 'live-channels'],
+    queryFn: () => fetchLiveChannels(false),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const liveProgramsQuery = useQuery({
+    queryKey: ['player', 'live-programs', Math.floor(now / 300_000)],
+    queryFn: () => {
+      const startS = Math.floor(now / 1000) - 1800;
+      return fetchLivePrograms(startS, startS + GUIDE_WINDOW_HOURS * 3600);
+    },
+    enabled: (liveChannelsQuery.data?.length ?? 0) > 0,
+    staleTime: 60_000,
+    retry: false,
+  });
   // the program it was picked from: the card pops in beside it
   const [pickedAt, setPickedAt] = useState<HTMLElement | null>(null);
   const setPicked = (next: Picked | null, at?: HTMLElement) => {
@@ -692,6 +716,110 @@ function GuidePage() {
                 ? 'Star a channel and it lands here, and at the top of the guide, on every screen you use.'
                 : 'Channels are made from what is in your library: a genre, a network, a decade, a mood. Once a few things with known runtimes are on disk, they appear here.'}
           </Empty>
+        ) : null}
+
+        {liveChannelsQuery.data?.length ? (
+          <section
+            aria-label="Live TV channels"
+            style={{
+              marginBottom: 18,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  background: '#dc2626',
+                  color: '#fff',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.06em',
+                  padding: '2px 7px',
+                  borderRadius: 999,
+                }}
+              >
+                LIVE TV
+              </span>
+              <span style={{ fontSize: 13, opacity: 0.78 }}>
+                {liveChannelsQuery.data.length}{' '}
+                {liveChannelsQuery.data.length === 1 ? 'channel' : 'channels'}
+              </span>
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                gap: 10,
+              }}
+            >
+              {liveChannelsQuery.data.map((ch) => {
+                const progs = liveProgramsQuery.data?.[ch.effective_epg_id] ?? [];
+                const nowS = now / 1000;
+                const airing =
+                  progs.find((p) => p.start_ts <= nowS && p.end_ts > nowS) ?? progs[0];
+                return (
+                  <button
+                    key={ch.id}
+                    type="button"
+                    onClick={() =>
+                      setWatchingLive({
+                        channel: ch,
+                        title: airing?.title,
+                        startTs: airing?.start_ts,
+                        endTs: airing?.end_ts,
+                      })
+                    }
+                    style={{
+                      textAlign: 'left',
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      background: 'rgba(255,255,255,0.04)',
+                      color: 'inherit',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                      {ch.guide_number ? (
+                        <span style={{ opacity: 0.65, fontVariantNumeric: 'tabular-nums' }}>
+                          {ch.guide_number}
+                        </span>
+                      ) : null}
+                      <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ch.display_name}
+                      </strong>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        opacity: 0.75,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {airing ? airing.title : 'Live broadcast'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
+        {watchingLive ? (
+          <LivePlayerModal
+            channel={watchingLive.channel}
+            programTitle={watchingLive.title}
+            programStartTs={watchingLive.startTs}
+            programEndTs={watchingLive.endTs}
+            onClose={() => setWatchingLive(null)}
+          />
         ) : null}
 
         {groups.length && view === 'grid' ? (

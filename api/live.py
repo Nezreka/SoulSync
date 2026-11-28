@@ -15,7 +15,7 @@ import time
 from flask import Blueprint, g, jsonify, request, send_from_directory
 
 from core.permissions import requires_any
-from core.player.live import hdhomerun, refresh, relay, store
+from core.player.live import dvr, hdhomerun, refresh, relay, store
 from core.profile_context import admin_only
 from utils.logging_config import get_logger
 
@@ -182,3 +182,104 @@ def live_stream_file(channel_id, filename):
     else:
         resp.headers["Cache-Control"] = "private, max-age=10"
     return resp
+
+
+@bp.route("/api/live/heartbeat/<channel_id>", methods=["POST"])
+@requires_any(*VIEWER_SECTIONS)
+def live_heartbeat(channel_id):
+    work_dir = relay.get_supervisor().touch(channel_id, _viewer_id())
+    if not work_dir:
+        return jsonify({"success": False, "error": "Channel session not running."}), 404
+    return jsonify({"success": True, "session": relay.get_supervisor().timeshift_status(channel_id)})
+
+
+@bp.route("/api/live/sessions/<channel_id>/timeshift", methods=["GET"])
+@requires_any(*VIEWER_SECTIONS)
+def live_timeshift(channel_id):
+    info = relay.get_supervisor().timeshift_status(channel_id)
+    if not info:
+        return jsonify({"success": False, "error": "Channel session not running."}), 404
+    return jsonify({"success": True, "session": info})
+
+
+# ── DVR rules & recordings ───────────────────────────────────────────────
+
+@bp.route("/api/live/dvr/rules", methods=["GET"])
+@admin_only
+def live_dvr_rules_list():
+    return jsonify({"success": True, "rules": dvr.list_rules(_db())})
+
+
+@bp.route("/api/live/dvr/rules", methods=["POST"])
+@admin_only
+def live_dvr_rules_add():
+    body = request.get_json(silent=True) or {}
+    try:
+        rule = dvr.add_rule(
+            _db(),
+            name=body.get("name", ""),
+            title_match=body.get("title_match", ""),
+            channel_id=body.get("channel_id"),
+            new_only=bool(body.get("new_only", False)),
+            pad_before_min=int(body.get("pad_before_min", 1) or 0),
+            pad_after_min=int(body.get("pad_after_min", 3) or 0),
+            keep_limit=int(body.get("keep_limit", 0) or 0),
+            library_type=body.get("library_type", "tv"),
+            target_dir=body.get("target_dir", ""),
+        )
+    except dvr.DvrError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    eval_stats = dvr.evaluate_rules(_db())
+    return jsonify({"success": True, "rule": rule, "evaluated": eval_stats}), 201
+
+
+@bp.route("/api/live/dvr/rules/<rule_id>", methods=["DELETE"])
+@admin_only
+def live_dvr_rules_delete(rule_id):
+    if not dvr.delete_rule(_db(), rule_id):
+        return jsonify({"success": False, "error": "Rule not found."}), 404
+    return jsonify({"success": True})
+
+
+@bp.route("/api/live/dvr/recordings", methods=["GET"])
+@requires_any(*VIEWER_SECTIONS)
+def live_dvr_recordings_list():
+    status = request.args.get("status")
+    return jsonify({"success": True, "recordings": dvr.list_recordings(_db(), status=status)})
+
+
+@bp.route("/api/live/dvr/recordings", methods=["POST"])
+@requires_any(*VIEWER_SECTIONS)
+def live_dvr_recordings_add():
+    body = request.get_json(silent=True) or {}
+    try:
+        rec = dvr.schedule_recording(
+            _db(),
+            channel_id=body.get("channel_id", ""),
+            title=body.get("title", ""),
+            start_ts=float(body.get("start_ts", 0)),
+            end_ts=float(body.get("end_ts", 0)),
+            subtitle=body.get("subtitle"),
+            episode_num=body.get("episode_num"),
+            description=body.get("description"),
+            pad_before_min=int(body.get("pad_before_min", 1) or 0),
+            pad_after_min=int(body.get("pad_after_min", 3) or 0),
+        )
+    except (dvr.DvrError, TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, "recording": rec}), 201
+
+
+@bp.route("/api/live/dvr/recordings/<rec_id>", methods=["DELETE"])
+@admin_only
+def live_dvr_recordings_delete(rec_id):
+    delete_files = request.args.get("delete_files") == "1"
+    if not dvr.cancel_recording(_db(), rec_id, delete_files=delete_files):
+        return jsonify({"success": False, "error": "Recording not found."}), 404
+    return jsonify({"success": True})
+
+
+@bp.route("/api/live/dvr/evaluate", methods=["POST"])
+@admin_only
+def live_dvr_evaluate():
+    return jsonify({"success": True, **dvr.evaluate_rules(_db())})
