@@ -31,6 +31,7 @@ export type SectionId =
   | 'setup'
   | 'downloads'
   | 'converting'
+  | 'live-tv'
   | 'guide'
   | 'issues';
 
@@ -168,6 +169,16 @@ const SERVER: SectionInfo[] = [
     inside: 'GPU, how many at once',
     description:
       "Video a screen can't play is converted as it streams. Pick the GPU, how many run at once, and test it.",
+    scope: 'Admin',
+  },
+  {
+    id: 'live-tv',
+    group: 'server',
+    icon: <TvIcon />,
+    title: 'Live TV',
+    inside: 'Antenna tuners, M3U, XMLTV',
+    description:
+      'Add an HDHomeRun antenna tuner or your own M3U playlist and XMLTV guide. Viewers on the same channel share a tuner.',
     scope: 'Admin',
   },
   {
