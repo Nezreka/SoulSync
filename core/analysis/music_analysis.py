@@ -51,7 +51,7 @@ def ensure_tables(db: Any) -> None:
         return
     with db._get_connection() as conn:
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS lib2_track_analysis (
+            CREATE TABLE IF NOT EXISTS lib2_music_analysis (
                 track_id INTEGER PRIMARY KEY,
                 duration_s REAL NOT NULL DEFAULT 0,
                 bpm REAL,
@@ -124,8 +124,8 @@ def write_bpm_key_tags(audio_path: str, bpm: Optional[float], musical_key: Optio
         if musical_key:
             try:
                 mf["initialkey"] = [musical_key]
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("initialkey tag not supported on %s: %s", audio_path, exc)
         mf.save()
         return True
     except Exception as exc:  # noqa: BLE001
@@ -426,7 +426,7 @@ def analyze_track_file(
     with db._get_connection() as conn:
         conn.execute(
             """
-            INSERT OR REPLACE INTO lib2_track_analysis
+            INSERT OR REPLACE INTO lib2_music_analysis
                 (track_id, duration_s, bpm, musical_key, camelot, peak_db,
                  leading_silence_s, trailing_silence_s, mix_in_s, mix_out_s,
                  waveform_json, analyzed_at)
@@ -481,7 +481,7 @@ def get_track_analysis(db: Any, track_id: int) -> Optional[Dict[str, Any]]:
     ensure_tables(db)
     with db._get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM lib2_track_analysis WHERE track_id = ?", (int(track_id),)
+            "SELECT * FROM lib2_music_analysis WHERE track_id = ?", (int(track_id),)
         ).fetchone()
     if not row:
         return None

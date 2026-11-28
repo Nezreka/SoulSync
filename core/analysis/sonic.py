@@ -48,7 +48,7 @@ def camelot_compatible(a: Optional[str], b: Optional[str]) -> float:
 def _cosine(va: List[float], vb: List[float]) -> float:
     if len(va) != len(vb) or not va:
         return 0.0
-    return sum(x * y for x, y in zip(va, vb))
+    return sum(x * y for x, y in zip(va, vb, strict=False))
 
 
 def _load_all_embeddings(db: Any) -> Dict[int, Dict[str, Any]]:
@@ -125,7 +125,7 @@ def sonic_adventure(
 
     for s in range(1, total_steps - 1):
         t = s / float(total_steps - 1)
-        target_vec = [(1.0 - t) * x + t * y for x, y in zip(start["vec"], end["vec"])]
+        target_vec = [(1.0 - t) * x + t * y for x, y in zip(start["vec"], end["vec"], strict=False)]
         best_tid = None
         best_sim = -1e9
         for tid, item in all_emb.items():
